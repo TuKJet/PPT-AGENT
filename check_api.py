@@ -87,15 +87,12 @@ def _format_exception(exc: Exception) -> str:
 def probe_chat(client: AIClient, prompt: str) -> tuple[bool, float, str]:
     started = time.perf_counter()
     try:
-        resp = client.client.chat.completions.create(
-            model=client.model,
+        content = client.chat(
+            "你是接口连通性测试助手。请简短回答：CHAT_OK",
+            prompt,
             temperature=0,
-            messages=[
-                {"role": "system", "content": "你是接口连通性测试助手。请简短回答：CHAT_OK"},
-                {"role": "user", "content": prompt},
-            ],
+            allow_responses_fallback=False,
         )
-        content = _extract_chat_text(resp.choices[0].message.content or "")
         elapsed = time.perf_counter() - started
         return True, elapsed, _preview(content or "<empty>")
     except Exception as exc:
@@ -106,13 +103,13 @@ def probe_chat(client: AIClient, prompt: str) -> tuple[bool, float, str]:
 def probe_responses(client: AIClient, prompt: str, reasoning_effort: str) -> tuple[bool, float, str]:
     started = time.perf_counter()
     try:
-        resp = client.client.responses.create(
-            model=client.model,
-            instructions="你是接口连通性测试助手。请简短回答：RESPONSES_OK",
-            input=prompt,
-            reasoning={"effort": reasoning_effort},
+        content = client.responses(
+            "你是接口连通性测试助手。请简短回答：RESPONSES_OK",
+            prompt,
+            reasoning_effort=reasoning_effort,
+            tools=None,
+            allow_chat_fallback=False,
         )
-        content = _extract_responses_text(resp)
         elapsed = time.perf_counter() - started
         return True, elapsed, _preview(content or "<empty>")
     except Exception as exc:

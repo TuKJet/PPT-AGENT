@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signal Dark Master</title>
+  <style>
+    html, body {
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(35, 128, 255, 0.22), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(54, 211, 153, 0.18), transparent 28%),
+        linear-gradient(180deg, #050812 0%, #0d1324 100%);
+      color: #eef2ff;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .slide {
+      width: 1180px;
+      height: 620px;
+      display: grid;
+      grid-template-rows: 108px 1fr 70px;
+      gap: 18px;
+      padding: 28px 30px;
+      border-radius: 28px;
+      background: rgba(9, 16, 31, 0.86);
+      border: 1px solid rgba(165, 180, 252, 0.18);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+    }
+    .header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(165, 180, 252, 0.16);
+      padding-bottom: 14px;
+    }
+    .header-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding-right: 24px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.14);
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .title {
+      margin: 14px 0 0;
+      font-size: 40px;
+      line-height: 1.04;
+      font-weight: 800;
+      letter-spacing: -0.035em;
+    }
+    .subtitle {
+      margin: 8px 0 0;
+      color: #cbd5e1;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+    .corner-cluster {
+      display: grid;
+      justify-items: end;
+      align-self: start;
+      min-width: 188px;
+      gap: 10px;
+    }
+    .meta-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .meta-chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.12);
+      color: #c7d2fe;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .meta-chip.muted {
+      background: rgba(15, 23, 42, 0.88);
+      color: #93c5fd;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+    }
+    .corner-divider {
+      width: 118px;
+      height: 1px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(14, 165, 233, 0.18), rgba(96, 165, 250, 0.92));
+    }
+    .page-tag {
+      align-self: start;
+      min-width: 68px;
+      padding: 10px 16px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #1d4ed8, #0ea5e9);
+      color: #eff6ff;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-align: center;
+    }
+    .corner-orbit {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding-left: 2px;
+    }
+    .corner-dot {
+      border-radius: 999px;
+      background: rgba(125, 211, 252, 0.95);
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.3);
+    }
+    .corner-dot:nth-child(1) {
+      width: 6px;
+      height: 6px;
+      opacity: 0.65;
+    }
+    .corner-dot:nth-child(2) {
+      width: 10px;
+      height: 10px;
+    }
+    .corner-dot:nth-child(3) {
+      width: 7px;
+      height: 7px;
+      opacity: 0.82;
+    }
+    .content {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+      min-height: 0;
+    }
+    .panel {
+      min-height: 0;
+      border-radius: 24px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      padding: 22px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px;
+      color: #94a3b8;
+      font-size: 12px;
+      border-top: 1px solid rgba(165, 180, 252, 0.12);
+    }
+  </style>
+</head>
+<body>
+  <div class="slide">
+    <header class="header">
+      <div class="header-main">
+        <div class="eyebrow">Velocity Systems</div>
+        <h1 class="title">{{ page_title }}</h1>
+        <p class="subtitle">{{ page_content }}</p>
+      </div>
+      <div class="corner-cluster">
+        <div class="meta-row">
+          <span class="meta-chip">Signal Deck</span>
+          <span class="meta-chip muted">Live</span>
+        </div>
+        <div class="corner-divider"></div>
+        <div class="meta-row">
+          <div class="page-tag">{{ current_page_number }}/{{ total_page_count }}</div>
+          <div class="corner-orbit" aria-hidden="true">
+            <span class="corner-dot"></span>
+            <span class="corner-dot"></span>
+            <span class="corner-dot"></span>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main class="content">
+      <section class="panel"></section>
+      <section class="panel"></section>
+    </main>
+    <footer class="footer">
+      <span>LandPPT Dark Master</span>
+      <span>{{ current_page_number }}</span>
+    </footer>
+  </div>
+</body>
+</html>

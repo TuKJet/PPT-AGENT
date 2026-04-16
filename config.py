@@ -31,5 +31,16 @@ REVIEW_MODEL = os.getenv("REVIEW_MODEL", "")
 REVIEW_REASONING_EFFORT = os.getenv("REVIEW_REASONING_EFFORT", "low")
 REVIEW_ENABLED = os.getenv("HTML_AI_REVIEW_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
+SVG_REVIEW_ENABLED = os.getenv(
+    "SVG_AI_REVIEW_ENABLED",
+    "true" if REVIEW_ENABLED else "false",
+).lower() in {"1", "true", "yes", "on"}
+SVG_REVIEW_PROVIDER = os.getenv("SVG_REVIEW_PROVIDER", REVIEW_PROVIDER)
+SVG_REVIEW_MODEL = os.getenv("SVG_REVIEW_MODEL", REVIEW_MODEL)
+SVG_REVIEW_REASONING_EFFORT = os.getenv("SVG_REVIEW_REASONING_EFFORT", REVIEW_REASONING_EFFORT)
+
 # 输出目录
+HTML_USE_LANDPPT_CORE = os.getenv("HTML_USE_LANDPPT_CORE", "true").lower() in {"1", "true", "yes", "on"}
+EDITABLE_EXPORT_ENGINE = os.getenv("EDITABLE_EXPORT_ENGINE", "landppt_dom")
+
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")

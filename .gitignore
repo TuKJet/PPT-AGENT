@@ -10,3 +10,8 @@ Thumbs.db
 .vscode/
 .idea/
 prompt_summaries/
+.ccpanes/
+.claude/
+.golutra/
+.landppt_cache/
+CLAUDE.md

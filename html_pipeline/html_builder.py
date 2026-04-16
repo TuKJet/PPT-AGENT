@@ -778,6 +778,94 @@ h1,
   height: 88px !important;
   min-height: 88px !important;
 }
+.panel {
+  gap: 10px !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] {
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 10px !important;
+  min-height: 0 !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article {
+  padding: 12px !important;
+  gap: 4px !important;
+  min-height: 0 !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div,
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article p,
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article span {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(2) {
+  font-size: 28px !important;
+  line-height: 1 !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(3),
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(4),
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article p {
+  font-size: 11px !important;
+  line-height: 1.24 !important;
+}
+.panel > div[style*="display:flex"][style*="flex-wrap:wrap"] {
+  gap: 6px !important;
+  margin-top: 4px !important;
+  align-content: flex-start !important;
+}
+.panel > div[style*="display:flex"][style*="flex-wrap:wrap"] > span {
+  font-size: 10px !important;
+  padding: 4px 8px !important;
+}
+"""
+
+
+INLINE_PANEL_SAFE_STYLE = """
+.panel {
+  gap: 12px !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] {
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 10px !important;
+  margin-bottom: 2px !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article {
+  padding: 12px !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(2) {
+  font-size: 28px !important;
+  line-height: 1 !important;
+}
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(3),
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article > div:nth-child(4),
+.panel > div[style*="grid-template-rows:1fr 1fr"] > article p {
+  font-size: 11px !important;
+  line-height: 1.22 !important;
+}
+.panel > div[style*="display:flex"][style*="flex-wrap:wrap"] {
+  gap: 6px !important;
+  margin-top: 6px !important;
+  padding-top: 2px !important;
+}
+.panel > div[style*="display:flex"][style*="flex-wrap:wrap"] > span {
+  font-size: 10px !important;
+  padding: 4px 8px !important;
+}
+"""
+
+
+COVER_HEADER_SAFE_STYLE = """
+.slide {
+  grid-template-rows: minmax(114px, auto) 1fr auto !important;
+}
+.header {
+  min-height: 114px !important;
+}
+.footer {
+  min-height: 70px !important;
+}
+.header > .header-main {
+  min-width: 0 !important;
+}
 """
 
 
@@ -826,6 +914,36 @@ def _inspect_html_layout(page) -> dict:
                     scrollWidth: sw,
                     clientWidth: cw,
                     text: (el.innerText || '').replace(/\\s+/g, ' ').slice(0, 80),
+                  });
+                }
+              });
+            }
+            return items;
+          };
+
+          const collectChipCollisions = () => {
+            const items = [];
+            const parents = Array.from(document.querySelectorAll('.panel, .card, article')).filter(
+              (el) => el instanceof HTMLElement
+            );
+            for (const parent of parents) {
+              const children = Array.from(parent.children).filter((el) => el instanceof HTMLElement);
+              children.forEach((child, index) => {
+                const inlineStyle = (child.getAttribute('style') || '').toLowerCase();
+                const isChipRow = (
+                  child.matches('.tags, .mini-tags, .tag-row, .summary-tags, .footer-tags')
+                  || (inlineStyle.includes('display:flex') && inlineStyle.includes('flex-wrap:wrap'))
+                );
+                if (!isChipRow || index === 0) return;
+                const prev = children[index - 1];
+                const prevRect = prev.getBoundingClientRect();
+                const rowRect = child.getBoundingClientRect();
+                if (rowRect.top < prevRect.bottom + 6) {
+                  items.push({
+                    parentTag: parent.tagName.toLowerCase(),
+                    index,
+                    delta: Math.round(prevRect.bottom + 6 - rowRect.top),
+                    rowText: (child.innerText || '').replace(/\\s+/g, ' ').slice(0, 60),
                   });
                 }
               });
@@ -891,6 +1009,21 @@ def _inspect_html_layout(page) -> dict:
             )
           );
 
+          const inlineDensePanel = Array.from(document.querySelectorAll('.panel')).some((panel) => {
+            const children = Array.from(panel.children).filter((el) => el instanceof HTMLElement);
+            const hasTwoRowGrid = children.some((child) => {
+              const style = (child.getAttribute('style') || '').toLowerCase();
+              return style.includes('display:grid') && style.includes('grid-template-rows:1fr 1fr');
+            });
+            const hasChipRow = children.some((child) => {
+              const style = (child.getAttribute('style') || '').toLowerCase();
+              return style.includes('display:flex') && style.includes('flex-wrap:wrap');
+            });
+            return hasTwoRowGrid && hasChipRow;
+          });
+
+          const chipCollisions = collectChipCollisions();
+
           const tocSparse = Boolean(
             document.querySelector('.steps')
             && document.querySelector('.flow-card')
@@ -923,10 +1056,11 @@ def _inspect_html_layout(page) -> dict:
             overlap,
             slideOverflow,
             overflowItems: collectOverflow(),
+            chipCollisions,
             boundaryIssues,
             summaryHeavy,
             timelineHeavy,
-            denseCardHeavy,
+            denseCardHeavy: denseCardHeavy || inlineDensePanel,
             tocSparse,
             conclusionHeavy,
             stepCardHeavy,
@@ -940,6 +1074,7 @@ def _summarize_layout_issues(report: dict) -> list[str]:
     issues = []
     slide = report.get("slide") or {}
     header = report.get("header") or {}
+    slide_rect = slide.get("rect") or {}
 
     if report.get("slideOverflow"):
         issues.append(
@@ -954,7 +1089,7 @@ def _summarize_layout_issues(report: dict) -> list[str]:
         )
 
     header_rect = header.get("rect") or {}
-    if header_rect.get("height", 0) > 110:
+    if header_rect.get("height", 0) > 118 and header_rect.get("top", 0) <= slide_rect.get("top", 0) + 12:
         issues.append(f"header 过高：height={header_rect.get('height')}px")
 
     for item in (report.get("overflowItems") or [])[:5]:
@@ -973,6 +1108,11 @@ def _summarize_layout_issues(report: dict) -> list[str]:
             f"{item['selector']}#{item['index']} 超出 slide 边界：right={rect.get('right')}, bottom={rect.get('bottom')}"
         )
 
+    for item in (report.get("chipCollisions") or [])[:4]:
+        issues.append(
+            f"{item['parentTag']} 鍐呴儴 tag/chip 琛屼笌涓婃柟鍐呭杩囪繎锛宒elta={item['delta']} 鏂囨湰={item['rowText']}"
+        )
+
     return issues
 
 
@@ -985,7 +1125,10 @@ def _should_regenerate(report: dict) -> bool:
         or (item.get("scrollWidth", 0) - item.get("clientWidth", 0) > 14)
     )
     total_overflow_count = len(overflow_items)
+    slide_rect = ((report.get("slide") or {}).get("rect") or {})
+    header_rect = ((report.get("header") or {}).get("rect") or {})
     header_height = ((report.get("header") or {}).get("rect") or {}).get("height", 0)
+    header_tight_and_tall = header_height > 118 and header_rect.get("top", 0) <= slide_rect.get("top", 0) + 12
     slide_delta = (report.get("slide") or {}).get("scrollHeight", 0) - (report.get("slide") or {}).get("clientHeight", 0)
 
     high_risk_dense_page = report.get("timelineHeavy") or report.get("denseCardHeavy")
@@ -994,7 +1137,7 @@ def _should_regenerate(report: dict) -> bool:
         report.get("overlap")
         or severe_overflow_count >= 1
         or total_overflow_count >= 3
-        or header_height > 118
+        or header_tight_and_tall
         or slide_delta > 12
         or len(report.get("boundaryIssues") or []) >= 2
         or (high_risk_dense_page and total_overflow_count >= 1)
@@ -1015,6 +1158,14 @@ def _apply_timeline_safe_mode(page) -> None:
 
 def _apply_dense_card_safe_mode(page) -> None:
     page.add_style_tag(content=DENSE_CARD_SAFE_STYLE)
+
+
+def _apply_inline_panel_safe_mode(page) -> None:
+    page.add_style_tag(content=INLINE_PANEL_SAFE_STYLE)
+
+
+def _apply_cover_header_safe_mode(page) -> None:
+    page.add_style_tag(content=COVER_HEADER_SAFE_STYLE)
 
 
 def _apply_toc_safe_mode(page) -> None:
@@ -1063,6 +1214,14 @@ def _persist_dense_card_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-dense-card-safe-style", DENSE_CARD_SAFE_STYLE)
 
 
+def _persist_inline_panel_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(html_path, original_html, "claude-inline-panel-safe-style", INLINE_PANEL_SAFE_STYLE)
+
+
+def _persist_cover_header_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(html_path, original_html, "claude-cover-header-safe-style", COVER_HEADER_SAFE_STYLE)
+
+
 def _persist_toc_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-toc-safe-style", TOC_SAFE_STYLE)
 
@@ -1083,12 +1242,16 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     persisted_summary_safe = False
     persisted_timeline_safe = False
     persisted_dense_card_safe = False
+    persisted_inline_panel_safe = False
+    persisted_cover_header_safe = False
     persisted_toc_safe = False
     persisted_conclusion_safe = False
     persisted_step_card_safe = False
     summary_safe_applied = False
     timeline_safe_applied = False
     dense_card_safe_applied = False
+    inline_panel_safe_applied = False
+    cover_header_safe_applied = False
     toc_safe_applied = False
     conclusion_safe_applied = False
     step_card_safe_applied = False
@@ -1096,6 +1259,57 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.set_content(html_content, wait_until="networkidle")
+
+        cover_header_structure = page.evaluate(
+            """
+            () => {
+              const slide = document.querySelector('.slide');
+              const header = document.querySelector('.header');
+              const main = document.querySelector('.header-main');
+              const title = document.querySelector('.title');
+              const subtitle = document.querySelector('.subtitle');
+              const eyebrow = document.querySelector('.eyebrow');
+              const cornerCluster = document.querySelector('.corner-cluster');
+              if (!slide || !header || !main || !title || !subtitle || !eyebrow || !cornerCluster) {
+                return false;
+              }
+              const slideRect = slide.getBoundingClientRect();
+              const headerRect = header.getBoundingClientRect();
+              const mainRect = main.getBoundingClientRect();
+              const titleRect = title.getBoundingClientRect();
+              const topGap = mainRect.top - slideRect.top;
+              const titleTopGap = titleRect.top - slideRect.top;
+              return topGap < 8 && titleTopGap < 56 && headerRect.height <= mainRect.height + 4;
+            }
+            """
+        )
+        if cover_header_structure:
+            _apply_cover_header_safe_mode(page)
+            cover_header_safe_applied = True
+            persisted_cover_header_safe = True
+            html_content = _persist_cover_header_safe_html(html_path, html_content)
+
+        inline_panel_structure = page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('.panel')).some((panel) => {
+              const children = Array.from(panel.children).filter((el) => el instanceof HTMLElement);
+              const hasTwoRowGrid = children.some((child) => {
+                const style = (child.getAttribute('style') || '').toLowerCase();
+                return style.includes('display:grid') && style.includes('grid-template-rows:1fr 1fr');
+              });
+              const hasChipRow = children.some((child) => {
+                const style = (child.getAttribute('style') || '').toLowerCase();
+                return style.includes('display:flex') && style.includes('flex-wrap:wrap');
+              });
+              return hasTwoRowGrid && hasChipRow;
+            })
+            """
+        )
+        if inline_panel_structure:
+            _apply_inline_panel_safe_mode(page)
+            inline_panel_safe_applied = True
+            persisted_inline_panel_safe = True
+            html_content = _persist_inline_panel_safe_html(html_path, html_content)
 
         initial_report = _inspect_html_layout(page)
         initial_issues = _summarize_layout_issues(initial_report)
@@ -1175,6 +1389,8 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "summary_safe_applied": summary_safe_applied,
         "timeline_safe_applied": timeline_safe_applied,
         "dense_card_safe_applied": dense_card_safe_applied,
+        "inline_panel_safe_applied": inline_panel_safe_applied,
+        "cover_header_safe_applied": cover_header_safe_applied,
         "toc_safe_applied": toc_safe_applied,
         "conclusion_safe_applied": conclusion_safe_applied,
         "step_card_safe_applied": step_card_safe_applied,
@@ -1182,6 +1398,8 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "persisted_summary_safe": persisted_summary_safe,
         "persisted_timeline_safe": persisted_timeline_safe,
         "persisted_dense_card_safe": persisted_dense_card_safe,
+        "persisted_inline_panel_safe": persisted_inline_panel_safe,
+        "persisted_cover_header_safe": persisted_cover_header_safe,
         "persisted_toc_safe": persisted_toc_safe,
         "persisted_conclusion_safe": persisted_conclusion_safe,
         "persisted_step_card_safe": persisted_step_card_safe,
@@ -1240,6 +1458,8 @@ def build_pptx(html_dir: Path, output_path: Path) -> Path:
                 print("    [检查] 检测到时间线高风险布局，已应用 timeline-safe mode")
             if report.get("dense_card_safe_applied"):
                 print("    [检查] 检测到高密度卡片布局，已应用 dense-card-safe mode")
+            if report.get("cover_header_safe_applied"):
+                print("    [检查] 检测到封面标题贴上边，已应用 cover-header-safe mode")
             if report.get("summary_safe_applied"):
                 print("    [检查] 检测到总结型高风险布局，已应用 summary-safe mode")
             if report.get("conclusion_safe_applied"):
@@ -1254,6 +1474,8 @@ def build_pptx(html_dir: Path, output_path: Path) -> Path:
                 print("    [检查] 已将 timeline-safe 样式回写到 HTML 文件")
             if report.get("persisted_dense_card_safe"):
                 print("    [检查] 已将 dense-card-safe 样式回写到 HTML 文件")
+            if report.get("persisted_cover_header_safe"):
+                print("    [检查] 已将 cover-header-safe 样式回写到 HTML 文件")
             if report.get("persisted_summary_safe"):
                 print("    [检查] 已将 summary-safe 样式回写到 HTML 文件")
             if report.get("persisted_conclusion_safe"):

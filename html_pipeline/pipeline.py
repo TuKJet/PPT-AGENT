@@ -1,17 +1,30 @@
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 添加项目根目录到 path 以导入共享模块
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ai_client import AIClient
-from config import OUTPUT_DIR, REVIEW_ENABLED, REVIEW_PROVIDER, REVIEW_MODEL, REVIEW_REASONING_EFFORT
+from config import (
+    EDITABLE_EXPORT_ENGINE,
+    HTML_USE_LANDPPT_CORE,
+    OUTPUT_DIR,
+    REVIEW_ENABLED,
+    REVIEW_MODEL,
+    REVIEW_PROVIDER,
+    REVIEW_REASONING_EFFORT,
+)
+from layout_policy import build_layout_role_guidance, build_layout_content_budget
 from pipeline import (
     step1_outline, step2_content, step3_plan,
     _get_pages, _get_title,
 )
+from editable_ppt_poc import build_editable_deck_from_html
+
+CHAIN_MANIFEST_FILE = "editable-ppt-chain.json"
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent
 HTML_PROMPT_FILE = PROMPTS_DIR / "html-ppt优化提示词.md"
@@ -101,6 +114,221 @@ def extract_html(text: str) -> str:
     return text
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _load_json_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _load_slide_meta_from_html_dir(html_dir: Path) -> list[dict]:
+    html_files = sorted(html_dir.glob("*.html"))
+    if not html_files:
+        raise ValueError(f"HTML directory is empty: {html_dir}")
+
+    run_dir = html_dir.parent
+    chain_manifest = _load_json_file(run_dir / CHAIN_MANIFEST_FILE)
+    manifest_by_index = {
+        int(item["index"]): item
+        for item in chain_manifest.get("slides", [])
+        if isinstance(item, dict) and str(item.get("index", "")).isdigit()
+    }
+
+    slide_status = _load_json_file(run_dir / "slide-status.json").get("slides", {})
+    status_by_index = {
+        int(key): value
+        for key, value in slide_status.items()
+        if str(key).isdigit() and isinstance(value, dict)
+    }
+
+    slides = []
+    for idx, html_path in enumerate(html_files, start=1):
+        merged = {}
+        merged.update(status_by_index.get(idx, {}))
+        merged.update(manifest_by_index.get(idx, {}))
+        slides.append({
+            "index": idx,
+            "title": merged.get("title") or html_path.stem,
+            "page_role": merged.get("page_role", "summary"),
+            "html_path": str(html_path),
+            "review_path": merged.get("review_path"),
+            "validation_status": merged.get("validation_status"),
+            "export_ready": merged.get("export_ready"),
+        })
+    return slides
+
+
+def _build_editable_deck(
+    html_dir: Path,
+    out_dir: Path,
+    slide_meta: list[dict],
+    deck_name: str,
+) -> Path:
+    engine = (EDITABLE_EXPORT_ENGINE or "legacy").strip().lower()
+    dom_last_exc = None
+
+    if engine in {"landppt_dom", "dom", "browser"}:
+        try:
+            from vendor_landppt.export.dom_pptx_exporter import build_dom_editable_deck_from_html
+
+            return build_dom_editable_deck_from_html(
+                html_dir=html_dir,
+                out_dir=out_dir,
+                slide_meta=slide_meta,
+                deck_name=deck_name,
+            )
+        except Exception as exc:
+            dom_last_exc = exc
+            print(f"    [fallback] DOM editable export failed, falling back to legacy builder: {exc}")
+
+    try:
+        return build_editable_deck_from_html(
+            html_dir,
+            out_dir,
+            slide_meta,
+            deck_name=deck_name,
+        )
+    except Exception:
+        if dom_last_exc is not None:
+            raise dom_last_exc
+        raise
+
+
+def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
+                                   slide_meta: list[dict], image_pptx_path: Path | None = None,
+                                   editable_pptx_path: Path | None = None,
+                                   editable_dir: Path | None = None,
+                                   source: str = "html-first-run") -> Path:
+    manifest_path = run_dir / CHAIN_MANIFEST_FILE
+    existing_manifest = _load_json_file(manifest_path)
+    source_run_dir = html_dir.parent
+    source_outline_path = run_dir / "outline.json" if (run_dir / "outline.json").exists() else source_run_dir / "outline.json"
+    source_contents_path = run_dir / "contents.json" if (run_dir / "contents.json").exists() else source_run_dir / "contents.json"
+    source_slide_status_path = run_dir / "slide-status.json" if (run_dir / "slide-status.json").exists() else source_run_dir / "slide-status.json"
+    root_slide_status = _load_json_file(source_slide_status_path).get("slides", {})
+    editable_status = {}
+    editable_export_manifest_path = None
+    if editable_dir:
+        editable_status = _load_json_file(editable_dir / "slide-status.json").get("slides", {})
+        editable_export_manifest_path = editable_dir / "editable-export-manifest.json"
+
+    slides = []
+    for meta in slide_meta:
+        idx = int(meta["index"])
+        key = f"{idx:02d}"
+        root_info = root_slide_status.get(key, {})
+        editable_info = editable_status.get(key, {})
+        slides.append({
+            "index": idx,
+            "title": meta.get("title") or root_info.get("title") or Path(meta.get("html_path", "")).stem,
+            "page_role": meta.get("page_role") or root_info.get("page_role", "summary"),
+            "html_path": meta.get("html_path"),
+            "review_path": root_info.get("review_path"),
+            "validation_status": root_info.get("validation_status"),
+            "export_ready": root_info.get("export_ready"),
+            "editable_scene_path": editable_info.get("scene_path"),
+            "editable_review_path": editable_info.get("review_path"),
+            "editable_validation_status": editable_info.get("validation_status"),
+            "editable_export_ready": editable_info.get("export_ready"),
+        })
+
+    artifacts = existing_manifest.get("artifacts", {})
+    manifest = {
+        "version": 1,
+        "topic": topic,
+        "source": source,
+        "source_of_truth": "html",
+        "created_at": existing_manifest.get("created_at") or _utc_now_iso(),
+        "updated_at": _utc_now_iso(),
+        "run_dir": str(run_dir),
+        "html_dir": str(html_dir),
+        "slide_count": len(slide_meta),
+        "artifacts": {
+            "outline_path": str(source_outline_path) if source_outline_path.exists() else artifacts.get("outline_path"),
+            "contents_path": str(source_contents_path) if source_contents_path.exists() else artifacts.get("contents_path"),
+            "slide_status_path": str(source_slide_status_path) if source_slide_status_path.exists() else artifacts.get("slide_status_path"),
+            "image_pptx_path": str(image_pptx_path) if image_pptx_path else artifacts.get("image_pptx_path"),
+            "editable_pptx_path": str(editable_pptx_path) if editable_pptx_path else artifacts.get("editable_pptx_path"),
+            "editable_slide_status_path": str(editable_dir / "slide-status.json") if editable_dir and (editable_dir / "slide-status.json").exists() else artifacts.get("editable_slide_status_path"),
+            "editable_export_manifest_path": str(editable_export_manifest_path) if editable_export_manifest_path and editable_export_manifest_path.exists() else artifacts.get("editable_export_manifest_path"),
+        },
+        "slides": slides,
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest_path
+
+
+def export_from_existing_html(html_dir: Path, topic: str | None = None,
+                              output_dir: Path | None = None,
+                              export_image_ppt: bool = True,
+                              export_editable_ppt: bool = True) -> dict:
+    if not export_image_ppt and not export_editable_ppt:
+        raise ValueError("At least one export mode must be enabled")
+
+    html_dir = html_dir.resolve()
+    if not html_dir.exists() or not html_dir.is_dir():
+        raise FileNotFoundError(f"HTML directory does not exist: {html_dir}")
+
+    slide_meta = _load_slide_meta_from_html_dir(html_dir)
+    source_run_dir = html_dir.parent
+    run_dir = output_dir.resolve() if output_dir else source_run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    chain_manifest = _load_json_file(source_run_dir / CHAIN_MANIFEST_FILE)
+    resolved_topic = topic or chain_manifest.get("topic") or source_run_dir.name.replace("_", " ")
+    total_steps = int(bool(export_image_ppt)) + int(bool(export_editable_ppt))
+
+    image_pptx_path = None
+    editable_pptx_path = None
+    editable_dir = None
+
+    if export_image_ppt:
+        print(f"[Re-export 1/{total_steps}] Building image PPT...")
+        from html_pipeline.html_builder import build_pptx
+        image_pptx_path = run_dir / f"{resolved_topic[:30]}.pptx"
+        build_pptx(html_dir, image_pptx_path)
+        print(f"Done! Image PPT saved to: {image_pptx_path}")
+
+    if export_editable_ppt:
+        current_step = 2 if export_image_ppt else 1
+        step_label = f"[Re-export {current_step}/{total_steps}]"
+        print(f"{step_label} Building editable PPT...")
+        editable_dir = run_dir / "editable"
+        editable_pptx_path = _build_editable_deck(
+            html_dir=html_dir,
+            out_dir=editable_dir,
+            slide_meta=slide_meta,
+            deck_name=resolved_topic,
+        )
+        print(f"Done! Editable PPT saved to: {editable_pptx_path}")
+
+    manifest_path = _write_editable_chain_manifest(
+        run_dir=run_dir,
+        topic=resolved_topic,
+        html_dir=html_dir,
+        slide_meta=slide_meta,
+        image_pptx_path=image_pptx_path,
+        editable_pptx_path=editable_pptx_path,
+        editable_dir=editable_dir,
+        source="html-reexport",
+    )
+
+    return {
+        "run_dir": run_dir,
+        "topic": resolved_topic,
+        "slide_count": len(slide_meta),
+        "image_pptx_path": image_pptx_path,
+        "editable_pptx_path": editable_pptx_path,
+        "manifest_path": manifest_path,
+    }
+
+
 def _generate_with_retry(label: str, func, attempts: int = 5):
     last_exc = None
     for attempt in range(1, attempts + 1):
@@ -117,12 +345,12 @@ def _generate_with_retry(label: str, func, attempts: int = 5):
 
 def _infer_page_role(index: int, total_pages: int, title: str, plan: str, material: str) -> str:
     text = f"{title}\n{plan}\n{material}".lower()
-    if index == 1 or any(keyword in text for keyword in ["封面", "cover"]):
-        return "cover"
-    if index == total_pages or any(keyword in text for keyword in ["总结", "结论", "展望", "thanks", "thank", "ending"]):
-        return "ending"
     if any(keyword in text for keyword in ["目录", "agenda", "toc"]):
         return "toc"
+    if index == 1 or any(keyword in text for keyword in ["封面", "cover"]):
+        return "cover"
+    if index == total_pages or any(keyword in text for keyword in ["总结与展望", "thanks", "thank", "ending"]):
+        return "ending"
     if any(keyword in text for keyword in ["总结", "结论", "判断", "建议", "表达", "路线", "路径", "销售", "应用", "价值", "话术"]):
         return "summary"
     if any(keyword in text for keyword in ["脉络", "发展史", "演变", "阶段", "timeline"]):
@@ -131,72 +359,19 @@ def _infer_page_role(index: int, total_pages: int, title: str, plan: str, materi
 
 
 def _build_role_guidance(page_role: str) -> str:
-    common = "- 页眉与页脚属于框架区，优先保证稳定；主要变化只能发生在中间内容区\n"
-    if page_role == "cover":
-        return common + """- 当前页是封面页：优先单焦点布局，不要堆太多卡片
-- 标题可以更强，但正文必须极少
-- footer 如非必要可以弱化或不单独成卡"""
-    if page_role == "toc":
-        return common + """- 当前页是目录页：以清晰分组和节奏感为主
-- 不要使用复杂三栏对比；优先 1 个主卡 + 2-4 个简洁目录项"""
-    if page_role == "summary":
-        return common + """- 当前页是总结/判断页：优先两栏或“上主下结论”结构，不要用拥挤三栏
-- footer 必须是薄条总结区，不能与主内容区抢高度
-- 中间步骤/路径类模块最多 2-3 步
-- 右侧结论区只能保留 1 个指标/日期模块 + 1 段说明，禁止再叠加第二个总结块"""
-    if page_role == "timeline":
-        return common + """- 当前页是发展脉络/时间线页：优先 4 个以内阶段节点，不要堆 5 个以上密集时间点
-- 如果既有时间线又有右侧指标卡，优先减少节点数量、缩短节点文案、压缩右侧卡片层级
-- 时间线节点每个只保留：阶段名 + 时间 + 1 句说明
-- 右侧辅助区最多保留 2 个指标块或 1 个指标块 + 1 个总结块，不要再叠加多层信息"""
-    if page_role == "ending":
-        return common + """- 当前页是结尾页：强调收束感，不要铺满信息
-- 优先单结论或双区块结构，避免复杂卡片矩阵
-- footer 只做轻量收尾，不要厚重"""
-    return common + """- 当前页是内容页：默认使用 2 个主区域 + 1 个 footer 的稳态结构，不要堆拥挤三栏
-- 主内容区最多保留 1 个主模块 + 1 个辅助模块；如果同时出现时间线、步骤、指标、场景、总结等混合结构，必须删减到只保留其中 1 类辅助信息
-- 优先使用“左主右辅”或“上主下辅”结构，避免 footer 被挤压"""
+    return build_layout_role_guidance(page_role)
 
 
 def _build_content_budget(page_role: str) -> str:
-    if page_role == "cover":
-        return """- 最多 1 个主标题 + 1 行副标题 + 1 个辅助信息块
-- 不要生成多张并列内容卡
-- 装饰信息宁少勿多，优先保留单焦点"""
-    if page_role == "toc":
-        return """- 最多 2 个主区域：左侧观点卡 + 右侧流程/目录卡
-- 右侧最多 3 个步骤卡；每卡最多 1 个标题 + 1 句说明 + 3 个标签
-- 左侧最多 1 个高亮结论块 + 1 段说明 + 3 个标签
-- 如果仍显空，只允许补 2-3 个短说明块，不要补大型数据卡"""
-    if page_role == "summary":
-        return """- 总结页最多 2 列
-- 左区最多 2 个主卡；右区最多 3 个步骤卡
-- 每张卡最多 2 个 bullet 或 1 段说明 + 3 个标签
-- footer 总结区最多 1 句主结论 + 2 个短 action 标签"""
-    if page_role == "timeline":
-        return """- 时间线最多 4 个节点
-- 每节点只保留：阶段名 + 时间 + 1 句说明 + 最多 2 个短标签
-- 右侧辅助区最多 2 张卡，且总共最多 2 个大数字/指标
-- footer 最多 1 句总结，不要再叠加第二条长说明"""
-    if page_role == "ending":
-        return """- 结尾页最多 2 个主区块 + 1 个 footer
-- 右侧判断/结论区最多 3 个步骤卡，每步 1 个标题 + 1 句说明 + 1 个短注释
-- 底部结果区最多 2 个结果卡
-- footer 最多 1 句结论 + 2 个短标签
-- 长说明卡必须改成“1 句主结论 + 2 条短支撑”，不要写整段长文"""
-    return """- 普通内容页最多 2 个主区域 + 1 个 footer，不要生成 3 个以上并列主卡
-- 主卡只保留 1 个核心观点；辅助区最多保留 1 类辅助信息（步骤 / 指标 / 场景 / 时间线 四选一）
-- 若使用时间线，节点最多 4 个；若使用步骤，步骤最多 3 个；若使用指标，指标块最多 2 个；若使用场景，场景项最多 3 个
-- 长说明卡最多 36 个中文字符，超过时必须拆成 1 句主结论 + 2 条短 bullet
-- footer 最多 1 句结论 + 2-3 个短标签；一旦主内容区已较满，优先删辅助模块，不要加厚 footer"""
+    return build_layout_content_budget(page_role)
 
 
-def step4_html(client: AIClient, title: str, material: str,
-               plan: str, audience: str, page_role: str,
-               layout_feedback: str = "") -> str:
+def _legacy_step4_html(client: AIClient, title: str, material: str,
+                       plan: str, audience: str, page_role: str,
+                       layout_feedback: str = "") -> str:
     """生成单页 HTML 演示文稿。"""
-    role_guidance = _build_role_guidance(page_role)
-    content_budget = _build_content_budget(page_role)
+    role_guidance = build_layout_role_guidance(page_role)
+    content_budget = build_layout_content_budget(page_role)
     feedback_block = ""
     if layout_feedback:
         feedback_block = f"""
@@ -250,6 +425,94 @@ def step4_html(client: AIClient, title: str, material: str,
         lambda: client.chat(HTML_SYSTEM, user, temperature=0.4),
     )
     return extract_html(raw)
+
+
+def _build_all_slides_context(slide_jobs: list[dict] | None) -> list[dict]:
+    context = []
+    for item in slide_jobs or []:
+        title = str(item.get("title") or item.get("page_title") or "").strip()
+        page_role = str(item.get("page_role") or item.get("slide_type") or item.get("type") or "content").strip() or "content"
+        plan = str(item.get("plan") or item.get("description") or "").strip()
+        material = str(item.get("material") or item.get("raw_material") or "").strip()
+        context.append(
+            {
+                "title": title,
+                "page_title": title,
+                "slide_type": page_role,
+                "type": page_role,
+                "page_role": page_role,
+                "description": plan[:220],
+                "raw_plan": plan,
+                "raw_material": material,
+            }
+        )
+    return context
+
+
+def _generate_with_landppt_core(
+    client: AIClient,
+    deck_topic: str,
+    title: str,
+    material: str,
+    plan: str,
+    audience: str,
+    page_role: str,
+    page_number: int,
+    total_pages: int,
+    layout_feedback: str = "",
+    all_slides: list[dict] | None = None,
+) -> str:
+    from vendor_landppt.html_generation_service import LandPPTHtmlGenerationService
+
+    service = LandPPTHtmlGenerationService(client=client)
+    return service.generate_slide_html(
+        deck_topic=deck_topic or title,
+        title=title,
+        material=material,
+        plan=plan,
+        audience=audience,
+        page_role=page_role,
+        page_number=page_number,
+        total_pages=total_pages,
+        layout_feedback=layout_feedback,
+        all_slides=all_slides,
+    )
+
+
+def step4_html(client: AIClient, title: str, material: str,
+               plan: str, audience: str, page_role: str,
+               layout_feedback: str = "",
+               deck_topic: str | None = None,
+               page_number: int = 1,
+               total_pages: int = 1,
+               all_slides: list[dict] | None = None) -> str:
+    """Generate single-slide HTML, preferring migrated LandPPT core with legacy fallback."""
+    if HTML_USE_LANDPPT_CORE:
+        try:
+            return _generate_with_landppt_core(
+                client=client,
+                deck_topic=deck_topic or title,
+                title=title,
+                material=material,
+                plan=plan,
+                audience=audience,
+                page_role=page_role,
+                page_number=page_number,
+                total_pages=total_pages,
+                layout_feedback=layout_feedback,
+                all_slides=all_slides,
+            )
+        except Exception as exc:
+            print(f"    [fallback] LandPPT HTML core failed for {title}: {exc}")
+    return _legacy_step4_html(
+        client=client,
+        title=title,
+        material=material,
+        plan=plan,
+        audience=audience,
+        page_role=page_role,
+        layout_feedback=layout_feedback,
+    )
 
 
 def _parse_review_result(text: str) -> dict:
@@ -310,7 +573,10 @@ def _write_review_artifact(review_dir: Path, page_index: int, html_name: str, re
 
 def _review_and_optionally_fix(generator_client: AIClient, review_client: AIClient | None, html_path: Path, page_index: int,
                               title: str, material: str, plan: str, audience: str,
-                              page_role: str, validation_report: dict) -> dict:
+                              page_role: str, validation_report: dict,
+                              deck_topic: str,
+                              total_pages: int,
+                              all_slides: list[dict] | None = None) -> dict:
     review_result = {
         "result": "SKIPPED",
         "reasons": [],
@@ -369,7 +635,19 @@ def _review_and_optionally_fix(generator_client: AIClient, review_client: AIClie
         regen_succeeded = False
         for _ in range(2):
             try:
-                html = step4_html(generator_client, title, material, plan, audience, page_role, layout_feedback=review_feedback)
+                html = step4_html(
+                    generator_client,
+                    title,
+                    material,
+                    plan,
+                    audience,
+                    page_role,
+                    layout_feedback=review_feedback,
+                    deck_topic=deck_topic,
+                    page_number=page_index,
+                    total_pages=total_pages,
+                    all_slides=all_slides,
+                )
                 html_path.write_text(html, encoding="utf-8")
                 _, current_report = render_html_with_validation(html_path)
                 screenshot_path.write_bytes(render_html_screenshot(html_path))
@@ -398,7 +676,11 @@ def _review_and_optionally_fix(generator_client: AIClient, review_client: AIClie
 def _validate_and_optionally_regenerate(client: AIClient, html_path: Path,
                                         title: str, material: str, plan: str,
                                         audience: str, page_role: str,
-                                        polish: bool) -> dict:
+                                        polish: bool,
+                                        deck_topic: str,
+                                        page_number: int,
+                                        total_pages: int,
+                                        all_slides: list[dict] | None = None) -> dict:
     from html_pipeline.html_builder import render_html_with_validation
 
     _, report = render_html_with_validation(html_path)
@@ -415,7 +697,19 @@ def _validate_and_optionally_regenerate(client: AIClient, html_path: Path,
             print(f"    [检查] {html_path.name} 存在结构性布局问题，执行一次重生成...")
         else:
             print(f"    [精修] {html_path.name} 仍有问题，执行逐页精修重生成...")
-        html = step4_html(client, title, material, plan, audience, page_role, layout_feedback=issue_text)
+        html = step4_html(
+            client,
+            title,
+            material,
+            plan,
+            audience,
+            page_role,
+            layout_feedback=issue_text,
+            deck_topic=deck_topic,
+            page_number=page_number,
+            total_pages=total_pages,
+            all_slides=all_slides,
+        )
         html_path.write_text(html, encoding="utf-8")
         _, report = render_html_with_validation(html_path)
         if report.get("timeline_safe_applied"):
@@ -448,18 +742,19 @@ def run_pipeline(topic: str, audience: str = "通用受众",
     out = Path(OUTPUT_DIR) / topic.replace(" ", "_")
     out.mkdir(parents=True, exist_ok=True)
     slide_status = {}
+    editable_slide_meta = []
 
-    print("[1/4] 生成大纲...")
+    print("[1/5] 生成大纲...")
     outline = step1_outline(client, topic, audience, page_req, research)
     (out / "outline.json").write_text(
         json.dumps(outline, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print("[2/4] 扩写内容...")
+    print("[2/5] 扩写内容...")
     contents = step2_content(client, outline)
     (out / "contents.json").write_text(
         json.dumps(contents, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print("[3/4] 生成策划稿 + HTML...")
+    print("[3/5] 生成策划稿 + HTML...")
     html_dir = out / "html"
     html_dir.mkdir(exist_ok=True)
     review_dir = out / "reviews"
@@ -473,21 +768,73 @@ def run_pipeline(topic: str, audience: str = "通用受众",
     if max_pages and max_pages > 0:
         all_pages = all_pages[:max_pages]
     total_pages = len(all_pages)
-    idx = 1
-    for page in all_pages:
+    slide_jobs = []
+    for idx, page in enumerate(all_pages, start=1):
         title = _get_title(page)
         material = contents.get(title, "")
         plan = step3_plan(client, title, material)
         page_role = _infer_page_role(idx, total_pages, title, plan, material)
+        slide_jobs.append(
+            {
+                "index": idx,
+                "title": title,
+                "material": material,
+                "plan": plan,
+                "page_role": page_role,
+            }
+        )
+
+    all_slides_context = _build_all_slides_context(slide_jobs)
+
+    for slide_job in slide_jobs:
+        idx = slide_job["index"]
+        title = slide_job["title"]
+        material = slide_job["material"]
+        plan = slide_job["plan"]
+        page_role = slide_job["page_role"]
         html_path = html_dir / f"{idx:02d}_{title[:20]}.html"
 
-        html = step4_html(client, title, material, plan, audience, page_role)
+        html = step4_html(
+            client,
+            title,
+            material,
+            plan,
+            audience,
+            page_role,
+            deck_topic=topic,
+            page_number=idx,
+            total_pages=total_pages,
+            all_slides=all_slides_context,
+        )
         html_path.write_text(html, encoding="utf-8")
         validation_report = _validate_and_optionally_regenerate(
-            client, html_path, title, material, plan, audience, page_role, polish
+            client,
+            html_path,
+            title,
+            material,
+            plan,
+            audience,
+            page_role,
+            polish,
+            deck_topic=topic,
+            page_number=idx,
+            total_pages=total_pages,
+            all_slides=all_slides_context,
         )
         review_result = _review_and_optionally_fix(
-            client, review_client, html_path, idx, title, material, plan, audience, page_role, validation_report
+            client,
+            review_client,
+            html_path,
+            idx,
+            title,
+            material,
+            plan,
+            audience,
+            page_role,
+            validation_report,
+            deck_topic=topic,
+            total_pages=total_pages,
+            all_slides=all_slides_context,
         )
         final_validation_status = review_result.get("post_fix_validation_status", validation_report.get("status"))
         final_issues_count = review_result.get("post_fix_final_issues", len(validation_report.get("final_issues") or []))
@@ -501,14 +848,51 @@ def run_pipeline(topic: str, audience: str = "通用受众",
             "review_rounds": review_result.get("review_rounds", 0),
             "review_path": review_result.get("review_path"),
             "export_ready": export_ready,
+            "html_path": str(html_path),
         }
+        editable_slide_meta.append({
+            "index": idx,
+            "title": title,
+            "page_role": page_role,
+            "html_path": str(html_path),
+            "slide_type": page_role,
+            "description": plan[:220],
+        })
         from html_pipeline.html_builder import write_slide_status
         write_slide_status(out, slide_status)
-        idx += 1
 
-    print("[4/4] 合成 PPT...")
+    manifest_path = _write_editable_chain_manifest(
+        run_dir=out,
+        topic=topic,
+        html_dir=html_dir,
+        slide_meta=editable_slide_meta,
+        source="html-first-run",
+    )
+
+    print("[4/5] 合成图片版 PPT...")
     from html_pipeline.html_builder import build_pptx
     pptx_path = out / f"{topic[:30]}.pptx"
     build_pptx(html_dir, pptx_path)
-    print(f"完成！PPT 已保存：{pptx_path}")
+    print(f"完成！图片版 PPT 已保存：{pptx_path}")
+
+    print("[5/5] 导出可编辑 PPT...")
+    editable_dir = out / "editable"
+    editable_pptx_path = _build_editable_deck(
+        html_dir=html_dir,
+        out_dir=editable_dir,
+        slide_meta=editable_slide_meta,
+        deck_name=topic,
+    )
+    print(f"完成！可编辑 PPT 已保存：{editable_pptx_path}")
+    manifest_path = _write_editable_chain_manifest(
+        run_dir=out,
+        topic=topic,
+        html_dir=html_dir,
+        slide_meta=editable_slide_meta,
+        image_pptx_path=pptx_path,
+        editable_pptx_path=editable_pptx_path,
+        editable_dir=editable_dir,
+        source="html-first-run",
+    )
+    print(f"HTML-first 链路清单已写入：{manifest_path}")
     return out

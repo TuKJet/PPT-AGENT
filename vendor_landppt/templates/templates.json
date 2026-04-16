@@ -1,0 +1,28 @@
+[
+  {
+    "id": "editorial_light_master",
+    "template_name": "Editorial Light Master",
+    "description": "Business/editorial light master template with restrained cards and warm accent.",
+    "html_file": "editorial_light_master.html",
+    "style_config": {
+      "mode": "light",
+      "accent": "#C9974D"
+    },
+    "tags": ["light", "editorial", "business"],
+    "is_default": true,
+    "is_active": true
+  },
+  {
+    "id": "signal_dark_master",
+    "template_name": "Signal Dark Master",
+    "description": "Dark keynote-style master template for product, AI and startup decks.",
+    "html_file": "signal_dark_master.html",
+    "style_config": {
+      "mode": "dark",
+      "accent": "#0EA5E9"
+    },
+    "tags": ["dark", "technology", "startup"],
+    "is_default": false,
+    "is_active": true
+  }
+]

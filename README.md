@@ -303,3 +303,32 @@ playwright>=1.40.0
 ## License
 
 ---
+
+## HTML-first 可编辑链路
+
+当前 HTML pipeline 会额外写出 `editable-ppt-chain.json`，把这条链路里的关键产物串起来：
+
+- `html/`：可继续人工修改的源页面
+- `slide-status.json`：逐页校验与审核状态
+- `editable/slide-status.json`：HTML -> scene -> editable PPT 的逐页状态
+- `editable/editable-export-manifest.json`：可编辑导出的 scene / preview / review 清单
+
+如果你已经手改过 `output/<topic>/html/*.html`，现在不需要重跑 AI 生成，可以直接基于现有 HTML 重导出：
+
+```bash
+python -m html_pipeline.main --from-html-dir output/你的主题/html
+```
+
+只导出可编辑版：
+
+```bash
+python -m html_pipeline.main --from-html-dir output/你的主题/html --editable-only
+```
+
+把重导出产物写到新目录：
+
+```bash
+python -m html_pipeline.main \
+  --from-html-dir output/你的主题/html \
+  --output-dir output/你的主题_reexport
+```
