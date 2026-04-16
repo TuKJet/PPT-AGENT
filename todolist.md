@@ -138,3 +138,4 @@
 - [x] 在 `dom_pptx_exporter.py` 稳定 header 右侧 tail/tag/chip 的宽度与对齐
 - [x] 用 1-2 页真实主题重新生成并复核观感
 - [x] 在 `html_builder.py` 增加 `cover-header-safe`，让封面页左上标题在贴近上边时自动下沉约 6px
+- [x] 在 `dom_pptx_exporter.py` 增加 PPTX 结构审计与自动 fallback，避免 DOM editable 导出退化成近似截图壳时仍被判为通过
