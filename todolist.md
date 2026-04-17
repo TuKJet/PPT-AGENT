@@ -143,3 +143,7 @@
   - 这是什么：把 `editable-preview` 从 DOM source 升级为 PowerPoint 实际导出图，并记录 `readback_mean_pixel_delta / readback_dhash_distance`
   - 为什么要这么做：仅靠 PPTX 结构审计能挡住“截图壳”，但还抓不到字体重排、局部漂移这类真实 Office 渲染偏差
   - 为什么这是好主意：现在 `PPT-AGENT` 的 editable 验收从“结构像可编辑”进化到了“结构过关 + Office 回读也像原页”，闭环更接近 LandPPT
+- [x] 在 `dom_pptx_exporter.py` 增加 `root backdrop` 导出兜底，修正 cover 页 `body` 级复杂背景在 PowerPoint 回读里丢失的问题
+  - 这是什么：导出前把 `body/html` 的复杂背景收敛成可渲染的全页 backdrop layer，并补两侧 glow blob 近似原始 radial ambiance
+  - 为什么要这么做：先前封面页在 Office 回读里只剩内层卡片，整页深色氛围背景没有被导出，导致 `cover` 被判 `warn`
+  - 为什么这是好主意：这是对导出层的稳定化，不依赖 prompt 碰运气；当前 `PPT-AGENT` 全链路 2 页 smoke run 已回到 `pass: 2 / warn: 0 / fail: 0`

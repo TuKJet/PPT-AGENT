@@ -495,6 +495,195 @@ class DomPptxExporter:
                       return Number.isFinite(parsed) ? parsed : fallback;
                     };
 
+                    const extractLastLinearGradient = (value) => {
+                      const input = String(value || '');
+                      const lower = input.toLowerCase();
+                      const token = 'linear-gradient(';
+                      const start = lower.lastIndexOf(token);
+                      if (start < 0) return '';
+
+                      let depth = 1;
+                      let quote = '';
+                      for (let index = start + token.length; index < input.length; index++) {
+                        const ch = input[index];
+                        if (quote) {
+                          if (ch === quote && input[index - 1] !== '\\\\') {
+                            quote = '';
+                          }
+                          continue;
+                        }
+                        if (ch === '"' || ch === "'") {
+                          quote = ch;
+                          continue;
+                        }
+                        if (ch === '(') {
+                          depth += 1;
+                          continue;
+                        }
+                        if (ch === ')') {
+                          depth -= 1;
+                          if (depth === 0) {
+                            return input.slice(start, index + 1);
+                          }
+                        }
+                      }
+                      return '';
+                    };
+
+                    const extractRadialGlowSpecs = (value) => {
+                      const input = String(value || '');
+                      const specs = [];
+                      const pattern = /radial-gradient\\(\\s*circle at\\s*([^,]+),\\s*(rgba?\\([^\\)]+\\)|#[0-9a-fA-F]+)\\s*,\\s*transparent\\s+([0-9.]+)%\\s*\\)/gi;
+                      let match = null;
+                      while ((match = pattern.exec(input))) {
+                        specs.push({
+                          position: String(match[1] || '').trim().toLowerCase(),
+                          color: String(match[2] || '').trim(),
+                          stop: clampPx(match[3], 30),
+                        });
+                      }
+                      return specs.slice(0, 3);
+                    };
+
+                    const ensureRootBackdrop = () => {
+                      const htmlEl = doc.documentElement;
+                      const body = doc.body;
+                      if (!(htmlEl instanceof win.HTMLElement) || !(body instanceof win.HTMLElement)) {
+                        return;
+                      }
+
+                      htmlEl.style.width = '1280px';
+                      htmlEl.style.height = '720px';
+                      htmlEl.style.margin = '0';
+                      htmlEl.style.overflow = 'hidden';
+                      body.style.width = '1280px';
+                      body.style.height = '720px';
+                      body.style.minHeight = '720px';
+                      body.style.margin = '0';
+                      body.style.overflow = 'hidden';
+                      if (!body.style.position || body.style.position === 'static') {
+                        body.style.position = 'relative';
+                      }
+
+                      const htmlStyle = win.getComputedStyle(htmlEl);
+                      const bodyStyle = win.getComputedStyle(body);
+                      const transparentColor = 'rgba(0, 0, 0, 0)';
+                      const bgSourceImage =
+                        bodyStyle.backgroundImage && bodyStyle.backgroundImage !== 'none'
+                          ? bodyStyle.backgroundImage
+                          : htmlStyle.backgroundImage;
+                      const bgSourceColor =
+                        bodyStyle.backgroundColor && bodyStyle.backgroundColor !== transparentColor
+                          ? bodyStyle.backgroundColor
+                          : htmlStyle.backgroundColor;
+                      const linearGradient = extractLastLinearGradient(bgSourceImage);
+                      const radialSpecs = extractRadialGlowSpecs(bgSourceImage);
+                      const hasRenderableBackdrop =
+                        !!linearGradient ||
+                        (!!bgSourceColor && bgSourceColor !== transparentColor) ||
+                        radialSpecs.length > 0;
+                      if (!hasRenderableBackdrop) {
+                        return;
+                      }
+
+                      let backdrop = Array.from(body.children).find(
+                        (child) =>
+                          child instanceof win.HTMLElement &&
+                          child.getAttribute('data-ppt-root-backdrop') === 'true'
+                      );
+                      if (!(backdrop instanceof win.HTMLElement)) {
+                        backdrop = doc.createElement('div');
+                        backdrop.setAttribute('data-ppt-root-backdrop', 'true');
+                        body.insertBefore(backdrop, body.firstChild);
+                      }
+
+                      backdrop.style.position = 'absolute';
+                      backdrop.style.left = '0';
+                      backdrop.style.top = '0';
+                      backdrop.style.width = '1280px';
+                      backdrop.style.height = '720px';
+                      backdrop.style.pointerEvents = 'none';
+                      backdrop.style.overflow = 'hidden';
+                      backdrop.style.zIndex = '0';
+                      backdrop.style.borderRadius = '0';
+                      backdrop.style.backgroundColor =
+                        bgSourceColor && bgSourceColor !== transparentColor ? bgSourceColor : 'transparent';
+                      backdrop.style.backgroundImage = linearGradient || 'none';
+                      backdrop.style.backgroundRepeat = 'no-repeat';
+                      backdrop.style.backgroundSize = '100% 100%';
+                      backdrop.style.backgroundPosition = 'center';
+
+                      Array.from(backdrop.children).forEach((child) => {
+                        if (child instanceof win.HTMLElement && child.getAttribute('data-ppt-root-glow') === 'true') {
+                          child.remove();
+                        }
+                      });
+
+                      radialSpecs.forEach((spec) => {
+                        const glow = doc.createElement('div');
+                        const baseSize = Math.max(1280, 720);
+                        const size = Math.max(
+                          260,
+                          Math.round(baseSize * Math.max(0.28, Math.min((spec.stop || 30) / 100 * 1.45, 0.64)))
+                        );
+                        const blur = Math.max(60, Math.round(size * 0.2));
+                        glow.setAttribute('data-ppt-root-glow', 'true');
+                        glow.style.position = 'absolute';
+                        glow.style.width = `${size}px`;
+                        glow.style.height = `${size}px`;
+                        glow.style.borderRadius = '999px';
+                        glow.style.backgroundColor = spec.color;
+                        glow.style.filter = `blur(${blur}px)`;
+                        glow.style.opacity = '1';
+                        glow.style.pointerEvents = 'none';
+                        glow.style.zIndex = '0';
+
+                        const pos = spec.position;
+                        if (pos.includes('100% 100%') || pos.includes('bottom right') || pos.includes('right bottom')) {
+                          glow.style.right = `${Math.round(-size * 0.16)}px`;
+                          glow.style.bottom = `${Math.round(-size * 0.16)}px`;
+                        } else if (
+                          pos.includes('100% 0%') ||
+                          pos.includes('top right') ||
+                          pos.includes('right top')
+                        ) {
+                          glow.style.right = `${Math.round(-size * 0.16)}px`;
+                          glow.style.top = `${Math.round(-size * 0.16)}px`;
+                        } else if (
+                          pos.includes('0% 100%') ||
+                          pos.includes('bottom left') ||
+                          pos.includes('left bottom')
+                        ) {
+                          glow.style.left = `${Math.round(-size * 0.16)}px`;
+                          glow.style.bottom = `${Math.round(-size * 0.16)}px`;
+                        } else {
+                          glow.style.left = `${Math.round(-size * 0.16)}px`;
+                          glow.style.top = `${Math.round(-size * 0.16)}px`;
+                        }
+
+                        backdrop.appendChild(glow);
+                      });
+
+                      Array.from(body.children).forEach((child) => {
+                        if (!(child instanceof win.HTMLElement) || child === backdrop) {
+                          return;
+                        }
+                        const childStyle = win.getComputedStyle(child);
+                        if (childStyle.position === 'static') {
+                          child.style.position = 'relative';
+                        }
+                        const childZIndex = Number.parseInt(childStyle.zIndex, 10);
+                        if (!Number.isFinite(childZIndex) || childZIndex < 1) {
+                          child.style.zIndex = '1';
+                        }
+                      });
+
+                      body.style.backgroundImage = 'none';
+                      body.style.backgroundColor = 'transparent';
+                      htmlEl.style.backgroundImage = 'none';
+                      htmlEl.style.backgroundColor = 'transparent';
+                    };
+
                     const stabilizeHeader = (header) => {
                       const headerStyle = win.getComputedStyle(header);
                       if (headerStyle.display !== 'flex') return;
@@ -584,6 +773,8 @@ class DomPptxExporter:
                         stabilizeHeader(header);
                       }
                     });
+
+                    ensureRootBackdrop();
                   }
 
                   async function waitForIframeReady(iframe) {
