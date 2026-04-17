@@ -39,18 +39,25 @@ def _inches(value: float):
     return Inches(value)
 
 
-def _set_fill(shape, color: str | None):
+def _set_fill(shape, color: str | None, opacity: float | None = None):
     if color:
         shape.fill.solid()
         shape.fill.fore_color.rgb = _rgb(color)
+        if opacity is not None:
+            shape.fill.transparency = max(0.0, min(1.0, 1.0 - float(opacity)))
     else:
         shape.fill.background()
 
 
-def _set_line(shape, color: str | None, width: float = 1):
+def _set_line(shape, color: str | None, width: float = 1, opacity: float | None = None):
     if color:
         shape.line.color.rgb = _rgb(color)
         shape.line.width = Pt(width)
+        if opacity is not None:
+            try:
+                shape.line.transparency = max(0.0, min(1.0, 1.0 - float(opacity)))
+            except Exception:
+                pass
     else:
         shape.line.fill.background()
 
@@ -64,8 +71,8 @@ def add_scene_shape(slide, element: dict):
         _inches(element["w"]),
         _inches(element["h"]),
     )
-    _set_fill(shape, element.get("fill"))
-    _set_line(shape, element.get("line"), element.get("line_width", 1))
+    _set_fill(shape, element.get("fill"), element.get("fill_opacity"))
+    _set_line(shape, element.get("line"), element.get("line_width", 1), element.get("line_opacity"))
     corner_ratio = element.get("corner_ratio")
     if corner_ratio is not None and hasattr(shape, "adjustments") and len(shape.adjustments) > 0:
         shape.adjustments[0] = float(corner_ratio)

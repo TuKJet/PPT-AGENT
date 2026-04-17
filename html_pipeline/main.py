@@ -57,6 +57,11 @@ def main():
         action="store_true",
         help="配合 --from-html-dir 使用，仅导出图片版 PPT",
     )
+    parser.add_argument(
+        "--editable-engine",
+        default=None,
+        help="指定可编辑导出引擎；当前支持 `dom_export` / `legacy`，历史 `pdf_export` 会自动回退到 `dom_export`",
+    )
     args = parser.parse_args()
 
     if args.editable_only and args.image_only:
@@ -73,6 +78,7 @@ def main():
                 output_dir=Path(args.output_dir) if args.output_dir else None,
                 export_image_ppt=not args.editable_only,
                 export_editable_ppt=not args.image_only,
+                editable_engine=args.editable_engine,
             )
             print(f"\nHTML 源目录：{Path(args.from_html_dir)}")
             print(f"主题：{export_result['topic']}")
@@ -110,6 +116,7 @@ def main():
             research=args.research,
             polish=polish,
             max_pages=args.max_pages,
+            editable_engine=args.editable_engine,
         )
         print(f"\nHTML 文件已保存至：{out}/html/")
         print(f"图片版 PPT：{out}/{topic[:30]}.pptx")

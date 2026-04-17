@@ -7,7 +7,7 @@ from typing import Any
 
 from adapters.asset_repository import LocalAssetRepository
 from ai_client import AIClient
-from vendor_landppt.models import (
+from vendor_presentation_core.models import (
     ImageRequirement,
     SlideImageAsset,
     SlideImagePlan,
@@ -18,7 +18,7 @@ from vendor_landppt.models import (
 logger = logging.getLogger(__name__)
 
 
-class LandPPTImageEngine:
+class MigratedImageEngine:
     """Migrated image planning logic adapted to PPT-AGENT's local environment."""
 
     def __init__(self, client: AIClient, asset_repository: LocalAssetRepository | None = None):
@@ -194,4 +194,3 @@ class LandPPTImageEngine:
         query_hints = self._build_query_hints(slide_data, requirements)
         collection = self._match_local_assets(requirements, query_hints)
         return SlideImagePlan(requirements=requirements, collection=collection, query_hints=query_hints)
-

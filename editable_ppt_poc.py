@@ -269,6 +269,89 @@ def _build_route_scene(route_entries: list[dict], slide_rect: dict) -> list[dict
     return lines
 
 
+def _parse_css_color_with_alpha(value: str) -> tuple[str | None, float]:
+    raw = str(value or '').strip()
+    if not raw:
+        return None, 0.0
+    if raw.startswith('#'):
+        return raw.upper(), 1.0
+    match = re.match(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?', raw)
+    if not match:
+        return None, 0.0
+    r, g, b = (int(match.group(i)) for i in range(1, 4))
+    alpha = float(match.group(4) or '1')
+    if alpha <= 0:
+        return None, 0.0
+    return f'#{r:02X}{g:02X}{b:02X}', alpha
+
+
+def _extract_radial_glow_specs(background_image: str) -> list[dict]:
+    pattern = re.compile(
+        r'radial-gradient\(\s*circle at\s*([^,]+),\s*(rgba?\([^\)]+\)|#[0-9a-fA-F]{6})\s*,\s*transparent\s+([0-9.]+)%\s*\)',
+        re.IGNORECASE,
+    )
+    specs = []
+    for match in pattern.finditer(str(background_image or '')):
+        color, alpha = _parse_css_color_with_alpha(match.group(2))
+        if not color or alpha <= 0:
+            continue
+        specs.append({
+            'position': str(match.group(1) or '').strip().lower(),
+            'color': color,
+            'alpha': alpha,
+            'stop': max(12.0, min(float(match.group(3) or 24), 42.0)),
+        })
+    return specs[:3]
+
+
+def _build_background_glow_scene(background_image: str) -> list[dict]:
+    glow_elements = []
+    for spec in _extract_radial_glow_specs(background_image):
+        base_size_px = max(1280, 720)
+        outer_size_px = max(260, round(base_size_px * max(0.28, min((spec['stop'] / 100.0) * 1.5, 0.66))))
+        inner_size_px = max(180, round(outer_size_px * 0.62))
+        outer_size = _px_to_in(outer_size_px)
+        inner_size = _px_to_in(inner_size_px)
+        outer_alpha = max(0.04, min(spec['alpha'] * 0.95, 0.10))
+        inner_alpha = max(0.06, min(spec['alpha'] * 1.35, 0.15))
+
+        position = spec['position']
+        if 'top right' in position or 'right top' in position or '100% 0%' in position:
+            outer_x = SLIDE_W_IN - outer_size * 0.88
+            outer_y = -outer_size * 0.22
+        elif 'bottom left' in position or 'left bottom' in position or '0% 100%' in position:
+            outer_x = -outer_size * 0.18
+            outer_y = SLIDE_H_IN - outer_size * 0.78
+        elif 'bottom right' in position or 'right bottom' in position or '100% 100%' in position:
+            outer_x = SLIDE_W_IN - outer_size * 0.84
+            outer_y = SLIDE_H_IN - outer_size * 0.76
+        else:
+            outer_x = -outer_size * 0.18
+            outer_y = -outer_size * 0.22
+
+        inner_x = outer_x + round((outer_size - inner_size) * 0.5, 3)
+        inner_y = outer_y + round((outer_size - inner_size) * 0.5, 3)
+        for x, y, size, alpha in (
+            (outer_x, outer_y, outer_size, outer_alpha),
+            (inner_x, inner_y, inner_size, inner_alpha),
+        ):
+            glow_elements.append({
+                'type': 'shape',
+                'shape': 'oval',
+                'x': round(x, 3),
+                'y': round(y, 3),
+                'w': round(size, 3),
+                'h': round(size, 3),
+                'fill': spec['color'],
+                'fill_opacity': round(alpha, 3),
+                'line': None,
+                'line_width': 0.0,
+                'source_selector': '_bg_glow',
+                '_dom_order': -1000,
+            })
+    return glow_elements
+
+
 def _append_cover_visual_scene(scene: dict):
     elements = scene.setdefault('elements', [])
     elements.extend([
@@ -537,7 +620,7 @@ def extract_html_layout_to_scene(html_path: Path, page_role: str = 'summary') ->
         'elements': []
     }
 
-    # 忽略 radial-gradient 装饰光效：它们在 editable PPT 中容易越界且影响正文排版判断
+    scene['elements'].extend(_build_background_glow_scene(slide_style.get('backgroundImage', '')))
 
     # 主题感知：根据背景色判断深/浅色主题，调整各类 fallback
     dark_theme = _is_dark_color(scene['background'])
@@ -1002,6 +1085,10 @@ def normalize_scene(scene: dict) -> dict:
                 "line_width": float(element.get("line_width", 1)),
                 "source_selector": element.get("source_selector", ""),
             })
+            if element.get("fill_opacity") is not None:
+                cleaned["fill_opacity"] = float(element.get("fill_opacity"))
+            if element.get("line_opacity") is not None:
+                cleaned["line_opacity"] = float(element.get("line_opacity"))
         elif element_type == "textbox":
             cleaned.update({
                 "x": float(element["x"]),
@@ -1819,9 +1906,13 @@ def _scene_budget_rules(page_role: str) -> dict:
 def _collect_scene_budget_issues(scene: dict, page_role: str) -> list[str]:
     rules = _scene_budget_rules(page_role)
     issues = []
-    if len(scene.get('elements', [])) > rules['max_elements']:
-        issues.append(f"元素过多：当前 {len(scene.get('elements', []))}，建议不超过 {rules['max_elements']}")
-    for idx, element in enumerate(scene.get('elements', [])):
+    budget_elements = [
+        element for element in scene.get('elements', [])
+        if element.get('source_selector') != '_bg_glow'
+    ]
+    if len(budget_elements) > rules['max_elements']:
+        issues.append(f"元素过多：当前 {len(budget_elements)}，建议不超过 {rules['max_elements']}")
+    for idx, element in enumerate(budget_elements):
         if element.get('type') != 'textbox':
             continue
         text = str(element.get('text', '')).strip()
@@ -1876,8 +1967,11 @@ def _compress_text_for_budget(text: str, limit: int) -> str:
 def _apply_scene_budget(scene: dict, page_role: str, hard_truncate: bool = True) -> dict:
     scene = normalize_scene(scene)
     rules = _scene_budget_rules(page_role)
+    preserved = [element for element in scene.get('elements', []) if element.get('source_selector') == '_bg_glow']
     trimmed = []
     for element in scene.get('elements', []):
+        if element.get('source_selector') == '_bg_glow':
+            continue
         if element.get('type') != 'textbox':
             trimmed.append(element)
             continue
@@ -1889,7 +1983,7 @@ def _apply_scene_budget(scene: dict, page_role: str, hard_truncate: bool = True)
         if hard_truncate and len(text.replace('\n', ' ').strip()) > limit:
             element = {**element, 'text': _compress_text_for_budget(text, limit)}
         trimmed.append(element)
-    scene['elements'] = trimmed[:rules['max_elements']] if hard_truncate else trimmed
+    scene['elements'] = preserved + (trimmed[:rules['max_elements']] if hard_truncate else trimmed)
     return scene
 
 
@@ -2004,7 +2098,9 @@ def validate_scene(scene: dict) -> list[dict]:
     for idx, element in enumerate(scene.get('elements', [])):
         if element['type'] in {'shape', 'textbox'}:
             x, y, w, h = element['x'], element['y'], element['w'], element['h']
-            if x < 0 or y < 0 or x + w > SLIDE_W_IN or y + h > SLIDE_H_IN:
+            if element.get('source_selector') == '_bg_glow':
+                pass
+            elif x < 0 or y < 0 or x + w > SLIDE_W_IN or y + h > SLIDE_H_IN:
                 issues.append({'type': 'bounds', 'message': f'元素 {idx} 超出页面边界'})
         if element['type'] == 'textbox':
             est_height = _textbox_required_height(element)
@@ -2036,11 +2132,15 @@ def validate_scene(scene: dict) -> list[dict]:
             h = int(element['h'] * PX_PER_IN)
             fill = element.get('fill') or 'none'
             stroke = element.get('line') or 'none'
+            fill_opacity = element.get('fill_opacity')
+            line_opacity = element.get('line_opacity')
+            fill_attr = f' fill-opacity="{max(0.0, min(float(fill_opacity), 1.0))}"' if fill_opacity is not None else ''
+            line_attr = f' stroke-opacity="{max(0.0, min(float(line_opacity), 1.0))}"' if line_opacity is not None else ''
             if element.get('shape') == 'oval':
-                svg.append(f'<ellipse cx="{x + w//2}" cy="{y + h//2}" rx="{w//2}" ry="{h//2}" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
+                svg.append(f'<ellipse cx="{x + w//2}" cy="{y + h//2}" rx="{w//2}" ry="{h//2}" fill="{fill}" stroke="{stroke}" stroke-width="1"{fill_attr}{line_attr}/>')
             else:
                 rx = 14 if element.get('shape') == 'rounded_rect' else 0
-                svg.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
+                svg.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{fill}" stroke="{stroke}" stroke-width="1"{fill_attr}{line_attr}/>')
         elif element['type'] == 'line':
             svg.append(
                 f'<line x1="{int(element["x1"] * PX_PER_IN)}" y1="{int(element["y1"] * PX_PER_IN)}" '
@@ -2206,7 +2306,7 @@ def auto_fix_scene(scene: dict, page_role: str = 'summary') -> dict:
     max_bottom = 0
     for element in scene.get('elements', []):
         if element['type'] in {'shape', 'textbox'}:
-            if element.get('source_selector') == '_glow':
+            if element.get('source_selector') in {'_glow', '_bg_glow'}:
                 continue
             max_bottom = max(max_bottom, element['y'] + element['h'])
         elif element['type'] == 'line':
@@ -2214,7 +2314,7 @@ def auto_fix_scene(scene: dict, page_role: str = 'summary') -> dict:
     overflow = round(max(0, max_bottom - (SLIDE_H_IN - 0.15)), 3)
     if overflow > 0 and page_role not in {'cover', 'toc', 'ending'}:
         for element in scene.get('elements', []):
-            if element.get('source_selector') == '_glow':
+            if element.get('source_selector') in {'_glow', '_bg_glow'}:
                 continue
             if element['type'] == 'textbox' and element['y'] > 5.2:
                 element['y'] = round(max(0.2, element['y'] - overflow), 3)

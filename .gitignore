@@ -13,5 +13,5 @@ prompt_summaries/
 .ccpanes/
 .claude/
 .golutra/
-.landppt_cache/
+.ppt_agent_cache/
 CLAUDE.md

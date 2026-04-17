@@ -1,2 +1,1 @@
-"""PPT-AGENT specific adapters for vendored LandPPT core."""
-
+"""PPT-AGENT specific adapters for the vendored presentation core."""

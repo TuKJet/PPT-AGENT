@@ -317,6 +317,9 @@ class DesignPrompts:
                     "- Cover slides must feel richer than a normal content page while keeping one clear hero focus.",
                     "- The cover must include at least one hero visual panel or abstract hero graphic in the main area.",
                     "- The cover must include at least one secondary support group such as metric chips, a micro timeline, capability badges, or a compact chart.",
+                    "- The cover must behave like an opener. Do not build it as a numbered process, agenda, or section-step slide.",
+                    "- Avoid large numeric badges or labels that imply sequence progression such as 1/2/3, 第一步, 第二阶段, or similar ordered markers.",
+                    "- If there is a separate toc page in the deck, keep the cover thematic and unnumbered instead of previewing the whole deck as ordered subtopics.",
                 ]
             )
         elif slide_role in {"toc", "summary", "ending"}:

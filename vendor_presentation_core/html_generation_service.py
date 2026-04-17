@@ -8,15 +8,15 @@ from typing import Any
 from adapters.asset_repository import LocalAssetRepository
 from adapters.template_repository import LocalTemplateRepository
 from ai_client import AIClient
-from vendor_landppt.design_engine import LandPPTDesignEngine
-from vendor_landppt.image_engine import LandPPTImageEngine
-from vendor_landppt.prompts import prompts_manager
+from vendor_presentation_core.design_engine import MigratedDesignEngine
+from vendor_presentation_core.image_engine import MigratedImageEngine
+from vendor_presentation_core.prompts import prompts_manager
 
 logger = logging.getLogger(__name__)
 
 
-class LandPPTHtmlGenerationService:
-    """LandPPT-style HTML generation core adapted to PPT-AGENT pipeline inputs."""
+class MigratedHtmlGenerationService:
+    """Presentation HTML generation core adapted to PPT-AGENT pipeline inputs."""
 
     def __init__(
         self,
@@ -28,12 +28,12 @@ class LandPPTHtmlGenerationService:
         self.client = client
         self.template_repository = template_repository or LocalTemplateRepository()
         self.asset_repository = asset_repository or LocalAssetRepository()
-        self.design_engine = LandPPTDesignEngine(
+        self.design_engine = MigratedDesignEngine(
             client=client,
             template_repository=self.template_repository,
             cache_dir=cache_dir,
         )
-        self.image_engine = LandPPTImageEngine(client=client, asset_repository=self.asset_repository)
+        self.image_engine = MigratedImageEngine(client=client, asset_repository=self.asset_repository)
 
     def _strip_code_block(self, text: str) -> str:
         match = re.search(r"```html\s*(<!DOCTYPE html>.*?</html>)\s*```", text, re.IGNORECASE | re.DOTALL)
@@ -77,9 +77,9 @@ class LandPPTHtmlGenerationService:
         return {
             "topic": deck_topic,
             "target_audience": audience,
-            "description": f"当前通过 PPT-AGENT 复用 LandPPT 风格链路生成 {page_role} 页面",
+            "description": f"当前通过 PPT-AGENT 的迁移内核生成 {page_role} 页面",
             "scenario": "presentation",
-            "ppt_style": "landppt-migrated",
+            "ppt_style": "ppt-agent-migrated-core",
         }
 
     def _summarize_all_slides(self, all_slides: list[dict[str, Any]] | None) -> str:
@@ -111,6 +111,9 @@ class LandPPTHtmlGenerationService:
                     "- Cover pages must include a hero visual panel or abstract hero graphic, not just two plain panels.",
                     "- Cover pages must include one secondary support group such as metric chips, mini timeline, compact chart, or capability badges.",
                     "- If the written content is short, spend the spare space on composition quality instead of leaving the page hollow.",
+                    "- The cover must read as an opener, not as step 2/3 of the deck. Do not turn the cover into a numbered process or agenda card.",
+                    "- Avoid dominant labels like 1/2/3, 第一步/第二步, or any metric badge that makes the cover look like a later section page.",
+                    "- If the deck already contains a toc page, the cover should only preview the theme and mood. Do not duplicate the toc with ordered subtopic breakdowns.",
                 ]
             )
         elif role in {"toc", "summary", "ending"}:
@@ -207,5 +210,5 @@ class LandPPTHtmlGenerationService:
         raw = self.client.chat(system_prompt, final_prompt, temperature=0.45)
         html = self._strip_code_block(raw)
         if not html.lower().startswith("<!doctype html"):
-            raise ValueError("Migrated LandPPT HTML generation did not return a full HTML document")
+            raise ValueError("Migrated HTML generation did not return a full HTML document")
         return html

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import math
 import re
@@ -15,7 +16,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from html_pipeline.html_builder import render_html_screenshot, write_slide_status
-from vendor_landppt.export.powerpoint_preview_renderer import (
+from vendor_presentation_core.export.powerpoint_preview_renderer import (
     detect_powerpoint_render_support,
     export_powerpoint_slide_previews,
 )
@@ -417,6 +418,78 @@ def _audit_exported_pptx(ppt_path: Path, slides: list[dict[str, Any]]) -> dict[s
     return {"slides": results, "failures": failures, "summary": summary}
 
 
+def _render_html_background_only_screenshot(html_path: Path) -> bytes:
+    html = html_path.read_text(encoding="utf-8")
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 720})
+        try:
+            page.set_content(html, wait_until="networkidle")
+            page.add_style_tag(
+                content="""
+                .slide > * {
+                  visibility: hidden !important;
+                }
+                """
+            )
+            page.wait_for_timeout(60)
+            locator = page.locator(".slide").first
+            if locator.count() == 0:
+                return page.screenshot(type="png")
+            return locator.screenshot(type="png")
+        finally:
+            browser.close()
+
+
+def _replace_full_slide_background_picture(ppt_path: Path, slides: list[dict[str, Any]]) -> None:
+    deck = Presentation(str(ppt_path))
+    slide_width = int(deck.slide_width)
+    slide_height = int(deck.slide_height)
+    patched = False
+
+    for idx, slide_payload in enumerate(slides, start=1):
+        html = str(slide_payload.get("html") or "")
+        if "radial-gradient(" not in html:
+            continue
+
+        ppt_slide = deck.slides[idx - 1] if idx - 1 < len(deck.slides) else None
+        if ppt_slide is None:
+            continue
+
+        target_picture = None
+        for shape in ppt_slide.shapes:
+            if getattr(shape, "shape_type", None) != MSO_SHAPE_TYPE.PICTURE:
+                continue
+            if abs(int(shape.left)) > 2000 or abs(int(shape.top)) > 2000:
+                continue
+            if int(shape.width) < int(slide_width * 0.98) or int(shape.height) < int(slide_height * 0.98):
+                continue
+            target_picture = shape
+            break
+
+        if target_picture is None:
+            continue
+
+        background_png = _render_html_background_only_screenshot(Path(slide_payload["html_path"]))
+        sp_tree = ppt_slide.shapes._spTree
+        target_index = list(sp_tree).index(target_picture._element)
+        sp_tree.remove(target_picture._element)
+
+        replacement = ppt_slide.shapes.add_picture(
+            io.BytesIO(background_png),
+            left=0,
+            top=0,
+            width=deck.slide_width,
+            height=deck.slide_height,
+        )
+        sp_tree.remove(replacement._element)
+        sp_tree.insert(target_index, replacement._element)
+        patched = True
+
+    if patched:
+        deck.save(str(ppt_path))
+
+
 def _write_dom_review(out_dir: Path, slide_result: dict[str, Any], html_path: Path) -> Path:
     review_path = out_dir / f"review-{slide_result['index']:02d}.md"
     status_label = {
@@ -463,7 +536,7 @@ def _write_dom_review(out_dir: Path, slide_result: dict[str, Any], html_path: Pa
 
 
 class DomPptxExporter:
-    """Run LandPPT's browser-side DOM exporter inside Playwright."""
+    """Run the browser-side DOM exporter inside Playwright."""
 
     def __init__(self, bundle_path: Path | None = None):
         self.bundle_path = bundle_path or (Path(__file__).resolve().parent / "dom-to-pptx.bundle.js")
@@ -545,6 +618,73 @@ class DomPptxExporter:
                       return specs.slice(0, 3);
                     };
 
+                    const parseCssColorAlpha = (value) => {
+                      const raw = String(value || '').trim();
+                      const rgbaMatch = raw.match(/^rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)(?:,\\s*([\\d.]+))?\\)$/i);
+                      if (rgbaMatch) {
+                        return {
+                          color: `rgb(${rgbaMatch[1]}, ${rgbaMatch[2]}, ${rgbaMatch[3]})`,
+                          alpha: rgbaMatch[4] != null ? Math.max(0, Math.min(Number.parseFloat(rgbaMatch[4]), 1)) : 1,
+                        };
+                      }
+                      return { color: raw || '#FFFFFF', alpha: 1 };
+                    };
+
+                    const buildGlowOverlayDataUrl = (specs) => {
+                      if (!Array.isArray(specs) || !specs.length) {
+                        return '';
+                      }
+
+                      const defs = [];
+                      const bodies = [];
+                      specs.forEach((spec, index) => {
+                        const baseSize = Math.max(1280, 720);
+                        const size = Math.max(
+                          260,
+                          Math.round(baseSize * Math.max(0.28, Math.min((spec.stop || 30) / 100 * 1.45, 0.64)))
+                        );
+                        const blur = Math.max(60, Math.round(size * 0.2));
+                        const innerSize = Math.max(180, Math.round(size * 0.62));
+                        const pos = String(spec.position || '').toLowerCase();
+                        let outerX = -size * 0.16;
+                        let outerY = -size * 0.16;
+                        if (pos.includes('100% 100%') || pos.includes('bottom right') || pos.includes('right bottom')) {
+                          outerX = 1280 - size * 0.84;
+                          outerY = 720 - size * 0.84;
+                        } else if (pos.includes('100% 0%') || pos.includes('top right') || pos.includes('right top')) {
+                          outerX = 1280 - size * 0.84;
+                          outerY = -size * 0.16;
+                        } else if (pos.includes('0% 100%') || pos.includes('bottom left') || pos.includes('left bottom')) {
+                          outerX = -size * 0.16;
+                          outerY = 720 - size * 0.84;
+                        }
+                        const innerX = outerX + Math.round((size - innerSize) * 0.5);
+                        const innerY = outerY + Math.round((size - innerSize) * 0.5);
+                        const colorInfo = parseCssColorAlpha(spec.color);
+                        const outerOpacity = Math.max(0.04, Math.min(colorInfo.alpha * 0.95, 0.10));
+                        const innerOpacity = Math.max(0.06, Math.min(colorInfo.alpha * 1.35, 0.15));
+                        const filterId = `pptGlow${index}`;
+                        defs.push(
+                          `<filter id="${filterId}" x="-50%" y="-50%" width="200%" height="200%">` +
+                          `<feGaussianBlur stdDeviation="${Math.max(16, Math.round(blur * 0.25))}" />` +
+                          `</filter>`
+                        );
+                        bodies.push(
+                          `<ellipse cx="${Math.round(outerX + size / 2)}" cy="${Math.round(outerY + size / 2)}" rx="${Math.round(size / 2)}" ry="${Math.round(size / 2)}" fill="${colorInfo.color}" fill-opacity="${outerOpacity.toFixed(3)}" filter="url(#${filterId})"/>`
+                        );
+                        bodies.push(
+                          `<ellipse cx="${Math.round(innerX + innerSize / 2)}" cy="${Math.round(innerY + innerSize / 2)}" rx="${Math.round(innerSize / 2)}" ry="${Math.round(innerSize / 2)}" fill="${colorInfo.color}" fill-opacity="${innerOpacity.toFixed(3)}"/>`
+                        );
+                      });
+
+                      const svg =
+                        `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">` +
+                        `<defs>${defs.join('')}</defs>` +
+                        bodies.join('') +
+                        `</svg>`;
+                      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+                    };
+
                     const ensureRootBackdrop = () => {
                       const htmlEl = doc.documentElement;
                       const body = doc.body;
@@ -613,59 +753,36 @@ class DomPptxExporter:
                       backdrop.style.backgroundSize = '100% 100%';
                       backdrop.style.backgroundPosition = 'center';
 
-                      Array.from(backdrop.children).forEach((child) => {
-                        if (child instanceof win.HTMLElement && child.getAttribute('data-ppt-root-glow') === 'true') {
+                      const glowOverlayUrl = buildGlowOverlayDataUrl(radialSpecs);
+                      Array.from(body.children).forEach((child) => {
+                        if (
+                          child instanceof win.HTMLElement &&
+                          child.getAttribute('data-ppt-root-glow-image') === 'true'
+                        ) {
                           child.remove();
                         }
                       });
-
-                      radialSpecs.forEach((spec) => {
-                        const glow = doc.createElement('div');
-                        const baseSize = Math.max(1280, 720);
-                        const size = Math.max(
-                          260,
-                          Math.round(baseSize * Math.max(0.28, Math.min((spec.stop || 30) / 100 * 1.45, 0.64)))
-                        );
-                        const blur = Math.max(60, Math.round(size * 0.2));
-                        glow.setAttribute('data-ppt-root-glow', 'true');
-                        glow.style.position = 'absolute';
-                        glow.style.width = `${size}px`;
-                        glow.style.height = `${size}px`;
-                        glow.style.borderRadius = '999px';
-                        glow.style.backgroundColor = spec.color;
-                        glow.style.filter = `blur(${blur}px)`;
-                        glow.style.opacity = '1';
-                        glow.style.pointerEvents = 'none';
-                        glow.style.zIndex = '0';
-
-                        const pos = spec.position;
-                        if (pos.includes('100% 100%') || pos.includes('bottom right') || pos.includes('right bottom')) {
-                          glow.style.right = `${Math.round(-size * 0.16)}px`;
-                          glow.style.bottom = `${Math.round(-size * 0.16)}px`;
-                        } else if (
-                          pos.includes('100% 0%') ||
-                          pos.includes('top right') ||
-                          pos.includes('right top')
-                        ) {
-                          glow.style.right = `${Math.round(-size * 0.16)}px`;
-                          glow.style.top = `${Math.round(-size * 0.16)}px`;
-                        } else if (
-                          pos.includes('0% 100%') ||
-                          pos.includes('bottom left') ||
-                          pos.includes('left bottom')
-                        ) {
-                          glow.style.left = `${Math.round(-size * 0.16)}px`;
-                          glow.style.bottom = `${Math.round(-size * 0.16)}px`;
-                        } else {
-                          glow.style.left = `${Math.round(-size * 0.16)}px`;
-                          glow.style.top = `${Math.round(-size * 0.16)}px`;
-                        }
-
-                        backdrop.appendChild(glow);
-                      });
+                      if (glowOverlayUrl) {
+                        const glowImage = doc.createElement('img');
+                        glowImage.setAttribute('data-ppt-root-glow-image', 'true');
+                        glowImage.src = glowOverlayUrl;
+                        glowImage.alt = '';
+                        glowImage.style.position = 'absolute';
+                        glowImage.style.left = '0';
+                        glowImage.style.top = '0';
+                        glowImage.style.width = '1280px';
+                        glowImage.style.height = '720px';
+                        glowImage.style.pointerEvents = 'none';
+                        glowImage.style.zIndex = '0';
+                        body.insertBefore(glowImage, backdrop.nextSibling);
+                      }
 
                       Array.from(body.children).forEach((child) => {
-                        if (!(child instanceof win.HTMLElement) || child === backdrop) {
+                        if (
+                          !(child instanceof win.HTMLElement) ||
+                          child === backdrop ||
+                          child.getAttribute('data-ppt-root-glow-image') === 'true'
+                        ) {
                           return;
                         }
                         const childStyle = win.getComputedStyle(child);
@@ -682,6 +799,72 @@ class DomPptxExporter:
                       body.style.backgroundColor = 'transparent';
                       htmlEl.style.backgroundImage = 'none';
                       htmlEl.style.backgroundColor = 'transparent';
+                    };
+
+                    const ensureSlideBackdrop = () => {
+                      const slide = doc.querySelector('.slide');
+                      if (!(slide instanceof win.HTMLElement)) {
+                        return;
+                      }
+
+                      const slideStyle = win.getComputedStyle(slide);
+                      const slideBgImage = slideStyle.backgroundImage;
+                      if (!slideBgImage || slideBgImage === 'none') {
+                        return;
+                      }
+
+                      const linearGradient = extractLastLinearGradient(slideBgImage);
+                      const radialSpecs = extractRadialGlowSpecs(slideBgImage);
+
+                      Array.from(slide.children).forEach((child) => {
+                        if (
+                          child instanceof win.HTMLElement &&
+                          child.getAttribute('data-ppt-slide-glow-image') === 'true'
+                        ) {
+                          child.remove();
+                        }
+                      });
+
+                      if (!slide.style.position || slide.style.position === 'static') {
+                        slide.style.position = 'relative';
+                      }
+                      slide.style.backgroundImage = linearGradient || 'none';
+                      slide.style.backgroundRepeat = 'no-repeat';
+                      slide.style.backgroundSize = '100% 100%';
+                      slide.style.backgroundPosition = 'center';
+
+                      const glowOverlayUrl = buildGlowOverlayDataUrl(radialSpecs);
+                      if (glowOverlayUrl) {
+                        const glowImage = doc.createElement('img');
+                        glowImage.setAttribute('data-ppt-slide-glow-image', 'true');
+                        glowImage.src = glowOverlayUrl;
+                        glowImage.alt = '';
+                        glowImage.style.position = 'absolute';
+                        glowImage.style.left = '0';
+                        glowImage.style.top = '0';
+                        glowImage.style.width = '1280px';
+                        glowImage.style.height = '720px';
+                        glowImage.style.pointerEvents = 'none';
+                        glowImage.style.zIndex = '0';
+                        slide.insertBefore(glowImage, slide.firstChild);
+                      }
+
+                      Array.from(slide.children).forEach((child) => {
+                        if (
+                          !(child instanceof win.HTMLElement) ||
+                          child.getAttribute('data-ppt-slide-glow-image') === 'true'
+                        ) {
+                          return;
+                        }
+                        const childStyle = win.getComputedStyle(child);
+                        if (childStyle.position === 'static') {
+                          child.style.position = 'relative';
+                        }
+                        const childZIndex = Number.parseInt(childStyle.zIndex, 10);
+                        if (!Number.isFinite(childZIndex) || childZIndex < 1) {
+                          child.style.zIndex = '1';
+                        }
+                      });
                     };
 
                     const stabilizeHeader = (header) => {
@@ -775,6 +958,418 @@ class DomPptxExporter:
                     });
 
                     ensureRootBackdrop();
+                    ensureSlideBackdrop();
+                  }
+
+                  function canParseCssColor(value) {
+                    if (!value) return false;
+                    try {
+                      const cvs = document.createElement('canvas');
+                      cvs.width = cvs.height = 1;
+                      const ctx = cvs.getContext('2d');
+                      if (!ctx) return false;
+                      ctx.fillStyle = '#000';
+                      ctx.fillStyle = value;
+                      return !!ctx.fillStyle;
+                    } catch (_) {
+                      return false;
+                    }
+                  }
+
+                  function toHexFallback(colorValue) {
+                    if (!canParseCssColor(colorValue)) return colorValue;
+                    try {
+                      const cvs = document.createElement('canvas');
+                      cvs.width = cvs.height = 1;
+                      const ctx = cvs.getContext('2d');
+                      if (!ctx) return colorValue;
+                      ctx.fillStyle = '#000';
+                      ctx.fillStyle = colorValue;
+                      return ctx.fillStyle || colorValue;
+                    } catch (_) {
+                      return colorValue;
+                    }
+                  }
+
+                  function convertModernColors(rootEl) {
+                    if (!rootEl) return;
+                    const modernColorRe = /\\b(oklch|oklab|lch|lab|color)\\s*\\(/i;
+                    const colorCssProps = [
+                      'color', 'background-color', 'border-color',
+                      'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color',
+                      'outline-color', 'text-decoration-color', 'caret-color', 'column-rule-color',
+                      'fill', 'stroke', 'stop-color', 'flood-color', 'lighting-color'
+                    ];
+                    const colorJsProps = [
+                      'color', 'backgroundColor', 'borderColor',
+                      'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+                      'outlineColor', 'textDecorationColor', 'caretColor', 'columnRuleColor',
+                      'fill', 'stroke', 'stopColor', 'floodColor', 'lightingColor'
+                    ];
+
+                    rootEl.querySelectorAll('style').forEach((styleEl) => {
+                      if (!modernColorRe.test(styleEl.textContent || '')) return;
+                      styleEl.textContent = styleEl.textContent.replace(
+                        /(oklch|oklab|lch|lab|color)\\([^)]*\\)/gi,
+                        (match) => toHexFallback(match)
+                      );
+                    });
+
+                    const walk = [rootEl, ...Array.from(rootEl.querySelectorAll('*'))];
+                    for (const el of walk) {
+                      if (!el || !el.style || el.tagName === 'STYLE' || el.tagName === 'SCRIPT') continue;
+
+                      let cs;
+                      try {
+                        cs = window.getComputedStyle(el);
+                      } catch (_) {
+                        continue;
+                      }
+
+                      for (let i = 0; i < colorCssProps.length; i++) {
+                        const val = cs.getPropertyValue(colorCssProps[i]);
+                        if (val && modernColorRe.test(val)) {
+                          el.style[colorJsProps[i]] = toHexFallback(val);
+                        }
+                      }
+
+                      const bgImg = cs.getPropertyValue('background-image');
+                      if (bgImg && modernColorRe.test(bgImg)) {
+                        el.style.backgroundImage = bgImg.replace(
+                          /(oklch|oklab|lch|lab|color)\\([^)]*\\)/gi,
+                          (match) => toHexFallback(match)
+                        );
+                      }
+
+                      for (const shadowProp of ['box-shadow', 'text-shadow']) {
+                        const shadowValue = cs.getPropertyValue(shadowProp);
+                        if (!shadowValue || !modernColorRe.test(shadowValue)) continue;
+                        const normalized = shadowValue.replace(
+                          /(oklch|oklab|lch|lab|color)\\([^)]*\\)/gi,
+                          (match) => toHexFallback(match)
+                        );
+                        el.style[shadowProp === 'box-shadow' ? 'boxShadow' : 'textShadow'] = normalized;
+                      }
+                    }
+                  }
+
+                  function extractFirstUrlFromBackgroundImage(bgValue, sourceWindow) {
+                    if (!bgValue || !/url\\s*\\(/i.test(bgValue)) return null;
+                    const match = /url\\s*\\(\\s*(['"]?)(.*?)\\1\\s*\\)/i.exec(bgValue);
+                    if (!match || !match[2]) return null;
+                    const rawUrl = match[2].trim();
+                    if (!rawUrl) return null;
+                    try {
+                      return new URL(rawUrl, sourceWindow.location.href).href;
+                    } catch (_) {
+                      return rawUrl;
+                    }
+                  }
+
+                  function inferObjectFitFromBackgroundSize(bgSize) {
+                    const value = String(bgSize || '').toLowerCase();
+                    if (value.includes('contain')) return 'contain';
+                    if (value.includes('cover')) return 'cover';
+                    if (value.includes('100% 100%') || value.includes('100%')) return 'fill';
+                    return 'cover';
+                  }
+
+                  function materializeBackgroundImagesForExport(sourceRoot, clonedRoot, sourceWindow) {
+                    if (!sourceRoot || !clonedRoot || !sourceWindow) return;
+                    const sourceNodes = [sourceRoot, ...Array.from(sourceRoot.querySelectorAll('*'))];
+                    const clonedNodes = [clonedRoot, ...Array.from(clonedRoot.querySelectorAll('*'))];
+                    const pairCount = Math.min(sourceNodes.length, clonedNodes.length);
+
+                    for (let i = 0; i < pairCount; i++) {
+                      const src = sourceNodes[i];
+                      const dst = clonedNodes[i];
+                      if (!src || !dst || !dst.style) continue;
+
+                      let srcStyle;
+                      try {
+                        srcStyle = sourceWindow.getComputedStyle(src);
+                      } catch (_) {
+                        continue;
+                      }
+                      const bgImage = srcStyle.getPropertyValue('background-image');
+                      if (!bgImage || !/url\\s*\\(/i.test(bgImage)) continue;
+                      if (bgImage.includes('gradient(') && bgImage.includes('url(')) continue;
+
+                      const hasChildren = dst.children && dst.children.length > 0;
+                      const hasText = !!(dst.textContent && dst.textContent.trim());
+                      if (hasChildren || hasText) continue;
+
+                      const imageUrl = extractFirstUrlFromBackgroundImage(bgImage, sourceWindow);
+                      if (!imageUrl) continue;
+
+                      const img = document.createElement('img');
+                      img.src = imageUrl;
+                      img.alt = '';
+                      img.setAttribute('data-export-bg-image', 'true');
+                      img.style.width = '100%';
+                      img.style.height = '100%';
+                      img.style.display = 'block';
+                      img.style.objectFit = inferObjectFitFromBackgroundSize(srcStyle.getPropertyValue('background-size'));
+                      img.style.objectPosition = srcStyle.getPropertyValue('background-position') || '50% 50%';
+
+                      dst.style.setProperty('background-image', 'none');
+                      dst.style.setProperty('background', 'none');
+                      dst.appendChild(img);
+                    }
+                  }
+
+                  function replaceClonedCanvasesWithImages(sourceDoc, clonedRoot) {
+                    if (!sourceDoc || !clonedRoot) return;
+
+                    const sourceCanvases = Array.from(sourceDoc.querySelectorAll('canvas'));
+                    const clonedCanvases = Array.from(clonedRoot.querySelectorAll('canvas'));
+                    const pairCount = Math.min(sourceCanvases.length, clonedCanvases.length);
+
+                    for (let i = 0; i < pairCount; i++) {
+                      const sourceCanvas = sourceCanvases[i];
+                      const clonedCanvas = clonedCanvases[i];
+                      if (!sourceCanvas || !clonedCanvas || !clonedCanvas.parentNode) continue;
+
+                      try {
+                        const dataUrl = sourceCanvas.toDataURL('image/png');
+                        if (!dataUrl || dataUrl.length < 128) continue;
+
+                        const img = document.createElement('img');
+                        img.src = dataUrl;
+                        img.alt = '';
+                        img.className = clonedCanvas.className || '';
+                        img.style.cssText = clonedCanvas.getAttribute('style') || '';
+                        if (!img.style.width) img.style.width = (sourceCanvas.style.width || sourceCanvas.width + 'px');
+                        if (!img.style.height) img.style.height = (sourceCanvas.style.height || sourceCanvas.height + 'px');
+                        if (!img.style.display) img.style.display = 'block';
+
+                        clonedCanvas.parentNode.replaceChild(img, clonedCanvas);
+                      } catch (_) {
+                        // Ignore tainted/unsupported canvas and keep original clone.
+                      }
+                    }
+                  }
+
+                  const EXPORT_COMPUTED_STYLE_PROPS = [
+                    'display', 'position', 'top', 'right', 'bottom', 'left', 'z-index',
+                    'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+                    'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+                    'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+                    'box-sizing', 'overflow', 'overflow-x', 'overflow-y',
+                    'transform', 'transform-origin', 'opacity',
+                    'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing',
+                    'text-align', 'text-transform', 'text-decoration', 'white-space', 'word-break',
+                    'color', 'background', 'background-color', 'background-image', 'background-size', 'background-position', 'background-repeat',
+                    'border', 'border-top', 'border-right', 'border-bottom', 'border-left', 'border-radius',
+                    'box-shadow', 'filter', 'backdrop-filter',
+                    'align-items', 'align-content', 'justify-content', 'justify-items',
+                    'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis', 'gap',
+                    'grid-template-columns', 'grid-template-rows', 'grid-column', 'grid-row',
+                    'object-fit', 'object-position'
+                  ];
+
+                  function copyComputedStylesForExport(sourceRoot, clonedRoot, sourceWindow) {
+                    if (!sourceRoot || !clonedRoot || !sourceWindow) return;
+
+                    const sourceNodes = [sourceRoot, ...Array.from(sourceRoot.querySelectorAll('*'))];
+                    const clonedNodes = [clonedRoot, ...Array.from(clonedRoot.querySelectorAll('*'))];
+                    const pairCount = Math.min(sourceNodes.length, clonedNodes.length);
+
+                    for (let i = 0; i < pairCount; i++) {
+                      const sourceNode = sourceNodes[i];
+                      const clonedNode = clonedNodes[i];
+                      if (!sourceNode || !clonedNode || !clonedNode.style) continue;
+                      if (clonedNode.tagName === 'SCRIPT' || clonedNode.tagName === 'STYLE') continue;
+
+                      try {
+                        const computed = sourceWindow.getComputedStyle(sourceNode);
+                        for (const prop of EXPORT_COMPUTED_STYLE_PROPS) {
+                          const value = computed.getPropertyValue(prop);
+                          if (value) clonedNode.style.setProperty(prop, value);
+                        }
+                      } catch (_) {}
+                    }
+                  }
+
+                  function parseUniformScaleFromTransform(transformValue) {
+                    const raw = String(transformValue || '').trim();
+                    if (!raw || raw === 'none') return null;
+
+                    const matrixMatch = raw.match(/^matrix\\(([^)]+)\\)$/i);
+                    if (matrixMatch) {
+                      const vals = matrixMatch[1].split(',').map((value) => parseFloat(value.trim()));
+                      if (vals.length >= 6 && vals.every((value) => Number.isFinite(value))) {
+                        const [a, b, c, d, e, f] = vals;
+                        if (Math.abs(b) < 1e-4 && Math.abs(c) < 1e-4 && Math.abs(a - d) < 1e-3 && Math.abs(e) < 0.5 && Math.abs(f) < 0.5) {
+                          return a;
+                        }
+                      }
+                    }
+
+                    const matrix3dMatch = raw.match(/^matrix3d\\(([^)]+)\\)$/i);
+                    if (matrix3dMatch) {
+                      const vals = matrix3dMatch[1].split(',').map((value) => parseFloat(value.trim()));
+                      if (vals.length >= 16 && vals.every((value) => Number.isFinite(value))) {
+                        const sx = vals[0];
+                        const sy = vals[5];
+                        const tx = vals[12];
+                        const ty = vals[13];
+                        if (Math.abs(sx - sy) < 1e-3 && Math.abs(tx) < 0.5 && Math.abs(ty) < 0.5) {
+                          return sx;
+                        }
+                      }
+                    }
+
+                    const scaleMatch = raw.match(/^scale\\(\\s*([-\\d.]+)(?:\\s*,\\s*([-\\d.]+))?\\s*\\)$/i);
+                    if (scaleMatch) {
+                      const sx = parseFloat(scaleMatch[1]);
+                      const sy = scaleMatch[2] ? parseFloat(scaleMatch[2]) : sx;
+                      if (Number.isFinite(sx) && Number.isFinite(sy) && Math.abs(sx - sy) < 1e-3) {
+                        return sx;
+                      }
+                    }
+
+                    return null;
+                  }
+
+                  function neutralizeViewportFitScaleForExport(sourceRoot, clonedRoot, sourceWindow) {
+                    if (!sourceRoot || !clonedRoot || !sourceWindow) return;
+
+                    const sourceNodes = [sourceRoot, ...Array.from(sourceRoot.querySelectorAll('*'))];
+                    const clonedNodes = [clonedRoot, ...Array.from(clonedRoot.querySelectorAll('*'))];
+                    const pairCount = Math.min(sourceNodes.length, clonedNodes.length);
+
+                    for (let i = 0; i < pairCount; i++) {
+                      const src = sourceNodes[i];
+                      const dst = clonedNodes[i];
+                      if (!src || !dst || !dst.style) continue;
+
+                      let cs;
+                      try {
+                        cs = sourceWindow.getComputedStyle(src);
+                      } catch (_) {
+                        continue;
+                      }
+                      if (!cs) continue;
+
+                      const uniformScale = parseUniformScaleFromTransform(cs.transform);
+                      if (!Number.isFinite(uniformScale) || Math.abs(uniformScale - 1) < 0.01) continue;
+
+                      const widthPx = parseFloat(cs.width) || src.getBoundingClientRect().width;
+                      const heightPx = parseFloat(cs.height) || src.getBoundingClientRect().height;
+                      if (!(widthPx > 900 && heightPx > 500)) continue;
+                      const ratio = widthPx / Math.max(1, heightPx);
+                      if (!(ratio > 1.7 && ratio < 1.8)) continue;
+
+                      let parentLooksViewportFitter = false;
+                      const parent = src.parentElement;
+                      if (parent) {
+                        try {
+                          const ps = sourceWindow.getComputedStyle(parent);
+                          parentLooksViewportFitter = String(ps.display || '').includes('flex') &&
+                            String(ps.justifyContent || '').includes('center') &&
+                            String(ps.alignItems || '').includes('center');
+                        } catch (_) {}
+                      }
+
+                      const idLikeSlideRoot = !!(src.id && /^(slide|ppt|page|slide-container|ppt-page|page-root)$/i.test(src.id));
+                      if (!parentLooksViewportFitter && !idLikeSlideRoot) continue;
+
+                      dst.style.setProperty('transform', 'none', 'important');
+                      dst.style.setProperty('transform-origin', 'center center', 'important');
+                    }
+                  }
+
+                  async function waitForStylesheetsReadyInContainer(container, timeoutMs = 2200) {
+                    if (!container || !container.querySelectorAll) return;
+                    const links = Array.from(container.querySelectorAll('link[rel="stylesheet"]'));
+                    if (links.length === 0) return;
+
+                    const waits = links.map((link) => new Promise((resolve) => {
+                      if (link.sheet) return resolve(true);
+                      const done = () => {
+                        link.removeEventListener('load', done);
+                        link.removeEventListener('error', done);
+                        resolve(true);
+                      };
+                      link.addEventListener('load', done, { once: true });
+                      link.addEventListener('error', done, { once: true });
+                      setTimeout(done, timeoutMs);
+                    }));
+                    await Promise.allSettled(waits);
+                  }
+
+                  async function waitForImagesReadyInContainer(container, timeoutMs = 2600) {
+                    if (!container || !container.querySelectorAll) return;
+                    const images = Array.from(container.querySelectorAll('img'));
+                    const pending = images.filter((img) => !img.complete);
+                    if (pending.length === 0) return;
+
+                    await Promise.race([
+                      Promise.allSettled(
+                        pending.map((img) => new Promise((resolve) => {
+                          const done = () => {
+                            img.removeEventListener('load', done);
+                            img.removeEventListener('error', done);
+                            resolve(true);
+                          };
+                          img.addEventListener('load', done, { once: true });
+                          img.addEventListener('error', done, { once: true });
+                        }))
+                      ),
+                      new Promise((resolve) => setTimeout(resolve, timeoutMs))
+                    ]);
+                  }
+
+                  function buildExportContainerFromDocument(sourceDoc, container) {
+                    try {
+                      if (!sourceDoc || !sourceDoc.body || !container) return false;
+
+                      const sourceBody = sourceDoc.body;
+                      const sourceWindow = sourceDoc.defaultView || window;
+                      const styleClone = document.createElement('div');
+                      styleClone.style.cssText = 'width:1280px;height:720px;overflow:hidden;position:relative;';
+                      styleClone.setAttribute('data-export-root', 'true');
+
+                      const freezeMotionStyle = document.createElement('style');
+                      freezeMotionStyle.textContent = '[data-export-root="true"] *, [data-export-root="true"] *::before, [data-export-root="true"] *::after { animation: none !important; transition: none !important; }';
+                      styleClone.appendChild(freezeMotionStyle);
+
+                      sourceDoc.querySelectorAll('style').forEach((styleNode) => {
+                        styleClone.appendChild(styleNode.cloneNode(true));
+                      });
+
+                      sourceDoc.querySelectorAll('link[rel="stylesheet"]').forEach((linkNode) => {
+                        styleClone.appendChild(linkNode.cloneNode(true));
+                      });
+
+                      const bodyStyle = sourceWindow.getComputedStyle(sourceBody);
+                      const bodyBg = bodyStyle.backgroundColor;
+                      const bodyBgImage = bodyStyle.backgroundImage;
+                      if (bodyBg && bodyBg !== 'rgba(0, 0, 0, 0)') {
+                        styleClone.style.backgroundColor = bodyBg;
+                      }
+                      if (bodyBgImage && bodyBgImage !== 'none') {
+                        styleClone.style.backgroundImage = bodyBgImage;
+                      }
+
+                      const bodyContent = sourceBody.cloneNode(true);
+                      copyComputedStylesForExport(sourceBody, bodyContent, sourceWindow);
+                      neutralizeViewportFitScaleForExport(sourceBody, bodyContent, sourceWindow);
+                      materializeBackgroundImagesForExport(sourceBody, bodyContent, sourceWindow);
+                      replaceClonedCanvasesWithImages(sourceDoc, bodyContent);
+                      bodyContent.style.margin = '0';
+                      bodyContent.style.width = '1280px';
+                      bodyContent.style.height = '720px';
+                      bodyContent.style.overflow = 'hidden';
+                      styleClone.appendChild(bodyContent);
+
+                      container.innerHTML = '';
+                      container.appendChild(styleClone);
+                      return true;
+                    } catch (_) {
+                      return false;
+                    }
                   }
 
                   async function waitForIframeReady(iframe) {
@@ -818,9 +1413,22 @@ class DomPptxExporter:
                       host.appendChild(iframe);
                       iframe.srcdoc = slide.html;
                       const root = await waitForIframeReady(iframe);
+                      const sourceDoc = iframe.contentDocument || iframe.contentWindow.document;
+                      const container = document.createElement('div');
+                      container.style.cssText = 'width:1280px;height:720px;overflow:hidden;position:relative;background:white;';
+                      host.appendChild(container);
+                      let exportRoot = root;
                       try {
-                        yield root;
+                        const built = buildExportContainerFromDocument(sourceDoc, container);
+                        if (built) {
+                          await waitForStylesheetsReadyInContainer(container, 2600);
+                          await waitForImagesReadyInContainer(container, 2800);
+                          convertModernColors(container);
+                          exportRoot = container;
+                        }
+                        yield exportRoot;
                       } finally {
+                        container.remove();
                         iframe.remove();
                       }
                     }
@@ -893,6 +1501,7 @@ def build_dom_editable_deck_from_html(
     deck_stem = (deck_name or html_dir.parent.name)[:30]
     ppt_path = out_dir.parent / f"{deck_stem}_editable.pptx"
     DomPptxExporter().export_slides(slides, ppt_path)
+    _replace_full_slide_background_picture(ppt_path, slides)
     structure_audit = _audit_exported_pptx(ppt_path, slides)
     if structure_audit["failures"]:
         ppt_path.unlink(missing_ok=True)
@@ -1003,7 +1612,7 @@ def build_dom_editable_deck_from_html(
             {
                 "version": 2,
                 "generated_at": _utc_now_iso(),
-                "pipeline": "landppt-dom-export",
+                "pipeline": "dom-editable-export",
                 "source_of_truth": "html",
                 "html_dir": str(html_dir),
                 "pptx_path": str(ppt_path),

@@ -5,11 +5,11 @@ from pathlib import Path
 
 
 class LocalAssetRepository:
-    """Simple local image search for migrated LandPPT image planning."""
+    """Simple local image search for migrated presentation image planning."""
 
     def __init__(self, base_dir: Path | None = None):
         root = Path(__file__).resolve().parent.parent
-        self.base_dir = base_dir or (root / "vendor_landppt" / "assets")
+        self.base_dir = base_dir or (root / "vendor_presentation_core" / "assets")
 
     def list_images(self) -> list[Path]:
         if not self.base_dir.exists():
@@ -29,4 +29,3 @@ class LocalAssetRepository:
                 matches.append({"path": str(image), "name": image.name, "score": score})
         matches.sort(key=lambda item: (-item["score"], item["name"]))
         return matches[:count]
-

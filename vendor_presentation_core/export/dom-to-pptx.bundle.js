@@ -63898,8 +63898,8 @@
     try {
       if (options && options.iconRules) {
         setIconRules(options.iconRules);
-      } else if (typeof window !== 'undefined' && window.__LANDPPT_ICON_EXPORT_RULES__) {
-        setIconRules(window.__LANDPPT_ICON_EXPORT_RULES__);
+      } else if (typeof window !== 'undefined' && window.__DOM_EXPORT_ICON_RULES__) {
+        setIconRules(window.__DOM_EXPORT_ICON_RULES__);
       } else if (!currentIconRulesCompiled) {
         setIconRules(DEFAULT_ICON_RULES);
       }
@@ -64364,7 +64364,7 @@
   function getCompiledIconRules() {
     if (!currentIconRulesCompiled) {
       const winRules =
-        typeof window !== 'undefined' ? window.__LANDPPT_ICON_EXPORT_RULES__ || null : null;
+        typeof window !== 'undefined' ? window.__DOM_EXPORT_ICON_RULES__ || null : null;
       currentIconRulesCompiled = compileIconRules(winRules);
     }
     return currentIconRulesCompiled;
@@ -64373,7 +64373,7 @@
   function setIconRules(rawRules) {
     currentIconRulesCompiled = compileIconRules(rawRules);
     if (typeof window !== 'undefined') {
-      window.__LANDPPT_ICON_EXPORT_RULES__ = currentIconRulesCompiled.rawRules;
+      window.__DOM_EXPORT_ICON_RULES__ = currentIconRulesCompiled.rawRules;
     }
     return currentIconRulesCompiled.rawRules;
   }
@@ -66049,10 +66049,10 @@
     return items;
   }
 
-  var LANDPPT_DOM_TO_PPTX_PATCH_VERSION = '2026-02-14-opacity-chain-v4';
+  var DOM_TO_PPTX_PATCH_VERSION = '2026-02-14-opacity-chain-v4';
   exports.exportToPptx = exportToPptx;
   exports.setIconRules = setIconRules;
   exports.getIconRules = getIconRules;
-  exports.__landpptPatchVersion = LANDPPT_DOM_TO_PPTX_PATCH_VERSION;
+  exports.__domExportPatchVersion = DOM_TO_PPTX_PATCH_VERSION;
 
 }));

@@ -9,14 +9,14 @@ from typing import Any
 
 from adapters.template_repository import LocalTemplateRepository, TemplateRecord
 from ai_client import AIClient
-from vendor_landppt.models import build_project_cache_key, ensure_directory
-from vendor_landppt.prompts import prompts_manager
+from vendor_presentation_core.models import build_project_cache_key, ensure_directory
+from vendor_presentation_core.prompts import prompts_manager
 
 logger = logging.getLogger(__name__)
 
 
-class LandPPTDesignEngine:
-    """Migrated design-side logic adapted from LandPPT services."""
+class MigratedDesignEngine:
+    """Migrated design-side logic adapted for PPT-AGENT."""
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class LandPPTDesignEngine:
     ):
         self.client = client
         self.template_repository = template_repository or LocalTemplateRepository()
-        self.cache_dir = ensure_directory(cache_dir or (Path(__file__).resolve().parent.parent / ".landppt_cache"))
+        self.cache_dir = ensure_directory(cache_dir or (Path(__file__).resolve().parent.parent / ".ppt_agent_cache"))
         self.style_cache_dir = ensure_directory(self.cache_dir / "style_genes")
         self.template_cache_dir = ensure_directory(self.cache_dir / "templates")
         self._cached_style_genes: dict[str, str] = {}
@@ -309,4 +309,3 @@ class LandPPTDesignEngine:
 
     def get_project_cache_key(self, topic: str, audience: str) -> str:
         return build_project_cache_key(topic, audience)
-

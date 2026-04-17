@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from ai_client import AIClient
 from config import (
     EDITABLE_EXPORT_ENGINE,
-    HTML_USE_LANDPPT_CORE,
+    HTML_USE_MIGRATED_CORE,
     OUTPUT_DIR,
     REVIEW_ENABLED,
     REVIEW_MODEL,
@@ -169,13 +169,26 @@ def _build_editable_deck(
     out_dir: Path,
     slide_meta: list[dict],
     deck_name: str,
+    engine_override: str | None = None,
 ) -> Path:
-    engine = (EDITABLE_EXPORT_ENGINE or "legacy").strip().lower()
+    raw_engine = (engine_override or EDITABLE_EXPORT_ENGINE or "legacy").strip().lower()
+    engine_aliases = {
+        "dom": "dom_export",
+        "browser": "dom_export",
+        "pdf_export": "dom_export",
+        "pdf": "dom_export",
+        "pdf_editable": "dom_export",
+        "high_fidelity": "dom_export",
+    }
+    engine = engine_aliases.get(raw_engine, raw_engine)
     dom_last_exc = None
 
-    if engine in {"landppt_dom", "dom", "browser"}:
+    if raw_engine in {"pdf_export", "pdf", "pdf_editable", "high_fidelity"}:
+        print("    [fallback] `pdf_export` 已停用，自动回退到开源 `dom_export`。")
+
+    if engine in {"dom_export", "dom", "browser"}:
         try:
-            from vendor_landppt.export.dom_pptx_exporter import build_dom_editable_deck_from_html
+            from vendor_presentation_core.export.dom_pptx_exporter import build_dom_editable_deck_from_html
 
             return build_dom_editable_deck_from_html(
                 html_dir=html_dir,
@@ -186,6 +199,9 @@ def _build_editable_deck(
         except Exception as exc:
             dom_last_exc = exc
             print(f"    [fallback] DOM editable export failed, falling back to legacy builder: {exc}")
+
+    if engine not in {"dom_export", "legacy"}:
+        print(f"    [fallback] Unknown editable export engine `{raw_engine}`, falling back to legacy builder.")
 
     try:
         return build_editable_deck_from_html(
@@ -214,9 +230,15 @@ def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
     root_slide_status = _load_json_file(source_slide_status_path).get("slides", {})
     editable_status = {}
     editable_export_manifest_path = None
+    editable_export_manifest = {}
     if editable_dir:
         editable_status = _load_json_file(editable_dir / "slide-status.json").get("slides", {})
         editable_export_manifest_path = editable_dir / "editable-export-manifest.json"
+        if editable_export_manifest_path.exists():
+            editable_export_manifest = _load_json_file(editable_export_manifest_path)
+
+    editable_pipeline = editable_export_manifest.get("pipeline")
+    editable_source_pdf_path = editable_export_manifest.get("source_pdf_path")
 
     slides = []
     for meta in slide_meta:
@@ -236,6 +258,8 @@ def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
             "editable_review_path": editable_info.get("review_path"),
             "editable_validation_status": editable_info.get("validation_status"),
             "editable_export_ready": editable_info.get("export_ready"),
+            "editable_source_pdf_path": editable_info.get("source_pdf_path") or editable_source_pdf_path,
+            "editable_pipeline": editable_pipeline,
         })
 
     artifacts = existing_manifest.get("artifacts", {})
@@ -249,6 +273,7 @@ def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
         "run_dir": str(run_dir),
         "html_dir": str(html_dir),
         "slide_count": len(slide_meta),
+        "editable_pipeline": editable_pipeline or existing_manifest.get("editable_pipeline"),
         "artifacts": {
             "outline_path": str(source_outline_path) if source_outline_path.exists() else artifacts.get("outline_path"),
             "contents_path": str(source_contents_path) if source_contents_path.exists() else artifacts.get("contents_path"),
@@ -257,6 +282,7 @@ def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
             "editable_pptx_path": str(editable_pptx_path) if editable_pptx_path else artifacts.get("editable_pptx_path"),
             "editable_slide_status_path": str(editable_dir / "slide-status.json") if editable_dir and (editable_dir / "slide-status.json").exists() else artifacts.get("editable_slide_status_path"),
             "editable_export_manifest_path": str(editable_export_manifest_path) if editable_export_manifest_path and editable_export_manifest_path.exists() else artifacts.get("editable_export_manifest_path"),
+            "editable_source_pdf_path": editable_source_pdf_path or artifacts.get("editable_source_pdf_path"),
         },
         "slides": slides,
     }
@@ -267,7 +293,8 @@ def _write_editable_chain_manifest(run_dir: Path, topic: str, html_dir: Path,
 def export_from_existing_html(html_dir: Path, topic: str | None = None,
                               output_dir: Path | None = None,
                               export_image_ppt: bool = True,
-                              export_editable_ppt: bool = True) -> dict:
+                              export_editable_ppt: bool = True,
+                              editable_engine: str | None = None) -> dict:
     if not export_image_ppt and not export_editable_ppt:
         raise ValueError("At least one export mode must be enabled")
 
@@ -305,6 +332,7 @@ def export_from_existing_html(html_dir: Path, topic: str | None = None,
             out_dir=editable_dir,
             slide_meta=slide_meta,
             deck_name=resolved_topic,
+            engine_override=editable_engine,
         )
         print(f"Done! Editable PPT saved to: {editable_pptx_path}")
 
@@ -449,7 +477,7 @@ def _build_all_slides_context(slide_jobs: list[dict] | None) -> list[dict]:
     return context
 
 
-def _generate_with_landppt_core(
+def _generate_with_migrated_core(
     client: AIClient,
     deck_topic: str,
     title: str,
@@ -462,9 +490,9 @@ def _generate_with_landppt_core(
     layout_feedback: str = "",
     all_slides: list[dict] | None = None,
 ) -> str:
-    from vendor_landppt.html_generation_service import LandPPTHtmlGenerationService
+    from vendor_presentation_core.html_generation_service import MigratedHtmlGenerationService
 
-    service = LandPPTHtmlGenerationService(client=client)
+    service = MigratedHtmlGenerationService(client=client)
     return service.generate_slide_html(
         deck_topic=deck_topic or title,
         title=title,
@@ -486,10 +514,10 @@ def step4_html(client: AIClient, title: str, material: str,
                page_number: int = 1,
                total_pages: int = 1,
                all_slides: list[dict] | None = None) -> str:
-    """Generate single-slide HTML, preferring migrated LandPPT core with legacy fallback."""
-    if HTML_USE_LANDPPT_CORE:
+    """Generate single-slide HTML, preferring the migrated core with legacy fallback."""
+    if HTML_USE_MIGRATED_CORE:
         try:
-            return _generate_with_landppt_core(
+            return _generate_with_migrated_core(
                 client=client,
                 deck_topic=deck_topic or title,
                 title=title,
@@ -503,7 +531,7 @@ def step4_html(client: AIClient, title: str, material: str,
                 all_slides=all_slides,
             )
         except Exception as exc:
-            print(f"    [fallback] LandPPT HTML core failed for {title}: {exc}")
+            print(f"    [fallback] migrated HTML core failed for {title}: {exc}")
     return _legacy_step4_html(
         client=client,
         title=title,
@@ -731,7 +759,8 @@ def _validate_and_optionally_regenerate(client: AIClient, html_path: Path,
 def run_pipeline(topic: str, audience: str = "通用受众",
                  page_req: str = "12-15页", provider: str | None = None,
                  research: str = "", polish: bool = False,
-                 max_pages: int | None = None) -> Path:
+                 max_pages: int | None = None,
+                 editable_engine: str | None = None) -> Path:
     """运行 HTML 版本的 PPT 生成 pipeline。"""
     client = AIClient(provider)
     review_client = None
@@ -882,6 +911,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
         out_dir=editable_dir,
         slide_meta=editable_slide_meta,
         deck_name=topic,
+        engine_override=editable_engine,
     )
     print(f"完成！可编辑 PPT 已保存：{editable_pptx_path}")
     manifest_path = _write_editable_chain_manifest(

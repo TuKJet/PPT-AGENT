@@ -40,7 +40,7 @@ SVG_REVIEW_MODEL = os.getenv("SVG_REVIEW_MODEL", REVIEW_MODEL)
 SVG_REVIEW_REASONING_EFFORT = os.getenv("SVG_REVIEW_REASONING_EFFORT", REVIEW_REASONING_EFFORT)
 
 # 输出目录
-HTML_USE_LANDPPT_CORE = os.getenv("HTML_USE_LANDPPT_CORE", "true").lower() in {"1", "true", "yes", "on"}
-EDITABLE_EXPORT_ENGINE = os.getenv("EDITABLE_EXPORT_ENGINE", "landppt_dom")
+HTML_USE_MIGRATED_CORE = os.getenv("HTML_USE_MIGRATED_CORE", "true").lower() in {"1", "true", "yes", "on"}
+EDITABLE_EXPORT_ENGINE = os.getenv("EDITABLE_EXPORT_ENGINE", "dom_export")
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")

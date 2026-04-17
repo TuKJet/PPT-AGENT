@@ -869,6 +869,40 @@ COVER_HEADER_SAFE_STYLE = """
 """
 
 
+COVER_CHAIN_SAFE_STYLE = """
+.chain {
+  gap: 10px !important;
+}
+.chain-item {
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 68px !important;
+}
+.num {
+  align-self: center !important;
+}
+.chain-text {
+  min-height: 44px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 3px !important;
+}
+.chain-text strong,
+.chain-text span {
+  display: block !important;
+}
+.impact-box {
+  gap: 8px !important;
+}
+.impact-num {
+  font-size: 26px !important;
+  line-height: 1.05 !important;
+}
+"""
+
+
 def _inspect_html_layout(page) -> dict:
     return page.evaluate(
         """
@@ -1168,6 +1202,10 @@ def _apply_cover_header_safe_mode(page) -> None:
     page.add_style_tag(content=COVER_HEADER_SAFE_STYLE)
 
 
+def _apply_cover_chain_safe_mode(page) -> None:
+    page.add_style_tag(content=COVER_CHAIN_SAFE_STYLE)
+
+
 def _apply_toc_safe_mode(page) -> None:
     page.add_style_tag(content=TOC_SAFE_STYLE)
 
@@ -1222,6 +1260,10 @@ def _persist_cover_header_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-cover-header-safe-style", COVER_HEADER_SAFE_STYLE)
 
 
+def _persist_cover_chain_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(html_path, original_html, "claude-cover-chain-safe-style", COVER_CHAIN_SAFE_STYLE)
+
+
 def _persist_toc_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-toc-safe-style", TOC_SAFE_STYLE)
 
@@ -1234,6 +1276,38 @@ def _persist_step_card_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-step-card-safe-style", STEP_CARD_SAFE_STYLE)
 
 
+def _normalize_cover_metric_copy(text: str) -> str:
+    cleaned = re.sub(r"^\s*\d+\s*", "", text).strip()
+    if not cleaned:
+        return text.strip()
+    if cleaned.startswith("重"):
+        return "多" + cleaned
+    return cleaned
+
+
+def _persist_cover_sequence_fix_html(html_path: Path, original_html: str) -> tuple[str, bool]:
+    changed = False
+
+    def replace_metric(match: re.Match[str]) -> str:
+        nonlocal changed
+        text = match.group(2)
+        if not re.match(r"^\s*\d+\s*", text):
+            return match.group(0)
+        normalized = _normalize_cover_metric_copy(text)
+        if normalized != text.strip():
+            changed = True
+        return f"{match.group(1)}{normalized}{match.group(3)}"
+
+    updated_html = re.sub(
+        r'(<(?:div|span|p)[^>]*class="[^"]*impact-num[^"]*"[^>]*>)([^<]+)(</(?:div|span|p)>)',
+        replace_metric,
+        original_html,
+    )
+    if changed:
+        html_path.write_text(updated_html, encoding="utf-8")
+    return updated_html, changed
+
+
 def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     from playwright.sync_api import sync_playwright
 
@@ -1244,6 +1318,8 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     persisted_dense_card_safe = False
     persisted_inline_panel_safe = False
     persisted_cover_header_safe = False
+    persisted_cover_chain_safe = False
+    persisted_cover_sequence_fix = False
     persisted_toc_safe = False
     persisted_conclusion_safe = False
     persisted_step_card_safe = False
@@ -1252,6 +1328,7 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     dense_card_safe_applied = False
     inline_panel_safe_applied = False
     cover_header_safe_applied = False
+    cover_chain_safe_applied = False
     toc_safe_applied = False
     conclusion_safe_applied = False
     step_card_safe_applied = False
@@ -1288,6 +1365,37 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
             cover_header_safe_applied = True
             persisted_cover_header_safe = True
             html_content = _persist_cover_header_safe_html(html_path, html_content)
+
+        cover_chain_structure = page.evaluate(
+            """
+            () => Boolean(
+              document.querySelector('.chain-item .num')
+              && document.querySelector('.chain-item .chain-text')
+              && document.querySelector('.impact-num')
+            )
+            """
+        )
+        if cover_chain_structure:
+            _apply_cover_chain_safe_mode(page)
+            cover_chain_safe_applied = True
+            persisted_cover_chain_safe = True
+            page.evaluate(
+                """
+                () => {
+                  const impact = document.querySelector('.impact-num');
+                  if (!impact) return;
+                  const raw = (impact.textContent || '').trim();
+                  if (!/^\\d+\\s*/.test(raw)) return;
+                  let normalized = raw.replace(/^\\d+\\s*/, '').trim();
+                  if (normalized.startsWith('重')) {
+                    normalized = `多${normalized}`;
+                  }
+                  impact.textContent = normalized;
+                }
+                """
+            )
+            html_content = _persist_cover_chain_safe_html(html_path, html_content)
+            html_content, persisted_cover_sequence_fix = _persist_cover_sequence_fix_html(html_path, html_content)
 
         inline_panel_structure = page.evaluate(
             """
@@ -1391,6 +1499,7 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "dense_card_safe_applied": dense_card_safe_applied,
         "inline_panel_safe_applied": inline_panel_safe_applied,
         "cover_header_safe_applied": cover_header_safe_applied,
+        "cover_chain_safe_applied": cover_chain_safe_applied,
         "toc_safe_applied": toc_safe_applied,
         "conclusion_safe_applied": conclusion_safe_applied,
         "step_card_safe_applied": step_card_safe_applied,
@@ -1400,6 +1509,8 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "persisted_dense_card_safe": persisted_dense_card_safe,
         "persisted_inline_panel_safe": persisted_inline_panel_safe,
         "persisted_cover_header_safe": persisted_cover_header_safe,
+        "persisted_cover_chain_safe": persisted_cover_chain_safe,
+        "persisted_cover_sequence_fix": persisted_cover_sequence_fix,
         "persisted_toc_safe": persisted_toc_safe,
         "persisted_conclusion_safe": persisted_conclusion_safe,
         "persisted_step_card_safe": persisted_step_card_safe,
@@ -1460,6 +1571,8 @@ def build_pptx(html_dir: Path, output_path: Path) -> Path:
                 print("    [检查] 检测到高密度卡片布局，已应用 dense-card-safe mode")
             if report.get("cover_header_safe_applied"):
                 print("    [检查] 检测到封面标题贴上边，已应用 cover-header-safe mode")
+            if report.get("cover_chain_safe_applied"):
+                print("    [检查] 检测到封面编号卡未垂直居中，已应用 cover-chain-safe mode")
             if report.get("summary_safe_applied"):
                 print("    [检查] 检测到总结型高风险布局，已应用 summary-safe mode")
             if report.get("conclusion_safe_applied"):
@@ -1476,6 +1589,10 @@ def build_pptx(html_dir: Path, output_path: Path) -> Path:
                 print("    [检查] 已将 dense-card-safe 样式回写到 HTML 文件")
             if report.get("persisted_cover_header_safe"):
                 print("    [检查] 已将 cover-header-safe 样式回写到 HTML 文件")
+            if report.get("persisted_cover_chain_safe"):
+                print("    [检查] 已将 cover-chain-safe 样式回写到 HTML 文件")
+            if report.get("persisted_cover_sequence_fix"):
+                print("    [检查] 已将封面序号感文案回写到 HTML 文件")
             if report.get("persisted_summary_safe"):
                 print("    [检查] 已将 summary-safe 样式回写到 HTML 文件")
             if report.get("persisted_conclusion_safe"):

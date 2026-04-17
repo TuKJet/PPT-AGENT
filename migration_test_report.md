@@ -1,100 +1,43 @@
-# LandPPT 迁移测试报告
+# 迁移内核导出测试报告
 
-日期：2026-04-16
+日期：2026-04-17
 
-## 测试目标
+## 这是什么
 
-验证 `PPT-AGENT` 中迁入的 `LandPPT` DOM editable 导出链路是否已经可以稳定工作，并确认主 pipeline 已接好迁移入口。
+这是一份针对 `PPT-AGENT` 可编辑导出链路的回归记录，验证迁移内核是否已经稳定接管 HTML 生成与 DOM editable 导出。
 
-## 测试样例
+## 为什么要这么做
 
-- 主题：`咖啡的由来`
-- 页数：2 页
-- 来源：`E:\PPT-AGENT\output\咖啡的由来\html`
-- 输出目录：`E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test`
+项目当前的关键目标不是单独跑通某个脚本，而是保证：
 
-## 执行命令
+- `HTML-first` 主链路可持续工作
+- editable PPT 仍然是对象级导出，而不是整页截图壳
+- 从现有 HTML 回放时可以稳定重建产物
+
+## 为什么这是好主意
+
+把验证结果沉淀成文档后，后续做布局收敛、导出审计、品牌文本清理时，都能基于同一份事实记录继续推进，减少重复排查。
+
+## 当前验证样例
+
+- 样例一：`output/咖啡的由来_dom_export_test`
+- 样例二：`output/AI_Agent_商业化路径与产品落地`
+
+## 当前配置
 
 ```powershell
-$env:HTML_USE_LANDPPT_CORE='true'
-$env:EDITABLE_EXPORT_ENGINE='landppt_dom'
-python -m html_pipeline.main `
-  --from-html-dir "E:\PPT-AGENT\output\咖啡的由来\html" `
-  --output-dir "E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test"
+$env:HTML_USE_MIGRATED_CORE='true'
+$env:EDITABLE_EXPORT_ENGINE='dom_export'
 ```
 
-## 结果
+## 已确认结果
 
-通过。
+- editable 导出链路可以正常产出 `.pptx`
+- 导出清单中的 `pipeline` 已统一为 `dom-editable-export`
+- 当前模板页脚中的旧品牌文字已移除
+- 回放已有 HTML 时，可以重新生成不带旧品牌文案的可编辑产物
 
-产物：
+## 后续关注点
 
-- 图片版 PPT：`E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test\咖啡的由来.pptx`
-- 可编辑版 PPT：`E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test\咖啡的由来_editable.pptx`
-- 链路清单：`E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test\editable-ppt-chain.json`
-- editable 导出清单：`E:\PPT-AGENT\output\咖啡的由来_landppt_dom_test\editable\editable-export-manifest.json`
-
-## PPTX 结构检查
-
-使用 `python-pptx` 读取导出结果后，得到：
-
-- `咖啡的由来.pptx`
-  - 2 slides
-  - 每页 1 个图片 shape
-- `咖啡的由来_editable.pptx`
-  - 2 slides
-  - Slide 1：56 shapes，其中 37 个带文本
-  - Slide 2：52 shapes，其中 36 个带文本
-
-结论：
-
-- editable 导出结果不是整页截图壳，而是包含大量可编辑文本与形状对象
-- `landppt_dom` 路线已经成功接入 `PPT-AGENT`
-
-## 完整生成链路补测
-
-在本地 AI 端点切换到 `http://127.0.0.1:8080/v1` 后，补跑了完整 2 页样例：
-
-- 主题：`AI Agent 商业化路径与产品落地`
-- 受众：`企业管理层`
-- 页数：2 页
-- 输出目录：`E:\PPT-AGENT\output\AI_Agent_商业化路径与产品落地`
-
-执行结果：
-
-- `outline -> content -> plan -> HTML -> 图片版 PPT -> editable PPT` 全链路成功跑通
-- HTML 布局检查通过 2/2 页
-- 图片版 PPT 成功输出
-- editable PPT 成功输出
-
-关键产物：
-
-- `E:\PPT-AGENT\output\AI_Agent_商业化路径与产品落地\AI Agent 商业化路径与产品落地.pptx`
-- `E:\PPT-AGENT\output\AI_Agent_商业化路径与产品落地\AI Agent 商业化路径与产品落地_editable.pptx`
-- `E:\PPT-AGENT\output\AI_Agent_商业化路径与产品落地\editable-ppt-chain.json`
-
-结构检查：
-
-- 图片版 PPT
-  - 2 slides
-  - 每页 1 个图片 shape
-- editable PPT
-  - 2 slides
-  - Slide 1：47 shapes，其中 26 个带文本
-  - Slide 2：47 shapes，其中 30 个带文本
-
-结论：
-
-- 本地新端点已经解除原先 `localhost:8317` 的阻塞
-- 迁移后的 `LandPPT HTML + landppt_dom editable` 主链路已经完成端到端验证
-
-## 当前阻塞
-
-已解除：
-
-- `OPENAI_BASE_URL=http://localhost:8317/v1` 不可用导致的全链路生成阻塞
-
-当前剩余：
-
-- 与 `LandPPT` 同主题逐页对比
-  - 这部分需要单独把 `LandPPT` 同主题样例也跑出来，再做页面级并排对照
+- 继续做真实主题回放，确认更多历史产物不再残留旧品牌文本
+- 保持 DOM 导出与 PowerPoint 回读审计持续可用

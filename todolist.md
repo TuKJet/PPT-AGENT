@@ -1,149 +1,45 @@
 # 当前 Todo
 
-> 当前目标：在不改动 `LandPPT` 的前提下，把 `LandPPT` 的设计层、HTML 生成层、DOM 导出层迁入 `PPT-AGENT`，让 `PPT-AGENT` 的结果尽量向 `LandPPT` 对齐，同时保留旧链路 fallback。
+> 当前目标：保持 `PPT-AGENT` 的 HTML 生成与 editable 导出链路稳定，同时把仓库内旧品牌文本与旧产物标识清理干净。
 
 ## 已确认策略
 
-- [x] 采用“单向迁移到 `PPT-AGENT`”而不是“双项目公共模块抽取”
-  - 这是什么：把 `LandPPT` 的核心逻辑和实现搬进 `PPT-AGENT`，`LandPPT` 保持无改动。
-  - 为什么要这么做：目标是让两边效果尽量一致，不是优先追求模块抽象优雅。
-  - 为什么这是好主意：可以最大化复用 `LandPPT` 的 prompt、模板、style genes、图片规划和 DOM export 能力，同时不影响 `LandPPT` 现有链路。
-- [x] 明确迁移范围是“三层一起迁”
-  - 这是什么：设计层 + HTML 生成层 + DOM 导出层一并迁入。
-  - 为什么要这么做：只搬设计层无法保证最终 HTML 和 editable PPT 仍然同源。
-  - 为什么这是好主意：只有三层共源，`PPT-AGENT` 才有机会同时在美观度和可编辑性上贴近 `LandPPT`。
+- [x] 采用仓库内自洽的迁移内核命名
+  - 这是什么：把内部包名、配置名、导出标识统一改成中性命名。
+  - 为什么要这么做：只清理注释和页脚不够，`rg` 仍会留下大量旧文本。
+  - 为什么这是好主意：内部和外部命名一致后，后续维护成本更低。
+- [x] 先清理可见文本，再回放已有产物
+  - 这是什么：优先处理模板页脚、manifest、文档和输出目录中的旧品牌文案。
+  - 为什么要这么做：这些内容最容易直接暴露到用户侧。
+  - 为什么这是好主意：可以在不扩大行为风险的前提下，最快看到结果。
 
 ## 已完成
 
-### Phase 0：迁移骨架
+- [x] 将迁移内核目录改为 `vendor_presentation_core/`
+- [x] 将核心配置改为 `HTML_USE_MIGRATED_CORE`
+- [x] 将 editable 默认导出引擎改为 `dom_export`
+- [x] 将导出 manifest 中的 `pipeline` 统一改为 `dom-editable-export`
+- [x] 清理模板页脚中的旧品牌文字
+- [x] 清理注释、README、测试报告和架构文档中的旧品牌文字
+- [x] 开始回放并更新历史产物
+- [x] 将 `LandPPT` 的 stable export container 迁入服务端 `DOM -> editable PPTX` 导出器
+  - 这是什么：在导出前把 iframe 内的 live DOM 固化成稳定容器，再执行 `dom-to-pptx`。
+  - 为什么要这么做：直接拿 live DOM 导出时，字体回流、viewport scale、背景图与 canvas 更容易在 PowerPoint 里产生版式漂移。
+  - 为什么这是好主意：这层修正不绑定某一页死数据，后续高密度 HTML 页导出 editable 时会更稳。
+- [x] 将付费 `pdf_export` 链路降级出主流程
+  - 这是什么：CLI、pipeline 和示例配置不再暴露 `pdf_export`，历史参数会自动回退到开源 `dom_export`。
+  - 为什么要这么做：既然项目当前明确只考虑开源方案，就不能再让付费导出能力卡住主链或误导后续使用。
+  - 为什么这是好主意：保留现有开源可编辑导出能力，同时把复杂度和商业依赖都压回可控范围，后续优化可以集中在页序、对齐和局部重叠这些真实问题上。
+- [x] 物理清理未引用的付费导出实现
+  - 这是什么：删除 `vendor_presentation_core/export/pdf_pptx_exporter.py` 和 `vendor_presentation_core/export/pdf_to_pptx_converter.py` 两份未接线文件。
+  - 为什么要这么做：只停用入口还不够，仓库里继续留着付费导出实现会干扰后续维护判断。
+  - 为什么这是好主意：代码基线更干净，后面谁来接手都不会再被“是不是还有一条 PDF 高保真主链”这类假线索带偏。
+- [x] 修复 editable PPT 的整页背景氛围层偏白问题
+  - 这是什么：在 `dom_export` 产物生成后，识别并替换那张整页背景 picture，改为基于原 HTML 渲染的 `background-only PNG`。
+  - 为什么要这么做：问题根因不是正文元素缺失，而是可编辑导出把页面背景 ambience layer 导浅了，导致视觉上像“背景没了”。
+  - 为什么这是好主意：这类背景层本来就不需要后续逐元素编辑，单独回写成一张正确的背景图，能最大化保真，同时不影响正文和卡片的可编辑性。
 
-- [x] 建立 `vendor_landppt/` 目录
-- [x] 建立迁移说明文档
-  - 文件：`vendor_landppt/README.md`
-- [x] 建立本地适配层目录
-  - 文件：`adapters/template_repository.py`
-  - 文件：`adapters/asset_repository.py`
+## 待确认
 
-### Phase 1：Prompt 与设计内核
-
-- [x] 迁移 `LandPPT` prompts 资源
-  - 目录：`vendor_landppt/prompts/`
-- [x] 迁移 `style genes` 提取逻辑
-  - 文件：`vendor_landppt/design_engine.py`
-- [x] 迁移 `unified design guide` 生成逻辑
-  - 文件：`vendor_landppt/design_engine.py`
-- [x] 迁移模板生成与模板 HTML 校验逻辑
-  - 文件：`vendor_landppt/design_engine.py`
-- [x] 在 `PPT-AGENT` 中实现本地模板仓库
-  - 文件：`adapters/template_repository.py`
-  - 文件：`vendor_landppt/templates/templates.json`
-
-### Phase 2：图片规划与素材决策
-
-- [x] 迁移图片需求分析逻辑
-  - 文件：`vendor_landppt/image_engine.py`
-- [x] 迁移图片相关模型
-  - 文件：`vendor_landppt/models.py`
-- [x] 实现图片服务本地适配层
-  - 文件：`adapters/asset_repository.py`
-- [x] 把图片规划结果接入 HTML 生成链路
-  - 文件：`vendor_landppt/html_generation_service.py`
-
-### Phase 3：HTML 生成内核
-
-- [x] 新建 `LandPPT` 风格单页 HTML 生成服务
-  - 文件：`vendor_landppt/html_generation_service.py`
-- [x] 迁移关键 prompt 组装逻辑
-  - 文件：`vendor_landppt/html_generation_service.py`
-  - 文件：`vendor_landppt/prompts/`
-- [x] 接管现有 `step4_html()` 的主生成入口
-  - 文件：`html_pipeline/pipeline.py`
-- [x] 保留旧 HTML 链路作为 fallback
-  - 文件：`html_pipeline/pipeline.py`
-
-### Phase 4：DOM 导出内核
-
-- [x] 迁入 `dom-to-pptx.bundle.js`
-  - 文件：`vendor_landppt/export/dom-to-pptx.bundle.js`
-- [x] 实现 headless DOM 导出 runner
-  - 文件：`vendor_landppt/export/dom_pptx_exporter.py`
-- [x] 在 `PPT-AGENT` 适配 DOM 导出输入协议
-  - 文件：`vendor_landppt/export/dom_pptx_exporter.py`
-- [x] 保留当前 `editable_ppt_poc.py` 作为 fallback
-  - 文件：`html_pipeline/pipeline.py`
-
-### Phase 5：链路集成
-
-- [x] 将“设计层 + 图片层 + HTML 生成层”接入现有 `html_pipeline`
-  - 文件：`html_pipeline/pipeline.py`
-- [x] 将 editable 默认导出切换为 DOM 导出链路
-  - 配置：`config.py`
-  - 调度：`html_pipeline/pipeline.py`
-- [x] 补充迁移配置开关
-  - 配置：`HTML_USE_LANDPPT_CORE`
-  - 配置：`EDITABLE_EXPORT_ENGINE`
-- [x] 统一第一版中间产物结构
-  - 文件：`editable-ppt-chain.json`
-  - 文件：`editable/editable-export-manifest.json`
-  - 文件：`editable/previews/html-source-xx.png`
-  - 文件：`editable/previews/editable-preview-xx.png`
-- [x] 增加一致性审查所需的双预览产物
-  - 当前已保留 HTML source preview 与 editable preview
-  - 备注：当前 `editable-preview` 仍以 DOM source 为基准，还不是 Office 实际回读渲染图
-
-### Phase 6：验证与收尾
-
-- [x] 固定一组 2 页样例用于迁移 smoke test
-  - 主题：`咖啡的由来`
-  - 来源：`output/咖啡的由来/html`
-- [x] 跑通 DOM editable re-export 链路
-  - 输出目录：`output/咖啡的由来_landppt_dom_test`
-- [x] 验证 editable PPT 不是截图壳
-  - 检查方式：`python-pptx`
-  - 结果：2 slides；第 1 页 56 shapes / 37 text shapes；第 2 页 52 shapes / 36 text shapes
-- [x] 记录迁移测试结论与当前阻塞
-  - 文件：`migration_test_report.md`
-
-## 当前阻塞
-
-- [x] 跑通“topic -> outline -> content -> plan -> LandPPT HTML -> editable PPT”完整 AI 生成链路
-  - 样例：`output/AI_Agent_商业化路径与产品落地`
-  - 结果：2 页 HTML、图片版 PPT、editable PPT 全部成功输出
-- [ ] 使用同主题逐页对比 `LandPPT` 与 `PPT-AGENT` 输出
-  - 当前状态：`PPT-AGENT` 一侧已可完整生成；还需单独运行 `LandPPT` 同主题样例做页面级并排对比
-
-## 完成标准
-
-- [x] `PPT-AGENT` 已接入迁入后的 `LandPPT` 设计与 HTML 生成入口
-- [x] `PPT-AGENT` 的 editable 默认导出链路已切换到 `landppt_dom`
-- [x] 已有至少一组样例完成 editable DOM 导出与可编辑结构验证
-- [x] 已有至少一组样例完成完整 AI 生成到 editable PPT 的端到端验证
-- [x] `LandPPT` 项目代码保持无改动
-
-## 备注
-
-- 历史参考文档：`p0_editable_architecture.md`
-- 迁移说明：`vendor_landppt/README.md`
-- 测试报告：`migration_test_report.md`
-- 当前结论：
-  - 代码层迁移与接线已完成
-  - DOM editable 导出已实测跑通
-  - 完整 AI 生成链路在 `127.0.0.1:8080` 端点下已跑通
-  - 当前只剩 `LandPPT` 同主题逐页对照这一项增强验证
-## 2026-04-16 视觉增强补充
-
-- [x] 放开 `design_prompts.py` 的图片 / 抽象图形提示触发条件
-- [x] 在 `html_generation_service.py` 为 cover / toc / summary 追加 richer composition 与 corner cluster 约束
-- [x] 在 `signal_dark_master.html` 把右上角升级为 `corner-cluster` 母版结构
-- [x] 在 `dom_pptx_exporter.py` 稳定 header 右侧 tail/tag/chip 的宽度与对齐
-- [x] 用 1-2 页真实主题重新生成并复核观感
-- [x] 在 `html_builder.py` 增加 `cover-header-safe`，让封面页左上标题在贴近上边时自动下沉约 6px
-- [x] 在 `dom_pptx_exporter.py` 增加 PPTX 结构审计与自动 fallback，避免 DOM editable 导出退化成近似截图壳时仍被判为通过
-- [x] 在 `dom_pptx_exporter.py` 接入 PowerPoint 实际回读预览与视觉审计，并在 `powerpoint_preview_renderer.py` 处理中文路径下的 COM 导出兼容
-  - 这是什么：把 `editable-preview` 从 DOM source 升级为 PowerPoint 实际导出图，并记录 `readback_mean_pixel_delta / readback_dhash_distance`
-  - 为什么要这么做：仅靠 PPTX 结构审计能挡住“截图壳”，但还抓不到字体重排、局部漂移这类真实 Office 渲染偏差
-  - 为什么这是好主意：现在 `PPT-AGENT` 的 editable 验收从“结构像可编辑”进化到了“结构过关 + Office 回读也像原页”，闭环更接近 LandPPT
-- [x] 在 `dom_pptx_exporter.py` 增加 `root backdrop` 导出兜底，修正 cover 页 `body` 级复杂背景在 PowerPoint 回读里丢失的问题
-  - 这是什么：导出前把 `body/html` 的复杂背景收敛成可渲染的全页 backdrop layer，并补两侧 glow blob 近似原始 radial ambiance
-  - 为什么要这么做：先前封面页在 Office 回读里只剩内层卡片，整页深色氛围背景没有被导出，导致 `cover` 被判 `warn`
-  - 为什么这是好主意：这是对导出层的稳定化，不依赖 prompt 碰运气；当前 `PPT-AGENT` 全链路 2 页 smoke run 已回到 `pass: 2 / warn: 0 / fail: 0`
+- [ ] 继续扩大历史产物扫描范围，确认 `.pptx` 压缩包内部也没有残留旧品牌文本
+- [ ] 视结果决定是否还需要继续清理更深层的历史缓存或外部引用

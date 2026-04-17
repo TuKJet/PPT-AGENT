@@ -31,11 +31,11 @@ class TemplateRecord:
 
 
 class LocalTemplateRepository:
-    """File-backed replacement for LandPPT's database template repository."""
+    """File-backed replacement for the migrated template repository."""
 
     def __init__(self, base_dir: Path | None = None):
         root = Path(__file__).resolve().parent.parent
-        self.base_dir = base_dir or (root / "vendor_landppt" / "templates")
+        self.base_dir = base_dir or (root / "vendor_presentation_core" / "templates")
         self.catalog_path = self.base_dir / "templates.json"
 
     def _load_catalog(self) -> list[dict[str, Any]]:
@@ -136,4 +136,3 @@ class LocalTemplateRepository:
             is_default=False,
             is_active=True,
         )
-
