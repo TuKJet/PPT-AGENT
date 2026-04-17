@@ -9,11 +9,20 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageChops, ImageFilter, ImageStat
 from playwright.sync_api import sync_playwright
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from html_pipeline.html_builder import render_html_screenshot, write_slide_status
+from vendor_landppt.export.powerpoint_preview_renderer import (
+    detect_powerpoint_render_support,
+    export_powerpoint_slide_previews,
+)
+
+
+_STATUS_PRIORITY = {"pass": 0, "warn": 1, "fail": 2}
+_RESAMPLE_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
 
 def _utc_now_iso() -> str:
@@ -69,6 +78,252 @@ def _iter_shapes(shapes) -> Any:
 def _shape_text(shape) -> str:
     raw_text = getattr(shape, "text", "") or ""
     return re.sub(r"\s+", " ", raw_text).strip()
+
+
+def _merge_status(*statuses: str | None) -> str:
+    merged = "pass"
+    for status in statuses:
+        if status is None:
+            continue
+        if _STATUS_PRIORITY.get(status, 0) > _STATUS_PRIORITY.get(merged, 0):
+            merged = status
+    return merged
+
+
+def _compute_dhash(image: Image.Image, size: int = 8) -> int:
+    grayscale = image.convert("L").resize((size + 1, size), _RESAMPLE_LANCZOS)
+    pixels = grayscale.load()
+    digest = 0
+    for row in range(size):
+        for col in range(size):
+            digest <<= 1
+            digest |= 1 if pixels[col, row] > pixels[col + 1, row] else 0
+    return digest
+
+
+def _hamming_distance(left: int, right: int) -> int:
+    return (left ^ right).bit_count()
+
+
+def _compare_preview_images(source_png: Path, preview_png: Path) -> dict[str, Any]:
+    with Image.open(source_png) as source_image, Image.open(preview_png) as preview_image:
+        source_rgb = source_image.convert("RGB")
+        preview_rgb = preview_image.convert("RGB")
+        if preview_rgb.size != source_rgb.size:
+            preview_rgb = preview_rgb.resize(source_rgb.size, _RESAMPLE_LANCZOS)
+
+        compare_size = (320, 180)
+        source_compare = source_rgb.resize(compare_size, _RESAMPLE_LANCZOS).filter(
+            ImageFilter.GaussianBlur(1.2)
+        )
+        preview_compare = preview_rgb.resize(compare_size, _RESAMPLE_LANCZOS).filter(
+            ImageFilter.GaussianBlur(1.2)
+        )
+        diff = ImageChops.difference(source_compare, preview_compare)
+        stat = ImageStat.Stat(diff)
+        mean_pixel_delta = sum(stat.mean) / (len(stat.mean) * 255.0)
+        dhash_distance = _hamming_distance(
+            _compute_dhash(source_compare),
+            _compute_dhash(preview_compare),
+        )
+
+    reasons: list[str] = []
+    if mean_pixel_delta >= 0.14 or (dhash_distance >= 20 and mean_pixel_delta >= 0.05):
+        reasons.append(
+            "powerpoint readback diverges visually "
+            f"(dhash={dhash_distance}, mean_delta={mean_pixel_delta:.4f})"
+        )
+        status = "fail"
+    elif dhash_distance >= 15 or mean_pixel_delta >= 0.09:
+        reasons.append(
+            "powerpoint readback shows noticeable drift "
+            f"(dhash={dhash_distance}, mean_delta={mean_pixel_delta:.4f})"
+        )
+        status = "warn"
+    else:
+        status = "pass"
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "mean_pixel_delta": round(mean_pixel_delta, 4),
+        "dhash_distance": dhash_distance,
+    }
+
+
+def _ensure_dom_preview_fallback(slides: list[dict[str, Any]]) -> None:
+    for slide in slides:
+        source_path = Path(slide["html_preview_png_path"])
+        preview_path = Path(slide["preview_png_path"])
+        if preview_path.exists():
+            continue
+        preview_path.write_bytes(source_path.read_bytes())
+
+
+def _render_powerpoint_readback_previews(
+    ppt_path: Path,
+    preview_dir: Path,
+    slides: list[dict[str, Any]],
+) -> dict[str, Any]:
+    support = detect_powerpoint_render_support()
+    if not support["available"]:
+        return {
+            "available": False,
+            "engine": None,
+            "reason": support["reason"],
+            "binary_path": support["binary_path"],
+            "used_ascii_workspace": False,
+            "slides": [],
+            "summary": None,
+            "failures": [],
+        }
+
+    try:
+        render_result = export_powerpoint_slide_previews(
+            ppt_path=ppt_path,
+            out_dir=preview_dir,
+            slide_count=len(slides),
+            prefix="editable-preview",
+        )
+    except Exception as exc:
+        return {
+            "available": False,
+            "engine": support["engine"],
+            "reason": str(exc),
+            "binary_path": support["binary_path"],
+            "used_ascii_workspace": False,
+            "slides": [],
+            "summary": None,
+            "failures": [],
+        }
+
+    results: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for index, slide in enumerate(slides, start=1):
+        preview_path = Path(slide["preview_png_path"])
+        if not preview_path.exists():
+            result = {
+                "index": index,
+                "status": "fail",
+                "reasons": ["PowerPoint readback preview missing"],
+                "mean_pixel_delta": None,
+                "dhash_distance": None,
+                "preview_png_path": str(preview_path),
+            }
+        else:
+            comparison = _compare_preview_images(
+                Path(slide["html_preview_png_path"]),
+                preview_path,
+            )
+            result = {
+                "index": index,
+                "status": comparison["status"],
+                "reasons": comparison["reasons"],
+                "mean_pixel_delta": comparison["mean_pixel_delta"],
+                "dhash_distance": comparison["dhash_distance"],
+                "preview_png_path": str(preview_path),
+            }
+        results.append(result)
+        if result["status"] == "fail":
+            failures.append(
+                f"slide {index:02d}: " + "; ".join(result["reasons"] or ["PowerPoint readback audit failed"])
+            )
+
+    summary = {
+        "pass": sum(1 for item in results if item["status"] == "pass"),
+        "warn": sum(1 for item in results if item["status"] == "warn"),
+        "fail": sum(1 for item in results if item["status"] == "fail"),
+    }
+    return {
+        "available": True,
+        "engine": render_result["engine"],
+        "reason": None,
+        "binary_path": render_result["binary_path"],
+        "used_ascii_workspace": render_result["used_ascii_workspace"],
+        "slides": results,
+        "summary": summary,
+        "failures": failures,
+    }
+
+
+def _merge_audit_results(
+    structure_audit: dict[str, Any],
+    readback_audit: dict[str, Any],
+) -> dict[str, Any]:
+    readback_by_index = {
+        int(item["index"]): item for item in readback_audit.get("slides", []) if "index" in item
+    }
+    results: list[dict[str, Any]] = []
+    failures = list(structure_audit.get("failures", []))
+    readback_available = bool(readback_audit.get("available"))
+    audit_basis = "pptx-structure+powerpoint-readback" if readback_available else "pptx-structure"
+    preview_basis = "powerpoint-readback" if readback_available else "dom-source"
+
+    for slide_result in structure_audit["slides"]:
+        index = int(slide_result["index"])
+        readback_result = readback_by_index.get(index)
+        combined_reasons = list(slide_result["reasons"])
+        combined_status = slide_result["status"]
+        readback_status = "skipped"
+        readback_reasons: list[str] = []
+        readback_mean_pixel_delta = None
+        readback_dhash_distance = None
+        preview_png_path = None
+
+        if readback_result:
+            combined_status = _merge_status(combined_status, readback_result["status"])
+            combined_reasons.extend(readback_result["reasons"])
+            readback_status = readback_result["status"]
+            readback_reasons = list(readback_result["reasons"])
+            readback_mean_pixel_delta = readback_result.get("mean_pixel_delta")
+            readback_dhash_distance = readback_result.get("dhash_distance")
+            preview_png_path = readback_result.get("preview_png_path")
+
+        merged = {
+            **slide_result,
+            "status": combined_status,
+            "reasons": combined_reasons,
+            "structure_status": slide_result["status"],
+            "structure_reasons": list(slide_result["reasons"]),
+            "readback_status": readback_status,
+            "readback_reasons": readback_reasons,
+            "readback_mean_pixel_delta": readback_mean_pixel_delta,
+            "readback_dhash_distance": readback_dhash_distance,
+            "preview_png_path": preview_png_path,
+            "preview_basis": preview_basis,
+            "audit_basis": audit_basis,
+            "readback_available": readback_available,
+            "readback_error": readback_audit.get("reason"),
+            "preview_engine": readback_audit.get("engine"),
+            "powerpoint_binary_path": readback_audit.get("binary_path"),
+            "powerpoint_used_ascii_workspace": readback_audit.get("used_ascii_workspace", False),
+        }
+        results.append(merged)
+        if merged["status"] == "fail" and not any(
+            failure.startswith(f"slide {index:02d}") for failure in failures
+        ):
+            failures.append(
+                f"slide {index:02d} {merged['title']}: " + "; ".join(merged["reasons"] or ["audit failed"])
+            )
+
+    summary = {
+        "pass": sum(1 for item in results if item["status"] == "pass"),
+        "warn": sum(1 for item in results if item["status"] == "warn"),
+        "fail": sum(1 for item in results if item["status"] == "fail"),
+    }
+    return {
+        "slides": results,
+        "failures": failures,
+        "summary": summary,
+        "preview_basis": preview_basis,
+        "audit_basis": audit_basis,
+        "readback_available": readback_available,
+        "readback_reason": readback_audit.get("reason"),
+        "readback_summary": readback_audit.get("summary"),
+        "preview_engine": readback_audit.get("engine"),
+        "powerpoint_binary_path": readback_audit.get("binary_path"),
+        "powerpoint_used_ascii_workspace": readback_audit.get("used_ascii_workspace", False),
+    }
 
 
 def _audit_exported_pptx(ppt_path: Path, slides: list[dict[str, Any]]) -> dict[str, Any]:
@@ -176,20 +431,33 @@ def _write_dom_review(out_dir: Path, slide_result: dict[str, Any], html_path: Pa
         "",
         "## Reasons",
     ]
-    lines.extend([f"- {item}" for item in slide_result["reasons"]] or ["- DOM export passed pptx structure audit"])
+    lines.extend([f"- {item}" for item in slide_result["reasons"]] or ["- DOM export passed all enabled audits"])
     lines.extend(
         [
+            "",
+            "## Audit Layers",
+            f"- structure_status: {slide_result['structure_status']}",
+            f"- readback_status: {slide_result['readback_status']}",
+            f"- preview_basis: {slide_result['preview_basis']}",
+            f"- audit_basis: {slide_result['audit_basis']}",
             "",
             "## Metrics",
             f"- shape_count: {slide_result['shape_count']}",
             f"- text_shape_count: {slide_result['text_shape_count']}",
             f"- picture_shape_count: {slide_result['picture_shape_count']}",
             f"- html_text_node_count: {slide_result['html_text_node_count']}",
+            f"- readback_mean_pixel_delta: {slide_result.get('readback_mean_pixel_delta')}",
+            f"- readback_dhash_distance: {slide_result.get('readback_dhash_distance')}",
             "",
             "## HTML Text Samples",
         ]
     )
     lines.extend([f"- {item}" for item in slide_result["html_text_samples"]] or ["- no sampled text nodes"])
+    if slide_result.get("readback_reasons"):
+        lines.extend(["", "## Readback Notes"])
+        lines.extend([f"- {item}" for item in slide_result["readback_reasons"]])
+    elif slide_result.get("readback_error"):
+        lines.extend(["", "## Readback Notes", f"- {slide_result['readback_error']}"])
     review_path.write_text("\n".join(lines), encoding="utf-8")
     return review_path
 
@@ -418,7 +686,6 @@ def build_dom_editable_deck_from_html(
         source_png = preview_dir / f"html-source-{idx:02d}.png"
         source_png.write_bytes(render_html_screenshot(html_path))
         dom_preview_png = preview_dir / f"editable-preview-{idx:02d}.png"
-        dom_preview_png.write_bytes(source_png.read_bytes())
         slides.append(
             {
                 "index": idx,
@@ -435,7 +702,20 @@ def build_dom_editable_deck_from_html(
     deck_stem = (deck_name or html_dir.parent.name)[:30]
     ppt_path = out_dir.parent / f"{deck_stem}_editable.pptx"
     DomPptxExporter().export_slides(slides, ppt_path)
-    audit = _audit_exported_pptx(ppt_path, slides)
+    structure_audit = _audit_exported_pptx(ppt_path, slides)
+    if structure_audit["failures"]:
+        ppt_path.unlink(missing_ok=True)
+        raise RuntimeError("DOM editable export audit failed: " + " | ".join(structure_audit["failures"]))
+
+    readback_audit = _render_powerpoint_readback_previews(ppt_path, preview_dir, slides)
+    if not readback_audit["available"]:
+        _ensure_dom_preview_fallback(slides)
+        print(
+            "    [audit] PowerPoint readback preview unavailable, using DOM source preview: "
+            + str(readback_audit["reason"])
+        )
+
+    audit = _merge_audit_results(structure_audit, readback_audit)
     if audit["failures"]:
         ppt_path.unlink(missing_ok=True)
         raise RuntimeError("DOM editable export audit failed: " + " | ".join(audit["failures"]))
@@ -448,7 +728,14 @@ def build_dom_editable_deck_from_html(
         html_path = html_paths_by_index[idx]
         review_path = _write_dom_review(out_dir, slide_result, html_path)
         status_key = f"{idx:02d}"
-        validation_status = "dom-verified" if slide_result["status"] == "pass" else "dom-verified-warn"
+        if slide_result["readback_available"]:
+            validation_status = (
+                "dom-verified-office"
+                if slide_result["status"] == "pass"
+                else "dom-verified-office-warn"
+            )
+        else:
+            validation_status = "dom-verified" if slide_result["status"] == "pass" else "dom-verified-warn"
         review_status = "PASS" if slide_result["status"] == "pass" else "WARN"
         status_payload = {
             "title": slide_payload["title"],
@@ -458,15 +745,26 @@ def build_dom_editable_deck_from_html(
             "review_rounds": 0,
             "export_ready": True,
             "html_path": slide_payload["html_path"],
-            "preview_png_path": slide_payload["preview_png_path"],
+            "preview_png_path": slide_result["preview_png_path"] or slide_payload["preview_png_path"],
             "html_preview_png_path": slide_payload["html_preview_png_path"],
-            "preview_basis": "dom-source",
-            "audit_basis": "pptx-structure",
+            "preview_basis": slide_result["preview_basis"],
+            "audit_basis": slide_result["audit_basis"],
             "shape_count": slide_result["shape_count"],
             "text_shape_count": slide_result["text_shape_count"],
             "picture_shape_count": slide_result["picture_shape_count"],
             "html_text_node_count": slide_result["html_text_node_count"],
             "audit_reasons": slide_result["reasons"],
+            "structure_status": slide_result["structure_status"],
+            "structure_reasons": slide_result["structure_reasons"],
+            "readback_status": slide_result["readback_status"],
+            "readback_reasons": slide_result["readback_reasons"],
+            "readback_mean_pixel_delta": slide_result["readback_mean_pixel_delta"],
+            "readback_dhash_distance": slide_result["readback_dhash_distance"],
+            "readback_available": slide_result["readback_available"],
+            "readback_error": slide_result["readback_error"],
+            "preview_engine": slide_result["preview_engine"],
+            "powerpoint_binary_path": slide_result["powerpoint_binary_path"],
+            "powerpoint_used_ascii_workspace": slide_result["powerpoint_used_ascii_workspace"],
             "review_path": str(review_path),
         }
         slide_status[status_key] = status_payload
@@ -477,18 +775,29 @@ def build_dom_editable_deck_from_html(
                 "page_role": slide_payload["page_role"],
                 "html_path": slide_payload["html_path"],
                 "review_path": str(review_path),
-                "preview_png_path": slide_payload["preview_png_path"],
+                "preview_png_path": slide_result["preview_png_path"] or slide_payload["preview_png_path"],
                 "html_preview_png_path": slide_payload["html_preview_png_path"],
                 "export_ready": True,
                 "validation_status": validation_status,
                 "review_status": review_status,
-                "preview_basis": "dom-source",
-                "audit_basis": "pptx-structure",
+                "preview_basis": slide_result["preview_basis"],
+                "audit_basis": slide_result["audit_basis"],
                 "shape_count": slide_result["shape_count"],
                 "text_shape_count": slide_result["text_shape_count"],
                 "picture_shape_count": slide_result["picture_shape_count"],
                 "html_text_node_count": slide_result["html_text_node_count"],
                 "audit_reasons": slide_result["reasons"],
+                "structure_status": slide_result["structure_status"],
+                "structure_reasons": slide_result["structure_reasons"],
+                "readback_status": slide_result["readback_status"],
+                "readback_reasons": slide_result["readback_reasons"],
+                "readback_mean_pixel_delta": slide_result["readback_mean_pixel_delta"],
+                "readback_dhash_distance": slide_result["readback_dhash_distance"],
+                "readback_available": slide_result["readback_available"],
+                "readback_error": slide_result["readback_error"],
+                "preview_engine": slide_result["preview_engine"],
+                "powerpoint_binary_path": slide_result["powerpoint_binary_path"],
+                "powerpoint_used_ascii_workspace": slide_result["powerpoint_used_ascii_workspace"],
             }
         )
         if slide_result["status"] == "warn":
@@ -501,7 +810,7 @@ def build_dom_editable_deck_from_html(
     (out_dir / "editable-export-manifest.json").write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "generated_at": _utc_now_iso(),
                 "pipeline": "landppt-dom-export",
                 "source_of_truth": "html",
@@ -509,7 +818,18 @@ def build_dom_editable_deck_from_html(
                 "pptx_path": str(ppt_path),
                 "slide_status_path": str(out_dir / "slide-status.json"),
                 "preview_dir": str(preview_dir),
+                "preview_basis": audit["preview_basis"],
+                "audit_basis": audit["audit_basis"],
                 "audit_summary": audit["summary"],
+                "structure_audit_summary": structure_audit["summary"],
+                "readback_audit_summary": audit["readback_summary"],
+                "readback": {
+                    "available": audit["readback_available"],
+                    "engine": audit["preview_engine"],
+                    "reason": audit["readback_reason"],
+                    "binary_path": audit["powerpoint_binary_path"],
+                    "used_ascii_workspace": audit["powerpoint_used_ascii_workspace"],
+                },
                 "slides": manifest_slides,
             },
             ensure_ascii=False,

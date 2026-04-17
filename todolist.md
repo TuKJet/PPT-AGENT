@@ -139,3 +139,7 @@
 - [x] 用 1-2 页真实主题重新生成并复核观感
 - [x] 在 `html_builder.py` 增加 `cover-header-safe`，让封面页左上标题在贴近上边时自动下沉约 6px
 - [x] 在 `dom_pptx_exporter.py` 增加 PPTX 结构审计与自动 fallback，避免 DOM editable 导出退化成近似截图壳时仍被判为通过
+- [x] 在 `dom_pptx_exporter.py` 接入 PowerPoint 实际回读预览与视觉审计，并在 `powerpoint_preview_renderer.py` 处理中文路径下的 COM 导出兼容
+  - 这是什么：把 `editable-preview` 从 DOM source 升级为 PowerPoint 实际导出图，并记录 `readback_mean_pixel_delta / readback_dhash_distance`
+  - 为什么要这么做：仅靠 PPTX 结构审计能挡住“截图壳”，但还抓不到字体重排、局部漂移这类真实 Office 渲染偏差
+  - 为什么这是好主意：现在 `PPT-AGENT` 的 editable 验收从“结构像可编辑”进化到了“结构过关 + Office 回读也像原页”，闭环更接近 LandPPT
