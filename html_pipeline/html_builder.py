@@ -819,6 +819,244 @@ h1,
 """
 
 
+DUAL_PANEL_COVER_SAFE_STYLE = """
+.slide {
+  gap: 10px !important;
+  padding: 14px 16px 12px !important;
+  grid-template-rows: auto 1fr 74px !important;
+}
+.header {
+  min-height: 106px !important;
+  padding-bottom: 8px !important;
+}
+.title {
+  font-size: 27px !important;
+  line-height: 1.08 !important;
+}
+.subtitle {
+  font-size: 12px !important;
+  line-height: 1.18 !important;
+}
+.content {
+  grid-template-columns: 1.06fr 0.94fr !important;
+  gap: 14px !important;
+}
+.panel {
+  padding: 16px !important;
+  border-radius: 20px !important;
+}
+.hero-left {
+  display: grid !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+  justify-content: normal !important;
+  gap: 10px !important;
+  overflow: hidden !important;
+}
+.hero-right {
+  display: grid !important;
+  grid-template-rows: auto auto 1fr !important;
+  align-content: start !important;
+  gap: 8px !important;
+  overflow: hidden !important;
+}
+.hero-top {
+  grid-template-columns: minmax(0, 1fr) 180px !important;
+  gap: 10px !important;
+}
+.hero-kicker {
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+}
+.hero-headline {
+  margin: 10px 0 8px !important;
+  font-size: 23px !important;
+  line-height: 1.03 !important;
+}
+.hero-summary {
+  max-width: 100% !important;
+  font-size: 11px !important;
+  line-height: 1.32 !important;
+}
+.capability-stack {
+  gap: 6px !important;
+}
+.cap-chip {
+  gap: 6px !important;
+  padding: 7px 9px !important;
+  border-radius: 12px !important;
+  font-size: 10px !important;
+}
+.cap-chip strong,
+.cap-chip span {
+  font-size: 9px !important;
+  line-height: 1.1 !important;
+}
+.hero-mid {
+  margin-top: 0 !important;
+  gap: 7px !important;
+}
+.logic-card {
+  grid-template-columns: 68px 1fr !important;
+  gap: 9px !important;
+  padding: 9px 10px !important;
+  border-radius: 15px !important;
+}
+.logic-index {
+  height: 26px !important;
+  border-radius: 9px !important;
+  font-size: 9px !important;
+}
+.logic-title {
+  margin: 0 0 3px !important;
+  font-size: 13px !important;
+  line-height: 1.12 !important;
+}
+.logic-desc {
+  font-size: 10px !important;
+  line-height: 1.24 !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+}
+.hero-bottom {
+  padding-top: 0 !important;
+  gap: 6px !important;
+}
+.tag-row {
+  gap: 5px !important;
+  margin-top: 0 !important;
+}
+.tag {
+  padding: 4px 7px !important;
+  font-size: 9px !important;
+}
+.tag-row .tag:nth-child(n+4) {
+  display: none !important;
+}
+.decision-bar {
+  gap: 7px !important;
+  padding: 8px 9px !important;
+  border-radius: 13px !important;
+  align-items: flex-start !important;
+}
+.decision-label {
+  padding: 4px 7px !important;
+  font-size: 8px !important;
+}
+.decision-text {
+  font-size: 10px !important;
+  line-height: 1.22 !important;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2 !important;
+  -webkit-box-orient: vertical !important;
+  overflow: hidden !important;
+}
+.metrics-head {
+  gap: 8px !important;
+}
+.metrics-title {
+  font-size: 13px !important;
+  line-height: 1.1 !important;
+}
+.metrics-note {
+  padding: 4px 7px !important;
+  font-size: 9px !important;
+}
+.metrics-grid {
+  gap: 7px !important;
+}
+.metrics-grid .metric-card:nth-child(n+4) {
+  display: none !important;
+}
+.metric-card {
+  min-height: 82px !important;
+  padding: 9px 10px !important;
+  border-radius: 14px !important;
+}
+.metric-label {
+  font-size: 9px !important;
+}
+.metric-value {
+  margin: 5px 0 3px !important;
+  font-size: 22px !important;
+}
+.metric-desc {
+  font-size: 10px !important;
+  line-height: 1.22 !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+}
+.loop-box {
+  padding: 8px 9px !important;
+  border-radius: 16px !important;
+  gap: 4px !important;
+  min-height: 0 !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+}
+.loop-title {
+  font-size: 12px !important;
+  line-height: 1.08 !important;
+}
+.loop-sub {
+  margin-top: 1px !important;
+  font-size: 9px !important;
+  line-height: 1.14 !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 1 !important;
+  overflow: hidden !important;
+}
+.loop-graphic {
+  min-height: 58px !important;
+  height: 58px !important;
+}
+.core-ring {
+  width: 88px !important;
+  height: 88px !important;
+}
+.core-ring::before {
+  inset: 20px !important;
+  font-size: 9px !important;
+}
+.loop-node {
+  padding: 4px 6px !important;
+  font-size: 8px !important;
+}
+.node-top {
+  top: 0 !important;
+}
+.node-right {
+  right: -2px !important;
+}
+.node-bottom {
+  bottom: 0 !important;
+}
+.node-left {
+  left: -2px !important;
+}
+.support-row {
+  gap: 4px !important;
+}
+.support-chip {
+  padding: 3px 6px !important;
+  font-size: 8px !important;
+}
+.support-row .support-chip:nth-child(n+4) {
+  display: none !important;
+}
+.footer {
+  min-height: 74px !important;
+  height: 74px !important;
+  font-size: 11px !important;
+}
+"""
+
+
 INLINE_PANEL_SAFE_STYLE = """
 .panel {
   gap: 12px !important;
@@ -870,6 +1108,22 @@ COVER_HEADER_SAFE_STYLE = """
 
 
 COVER_CHAIN_SAFE_STYLE = """
+.main {
+  padding-bottom: 10px !important;
+}
+.side-card {
+  padding: 20px 20px !important;
+  gap: 12px !important;
+  justify-content: flex-start !important;
+}
+.side-top {
+  gap: 12px !important;
+  min-height: 0 !important;
+}
+.side-title {
+  font-size: 20px !important;
+  line-height: 1.18 !important;
+}
 .chain {
   gap: 10px !important;
 }
@@ -877,7 +1131,8 @@ COVER_CHAIN_SAFE_STYLE = """
   grid-template-columns: 44px minmax(0, 1fr) !important;
   align-items: center !important;
   gap: 12px !important;
-  min-height: 68px !important;
+  min-height: 62px !important;
+  padding: 10px 11px !important;
 }
 .num {
   align-self: center !important;
@@ -893,14 +1148,548 @@ COVER_CHAIN_SAFE_STYLE = """
 .chain-text span {
   display: block !important;
 }
+.chain-text strong {
+  font-size: 15px !important;
+  line-height: 1.24 !important;
+}
+.chain-text span {
+  font-size: 13px !important;
+  line-height: 1.38 !important;
+}
 .impact-box {
+  margin-top: 10px !important;
+  padding: 14px 16px !important;
   gap: 8px !important;
 }
 .impact-num {
-  font-size: 26px !important;
-  line-height: 1.05 !important;
+  font-size: 24px !important;
+  line-height: 1.02 !important;
+}
+.impact-text {
+  font-size: 13px !important;
+  line-height: 1.42 !important;
+}
+.tags {
+  gap: 6px !important;
+}
+.tag {
+  padding: 5px 9px !important;
+  font-size: 11px !important;
+  line-height: 1.1 !important;
+}
+.summary {
+  padding: 15px 18px !important;
+}
+.summary-text {
+  font-size: 17px !important;
+  line-height: 1.45 !important;
 }
 """
+
+
+SIGNAL_DARK_COVER_SAFE_STYLE = """
+.slide {
+  grid-template-rows: 96px 1fr 64px !important;
+  gap: 12px !important;
+  padding: 20px 22px 20px !important;
+}
+.header {
+  padding-bottom: 8px !important;
+}
+.title {
+  font-size: 32px !important;
+  line-height: 1.04 !important;
+}
+.subtitle {
+  margin-top: 4px !important;
+  font-size: 12px !important;
+  line-height: 1.28 !important;
+}
+.corner-cluster {
+  min-width: 166px !important;
+  gap: 6px !important;
+}
+.page-tag {
+  padding: 8px 12px !important;
+}
+.content {
+  min-height: 0 !important;
+}
+.hero-panel {
+  padding: 14px 16px 12px !important;
+  display: grid !important;
+  grid-template-rows: auto auto auto !important;
+  align-content: start !important;
+  row-gap: 10px !important;
+}
+.hero-top {
+  grid-template-columns: minmax(0, 1fr) 270px !important;
+  gap: 12px !important;
+}
+.hero-kicker {
+  margin-bottom: 8px !important;
+  font-size: 11px !important;
+}
+.thesis {
+  max-width: 590px !important;
+  font-size: 22px !important;
+  line-height: 1.20 !important;
+}
+.hero-note {
+  margin-top: 8px !important;
+  max-width: 560px !important;
+  font-size: 11px !important;
+  line-height: 1.34 !important;
+}
+.support-cluster {
+  padding: 12px 12px 10px !important;
+  border-radius: 18px !important;
+}
+.support-title {
+  margin-bottom: 8px !important;
+  font-size: 11px !important;
+}
+.metric-grid {
+  gap: 6px !important;
+}
+.metric-chip {
+  min-height: 52px !important;
+  padding: 8px !important;
+  border-radius: 14px !important;
+}
+.metric-value {
+  font-size: 20px !important;
+}
+.metric-label {
+  margin-top: 4px !important;
+  font-size: 9px !important;
+  line-height: 1.22 !important;
+}
+.flow-zone {
+  margin-top: 0 !important;
+  gap: 8px !important;
+  align-items: start !important;
+}
+.flow-card {
+  min-height: 0 !important;
+  padding: 10px 10px 8px !important;
+  border-radius: 16px !important;
+}
+.flow-card::after {
+  right: -8px !important;
+  width: 16px !important;
+}
+.flow-card:not(:last-child)::before {
+  right: -14px !important;
+}
+.icon-wrap {
+  width: 30px !important;
+  height: 30px !important;
+  margin-bottom: 8px !important;
+  border-radius: 12px !important;
+}
+.icon-wrap svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+.flow-title {
+  min-height: 30px !important;
+  margin-bottom: 4px !important;
+  font-size: 13px !important;
+  line-height: 1.18 !important;
+}
+.flow-desc {
+  min-height: auto !important;
+  margin: 0 0 8px !important;
+  font-size: 10px !important;
+  line-height: 1.28 !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+}
+.flow-badge {
+  padding: 5px 8px !important;
+  gap: 4px !important;
+  font-size: 9px !important;
+}
+.flow-badge .num {
+  font-size: 14px !important;
+}
+.flow-card .flow-badge:nth-of-type(n+2) {
+  display: none !important;
+}
+.bottom-band {
+  margin-top: 8px !important;
+  gap: 10px !important;
+  padding: 8px 12px !important;
+  border-radius: 16px !important;
+}
+.bottom-summary {
+  font-size: 12px !important;
+  line-height: 1.25 !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+}
+.capability-badges {
+  max-width: 280px !important;
+  gap: 5px !important;
+}
+.cap-badge {
+  padding: 5px 8px !important;
+  font-size: 9px !important;
+}
+.capability-badges .cap-badge:nth-child(n+3) {
+  display: none !important;
+}
+.orbit-line {
+  left: 62px !important;
+  right: 62px !important;
+  bottom: 64px !important;
+  height: 86px !important;
+}
+.signal-dots {
+  right: 30px !important;
+  bottom: 98px !important;
+}
+.footer {
+  min-height: 64px !important;
+  font-size: 11px !important;
+}
+"""
+
+
+SIGNAL_DARK_TOC_SAFE_STYLE = """
+.slide {
+  grid-template-rows: 100px 1fr 68px !important;
+  gap: 14px !important;
+  padding: 22px 24px 22px !important;
+}
+.header {
+  padding-bottom: 10px !important;
+}
+.title {
+  font-size: 34px !important;
+  line-height: 1.06 !important;
+}
+.subtitle {
+  margin-top: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.34 !important;
+}
+.content {
+  min-height: 0 !important;
+}
+.toc-stage {
+  gap: 12px !important;
+  padding: 2px 0 0 !important;
+}
+.intro-band {
+  min-height: 72px !important;
+  gap: 14px !important;
+}
+.intro-copy {
+  padding: 14px 16px !important;
+}
+.intro-title {
+  font-size: 14px !important;
+}
+.intro-text {
+  margin-top: 6px !important;
+  font-size: 12px !important;
+  line-height: 1.42 !important;
+}
+.intro-chips {
+  gap: 8px !important;
+}
+.flow-chip {
+  padding: 8px 12px !important;
+  font-size: 11px !important;
+}
+.toc-cards {
+  gap: 14px !important;
+}
+.toc-cards::after {
+  bottom: 22px !important;
+}
+.toc-card {
+  padding: 18px 16px 16px !important;
+}
+.card-index {
+  font-size: 34px !important;
+}
+.card-icon {
+  width: 38px !important;
+  height: 38px !important;
+}
+.card-part {
+  margin-top: 12px !important;
+  font-size: 11px !important;
+}
+.card-title {
+  min-height: 50px !important;
+  margin-top: 8px !important;
+  font-size: 20px !important;
+  line-height: 1.2 !important;
+}
+.card-desc {
+  min-height: 42px !important;
+  margin-top: 8px !important;
+  font-size: 12px !important;
+  line-height: 1.42 !important;
+}
+.keyword-group {
+  margin-top: 12px !important;
+  gap: 6px !important;
+}
+.keyword {
+  padding: 6px 8px !important;
+  font-size: 10px !important;
+}
+.keyword-group .keyword:nth-child(n+3) {
+  display: none !important;
+}
+.card-foot {
+  margin-top: 10px !important;
+  padding-top: 8px !important;
+  display: none !important;
+}
+.foot-label {
+  font-size: 11px !important;
+}
+.foot-arrow {
+  width: 28px !important;
+  height: 28px !important;
+}
+.support-strip {
+  min-height: 64px !important;
+  gap: 14px !important;
+}
+.summary-bar {
+  gap: 10px !important;
+  padding: 12px 14px !important;
+}
+.summary-copy strong {
+  font-size: 13px !important;
+}
+.summary-copy span {
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+}
+.mini-metrics {
+  padding: 12px 14px !important;
+  gap: 10px !important;
+}
+.metric-label,
+.metric-note {
+  font-size: 10px !important;
+  line-height: 1.28 !important;
+}
+.metric-value {
+  font-size: 22px !important;
+}
+.footer {
+  min-height: 68px !important;
+}
+"""
+
+
+SIGNAL_DARK_ENDING_SAFE_STYLE = """
+.slide {
+  grid-template-rows: 100px 1fr 70px !important;
+  gap: 14px !important;
+  padding: 22px 24px 22px !important;
+}
+.header {
+  padding-bottom: 10px !important;
+}
+.title {
+  font-size: 33px !important;
+  line-height: 1.06 !important;
+}
+.subtitle {
+  margin-top: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.34 !important;
+}
+.content {
+  gap: 12px !important;
+  min-height: 0 !important;
+}
+.logic-board {
+  grid-template-columns: 1fr 0.86fr 1.02fr !important;
+  gap: 12px !important;
+}
+.panel {
+  padding: 16px !important;
+}
+.section-label {
+  margin-bottom: 12px !important;
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+}
+.pain-list {
+  gap: 10px !important;
+}
+.pain-card,
+.value-item {
+  grid-template-columns: 38px 1fr !important;
+  gap: 10px !important;
+  padding: 11px 11px 10px !important;
+}
+.pain-icon,
+.value-icon {
+  width: 38px !important;
+  height: 38px !important;
+}
+.card-title {
+  margin: 1px 0 4px !important;
+  font-size: 16px !important;
+  line-height: 1.1 !important;
+}
+.card-desc,
+.value-item span {
+  font-size: 11px !important;
+  line-height: 1.32 !important;
+}
+.value-item strong {
+  margin: 2px 0 4px !important;
+  font-size: 15px !important;
+  line-height: 1.16 !important;
+}
+.core-badge {
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+}
+.core-visual {
+  margin-top: 14px !important;
+  height: 130px !important;
+}
+.ring-1 {
+  width: 140px !important;
+  height: 140px !important;
+}
+.ring-2 {
+  width: 104px !important;
+  height: 104px !important;
+}
+.ring-3 {
+  width: 68px !important;
+  height: 68px !important;
+}
+.node-a {
+  top: 18px !important;
+}
+.node-b {
+  right: 28px !important;
+}
+.node-c {
+  bottom: 18px !important;
+}
+.node-d {
+  left: 28px !important;
+}
+.core-center {
+  width: 100px !important;
+  height: 100px !important;
+  border-radius: 24px !important;
+}
+.core-center svg {
+  width: 28px !important;
+  height: 28px !important;
+  margin-bottom: 8px !important;
+}
+.core-name {
+  font-size: 14px !important;
+}
+.core-sub {
+  margin-top: 2px !important;
+  font-size: 10px !important;
+}
+.core-copy {
+  margin-top: 8px !important;
+}
+.core-headline {
+  font-size: 18px !important;
+  line-height: 1.2 !important;
+}
+.core-desc {
+  margin-top: 8px !important;
+  font-size: 11px !important;
+  line-height: 1.34 !important;
+}
+.chip-grid {
+  margin-top: 12px !important;
+  gap: 8px !important;
+}
+.impact-chip {
+  padding: 6px 10px !important;
+  font-size: 10px !important;
+}
+.chip-grid .impact-chip:nth-child(n+3) {
+  display: none !important;
+}
+.value-panel {
+  grid-template-rows: auto 1fr auto !important;
+  gap: 10px !important;
+}
+.value-list {
+  gap: 9px !important;
+}
+.priority-box {
+  padding: 12px 12px 10px !important;
+}
+.priority-title {
+  margin-bottom: 8px !important;
+  font-size: 13px !important;
+}
+.priority-chips {
+  gap: 6px !important;
+  margin-bottom: 8px !important;
+}
+.mini-chip {
+  padding: 6px 8px !important;
+  font-size: 10px !important;
+}
+.priority-chips .mini-chip:nth-child(n+3) {
+  display: none !important;
+}
+.priority-note {
+  font-size: 10px !important;
+  line-height: 1.3 !important;
+}
+.summary-strip {
+  min-height: 64px !important;
+  grid-template-columns: 156px 1fr auto !important;
+  gap: 12px !important;
+  padding: 12px 14px !important;
+}
+.summary-kicker {
+  padding: 10px 12px !important;
+  font-size: 11px !important;
+}
+.summary-text {
+  font-size: 20px !important;
+  line-height: 1.18 !important;
+}
+.summary-tags {
+  gap: 6px !important;
+}
+.summary-tag {
+  padding: 6px 8px !important;
+  font-size: 10px !important;
+}
+.summary-tags .summary-tag:nth-child(n+3) {
+  display: none !important;
+}
+.footer {
+  min-height: 70px !important;
+}
+"""
+
+
 
 
 def _inspect_html_layout(page) -> dict:
@@ -931,6 +1720,8 @@ def _inspect_html_layout(page) -> dict:
             };
           };
 
+          const normalizeText = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+
           const collectOverflow = () => {
             const items = [];
             for (const selector of overflowSelectors) {
@@ -947,12 +1738,35 @@ def _inspect_html_layout(page) -> dict:
                     clientHeight: ch,
                     scrollWidth: sw,
                     clientWidth: cw,
-                    text: (el.innerText || '').replace(/\\s+/g, ' ').slice(0, 80),
+                    text: normalizeText(el.innerText || '').slice(0, 80),
                   });
                 }
               });
             }
             return items;
+          };
+
+          const isDecorativeElement = (el) => {
+            if (!(el instanceof HTMLElement)) return true;
+            const text = normalizeText(el.innerText || '');
+            const classes = Array.from(el.classList || []).join(' ').toLowerCase();
+            const ariaHidden = (el.getAttribute('aria-hidden') || '').toLowerCase() === 'true';
+            const decorativeTokens = [
+              'ambient', 'orb', 'glow', 'ring', 'signal-node', 'corner-dot',
+              'corner-orbit', 'orbit-line', 'sr-only'
+            ];
+            const meaningfulHiddenTokens = ['icon', 'arrow', 'badge', 'page-tag'];
+            if (classes && decorativeTokens.some((token) => classes.includes(token))) {
+              return true;
+            }
+            if (ariaHidden && !text && !meaningfulHiddenTokens.some((token) => classes.includes(token))) {
+              return true;
+            }
+            const tag = el.tagName.toLowerCase();
+            if (!text && ['svg', 'path', 'circle'].includes(tag)) {
+              return true;
+            }
+            return false;
           };
 
           const collectChipCollisions = () => {
@@ -977,11 +1791,136 @@ def _inspect_html_layout(page) -> dict:
                     parentTag: parent.tagName.toLowerCase(),
                     index,
                     delta: Math.round(prevRect.bottom + 6 - rowRect.top),
-                    rowText: (child.innerText || '').replace(/\\s+/g, ' ').slice(0, 60),
+                    rowText: normalizeText(child.innerText || '').slice(0, 60),
                   });
                 }
               });
             }
+            return items;
+          };
+
+          const identifyNode = (el) => {
+            if (!el) return 'unknown';
+            const classes = Array.from(el.classList || []).filter(Boolean);
+            if (classes.length) {
+              return `.${classes.slice(0, 2).join('.')}`;
+            }
+            return el.tagName.toLowerCase();
+          };
+
+          const collectClippedDescendants = () => {
+            const items = [];
+            if (!slide) return items;
+            const slideRect = slide.getBoundingClientRect();
+            const seen = new Set();
+            const nodes = Array.from(document.querySelectorAll('.slide *')).filter(
+              (el) => el instanceof HTMLElement
+            );
+
+            for (const el of nodes) {
+              if (isDecorativeElement(el)) continue;
+              const rect = el.getBoundingClientRect();
+              if (rect.width <= 2 || rect.height <= 2) continue;
+              const bottomDelta = Math.max(0, Math.round((rect.bottom - slideRect.bottom) * 10) / 10);
+              const rightDelta = Math.max(0, Math.round((rect.right - slideRect.right) * 10) / 10);
+              const topDelta = Math.max(0, Math.round((slideRect.top - rect.top) * 10) / 10);
+              const leftDelta = Math.max(0, Math.round((slideRect.left - rect.left) * 10) / 10);
+              if (bottomDelta <= 1 && rightDelta <= 1 && topDelta <= 1 && leftDelta <= 1) {
+                continue;
+              }
+              const signature = [
+                el.tagName.toLowerCase(),
+                identifyNode(el),
+                Math.round(rect.top),
+                Math.round(rect.left),
+                Math.round(rect.bottom),
+                Math.round(rect.right),
+              ].join('|');
+              if (seen.has(signature)) continue;
+              seen.add(signature);
+              items.push({
+                selector: identifyNode(el),
+                tag: el.tagName.toLowerCase(),
+                bottom: Math.round(rect.bottom),
+                right: Math.round(rect.right),
+                bottomDelta,
+                rightDelta,
+                topDelta,
+                leftDelta,
+                text: normalizeText(el.innerText || '').slice(0, 80),
+              });
+            }
+
+            items.sort((left, right) => {
+              const leftDelta = Math.max(left.bottomDelta, left.rightDelta, left.topDelta, left.leftDelta);
+              const rightDelta = Math.max(right.bottomDelta, right.rightDelta, right.topDelta, right.leftDelta);
+              return rightDelta - leftDelta;
+            });
+            return items.slice(0, 16);
+          };
+
+          const collectFooterIntrusions = () => {
+            const items = [];
+            if (!main || !footer) return items;
+            const footerRect = footer.getBoundingClientRect();
+            const candidates = Array.from(
+              main.querySelectorAll(
+                '.side-card, .impact-box, .tags, .tag, .card, article, .panel, .summary-card, .footer-card'
+              )
+            ).filter((el) => el instanceof HTMLElement);
+
+            for (const candidate of candidates) {
+              const rect = candidate.getBoundingClientRect();
+              const delta = Math.round(rect.bottom + 8 - footerRect.top);
+              if (delta > 0) {
+                items.push({
+                  selector: identifyNode(candidate),
+                  delta,
+                  text: normalizeText(candidate.innerText || '').slice(0, 80),
+                });
+              }
+            }
+
+            return items;
+          };
+
+          const collectSignalDarkCollisions = () => {
+            const items = [];
+            const bottomBand = document.querySelector('.bottom-band');
+            const footerEl = document.querySelector('.footer');
+            const flowCards = Array.from(document.querySelectorAll('.flow-zone .flow-card')).filter(
+              (el) => el instanceof HTMLElement
+            );
+
+            if (bottomBand && flowCards.length) {
+              const bandRect = bottomBand.getBoundingClientRect();
+              flowCards.forEach((card, index) => {
+                const cardRect = card.getBoundingClientRect();
+                const delta = Math.round((cardRect.bottom + 8 - bandRect.top) * 10) / 10;
+                if (delta > 0) {
+                  items.push({
+                    kind: 'flow-to-band',
+                    index,
+                    delta,
+                    text: normalizeText(card.innerText || '').slice(0, 80),
+                  });
+                }
+              });
+            }
+
+            if (bottomBand && footerEl) {
+              const bandRect = bottomBand.getBoundingClientRect();
+              const footerRect = footerEl.getBoundingClientRect();
+              const delta = Math.round((bandRect.bottom + 6 - footerRect.top) * 10) / 10;
+              if (delta > 0) {
+                items.push({
+                  kind: 'band-to-footer',
+                  delta,
+                  text: normalizeText(bottomBand.innerText || '').slice(0, 80),
+                });
+              }
+            }
+
             return items;
           };
 
@@ -1057,6 +1996,9 @@ def _inspect_html_layout(page) -> dict:
           });
 
           const chipCollisions = collectChipCollisions();
+          const clippedDescendants = collectClippedDescendants();
+          const footerIntrusions = collectFooterIntrusions();
+          const signalDarkCollisions = collectSignalDarkCollisions();
 
           const tocSparse = Boolean(
             document.querySelector('.steps')
@@ -1076,6 +2018,33 @@ def _inspect_html_layout(page) -> dict:
             && document.querySelectorAll('.steps .step').length >= 3
           );
 
+          const dualPanelCover = Boolean(
+            document.querySelector('.hero-left')
+            && document.querySelector('.hero-right')
+            && document.querySelector('.hero-bottom')
+            && document.querySelector('.loop-box')
+            && document.querySelectorAll('.logic-card').length >= 3
+            && document.querySelectorAll('.metric-card').length >= 3
+          );
+
+          const signalDarkCover = Boolean(
+            document.querySelector('.hero-panel')
+            && document.querySelector('.flow-zone')
+            && document.querySelectorAll('.flow-card').length >= 4
+          );
+
+          const signalDarkToc = Boolean(
+            document.querySelector('.toc-stage')
+            && document.querySelectorAll('.toc-card').length >= 3
+            && document.querySelector('.support-strip')
+          );
+
+          const signalDarkEnding = Boolean(
+            document.querySelector('.logic-board')
+            && document.querySelector('.core-panel')
+            && document.querySelector('.value-panel')
+          );
+
           return {
             slide: slide ? {
               scrollHeight: slide.scrollHeight,
@@ -1090,7 +2059,10 @@ def _inspect_html_layout(page) -> dict:
             overlap,
             slideOverflow,
             overflowItems: collectOverflow(),
+            clippedDescendants,
             chipCollisions,
+            footerIntrusions,
+            signalDarkCollisions,
             boundaryIssues,
             summaryHeavy,
             timelineHeavy,
@@ -1098,10 +2070,16 @@ def _inspect_html_layout(page) -> dict:
             tocSparse,
             conclusionHeavy,
             stepCardHeavy,
+            dualPanelCover,
+            signalDarkCover,
+            signalDarkToc,
+            signalDarkEnding,
           };
         }
         """
     )
+
+
 
 
 def _summarize_layout_issues(report: dict) -> list[str]:
@@ -1142,40 +2120,94 @@ def _summarize_layout_issues(report: dict) -> list[str]:
             f"{item['selector']}#{item['index']} 超出 slide 边界：right={rect.get('right')}, bottom={rect.get('bottom')}"
         )
 
+    for item in (report.get("clippedDescendants") or [])[:5]:
+        deltas = []
+        if item.get("bottomDelta", 0) > 1:
+            deltas.append(f"bottom+{item['bottomDelta']}")
+        if item.get("rightDelta", 0) > 1:
+            deltas.append(f"right+{item['rightDelta']}")
+        if item.get("topDelta", 0) > 1:
+            deltas.append(f"top+{item['topDelta']}")
+        if item.get("leftDelta", 0) > 1:
+            deltas.append(f"left+{item['leftDelta']}")
+        delta_text = ",".join(deltas) if deltas else "beyond-safe-area"
+        issues.append(f"{item['selector']} 被 slide 裁切：{delta_text} 文本={item['text']}")
+
     for item in (report.get("chipCollisions") or [])[:4]:
         issues.append(
-            f"{item['parentTag']} 鍐呴儴 tag/chip 琛屼笌涓婃柟鍐呭杩囪繎锛宒elta={item['delta']} 鏂囨湰={item['rowText']}"
+            f"{item['parentTag']} 内部 tag/chip 行与上方内容过近，delta={item['delta']} 文本={item['rowText']}"
         )
+
+    for item in (report.get("footerIntrusions") or [])[:4]:
+        issues.append(
+            f"{item['selector']} 侵入 footer 安全区，delta={item['delta']} 文本={item['text']}"
+        )
+
+    for item in (report.get("signalDarkCollisions") or [])[:6]:
+        if item.get("kind") == "flow-to-band":
+            issues.append(
+                f"signal-dark cover flow-card#{item['index']} overlaps bottom-band, delta={item['delta']} text={item['text']}"
+            )
+        else:
+            issues.append(
+                f"signal-dark cover bottom-band intrudes footer safe area, delta={item['delta']} text={item['text']}"
+            )
 
     return issues
 
 
 def _should_regenerate(report: dict) -> bool:
     overflow_items = report.get("overflowItems") or []
+    clipped_items = report.get("clippedDescendants") or []
     severe_overflow_count = sum(
         1
         for item in overflow_items
         if (item.get("scrollHeight", 0) - item.get("clientHeight", 0) > 14)
         or (item.get("scrollWidth", 0) - item.get("clientWidth", 0) > 14)
     )
+    severe_clipped_count = sum(
+        1
+        for item in clipped_items
+        if max(
+            item.get("bottomDelta", 0),
+            item.get("rightDelta", 0),
+            item.get("topDelta", 0),
+            item.get("leftDelta", 0),
+        ) > 10
+    )
     total_overflow_count = len(overflow_items)
+    total_clipped_count = len(clipped_items)
     slide_rect = ((report.get("slide") or {}).get("rect") or {})
     header_rect = ((report.get("header") or {}).get("rect") or {})
     header_height = ((report.get("header") or {}).get("rect") or {}).get("height", 0)
     header_tight_and_tall = header_height > 118 and header_rect.get("top", 0) <= slide_rect.get("top", 0) + 12
     slide_delta = (report.get("slide") or {}).get("scrollHeight", 0) - (report.get("slide") or {}).get("clientHeight", 0)
+    signal_dark_collisions = report.get("signalDarkCollisions") or []
+    severe_signal_dark_collision = any(item.get("delta", 0) > 6 for item in signal_dark_collisions)
 
-    high_risk_dense_page = report.get("timelineHeavy") or report.get("denseCardHeavy")
+    high_risk_dense_page = (
+        report.get("timelineHeavy")
+        or report.get("denseCardHeavy")
+        or report.get("dualPanelCover")
+        or report.get("signalDarkCover")
+        or report.get("signalDarkToc")
+        or report.get("signalDarkEnding")
+    )
 
     return bool(
         report.get("overlap")
         or severe_overflow_count >= 1
+        or severe_clipped_count >= 1
         or total_overflow_count >= 3
+        or total_clipped_count >= 3
         or header_tight_and_tall
         or slide_delta > 12
+        or severe_signal_dark_collision
         or len(report.get("boundaryIssues") or []) >= 2
-        or (high_risk_dense_page and total_overflow_count >= 1)
+        or (high_risk_dense_page and (total_overflow_count >= 1 or total_clipped_count >= 1))
     )
+
+
 
 
 def _apply_compact_mode(page) -> None:
@@ -1194,6 +2226,10 @@ def _apply_dense_card_safe_mode(page) -> None:
     page.add_style_tag(content=DENSE_CARD_SAFE_STYLE)
 
 
+def _apply_dual_panel_cover_safe_mode(page) -> None:
+    page.add_style_tag(content=DUAL_PANEL_COVER_SAFE_STYLE)
+
+
 def _apply_inline_panel_safe_mode(page) -> None:
     page.add_style_tag(content=INLINE_PANEL_SAFE_STYLE)
 
@@ -1204,6 +2240,18 @@ def _apply_cover_header_safe_mode(page) -> None:
 
 def _apply_cover_chain_safe_mode(page) -> None:
     page.add_style_tag(content=COVER_CHAIN_SAFE_STYLE)
+
+
+def _apply_signal_dark_cover_safe_mode(page) -> None:
+    page.add_style_tag(content=SIGNAL_DARK_COVER_SAFE_STYLE)
+
+
+def _apply_signal_dark_toc_safe_mode(page) -> None:
+    page.add_style_tag(content=SIGNAL_DARK_TOC_SAFE_STYLE)
+
+
+def _apply_signal_dark_ending_safe_mode(page) -> None:
+    page.add_style_tag(content=SIGNAL_DARK_ENDING_SAFE_STYLE)
 
 
 def _apply_toc_safe_mode(page) -> None:
@@ -1252,6 +2300,15 @@ def _persist_dense_card_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-dense-card-safe-style", DENSE_CARD_SAFE_STYLE)
 
 
+def _persist_dual_panel_cover_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(
+        html_path,
+        original_html,
+        "claude-dual-panel-cover-safe-style",
+        DUAL_PANEL_COVER_SAFE_STYLE,
+    )
+
+
 def _persist_inline_panel_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-inline-panel-safe-style", INLINE_PANEL_SAFE_STYLE)
 
@@ -1262,6 +2319,33 @@ def _persist_cover_header_safe_html(html_path: Path, original_html: str) -> str:
 
 def _persist_cover_chain_safe_html(html_path: Path, original_html: str) -> str:
     return _persist_style(html_path, original_html, "claude-cover-chain-safe-style", COVER_CHAIN_SAFE_STYLE)
+
+
+def _persist_signal_dark_cover_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(
+        html_path,
+        original_html,
+        "claude-signal-dark-cover-safe-style",
+        SIGNAL_DARK_COVER_SAFE_STYLE,
+    )
+
+
+def _persist_signal_dark_toc_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(
+        html_path,
+        original_html,
+        "claude-signal-dark-toc-safe-style",
+        SIGNAL_DARK_TOC_SAFE_STYLE,
+    )
+
+
+def _persist_signal_dark_ending_safe_html(html_path: Path, original_html: str) -> str:
+    return _persist_style(
+        html_path,
+        original_html,
+        "claude-signal-dark-ending-safe-style",
+        SIGNAL_DARK_ENDING_SAFE_STYLE,
+    )
 
 
 def _persist_toc_safe_html(html_path: Path, original_html: str) -> str:
@@ -1308,6 +2392,8 @@ def _persist_cover_sequence_fix_html(html_path: Path, original_html: str) -> tup
     return updated_html, changed
 
 
+
+
 def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     from playwright.sync_api import sync_playwright
 
@@ -1316,9 +2402,13 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     persisted_summary_safe = False
     persisted_timeline_safe = False
     persisted_dense_card_safe = False
+    persisted_dual_panel_cover_safe = False
     persisted_inline_panel_safe = False
     persisted_cover_header_safe = False
     persisted_cover_chain_safe = False
+    persisted_signal_dark_cover_safe = False
+    persisted_signal_dark_toc_safe = False
+    persisted_signal_dark_ending_safe = False
     persisted_cover_sequence_fix = False
     persisted_toc_safe = False
     persisted_conclusion_safe = False
@@ -1326,9 +2416,13 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     summary_safe_applied = False
     timeline_safe_applied = False
     dense_card_safe_applied = False
+    dual_panel_cover_safe_applied = False
     inline_panel_safe_applied = False
     cover_header_safe_applied = False
     cover_chain_safe_applied = False
+    signal_dark_cover_safe_applied = False
+    signal_dark_toc_safe_applied = False
+    signal_dark_ending_safe_applied = False
     toc_safe_applied = False
     conclusion_safe_applied = False
     step_card_safe_applied = False
@@ -1387,8 +2481,8 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
                   const raw = (impact.textContent || '').trim();
                   if (!/^\\d+\\s*/.test(raw)) return;
                   let normalized = raw.replace(/^\\d+\\s*/, '').trim();
-                  if (normalized.startsWith('重')) {
-                    normalized = `多${normalized}`;
+                  if (normalized.startsWith('\u91cd')) {
+                    normalized = `\u591a${normalized}`;
                   }
                   impact.textContent = normalized;
                 }
@@ -1425,7 +2519,31 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         final_report = initial_report
         final_issues = initial_issues
 
-        if initial_report.get("tocSparse"):
+        if final_report.get("signalDarkCover"):
+            _apply_signal_dark_cover_safe_mode(page)
+            signal_dark_cover_safe_applied = True
+            persisted_signal_dark_cover_safe = True
+            final_report = _inspect_html_layout(page)
+            final_issues = _summarize_layout_issues(final_report)
+            html_content = _persist_signal_dark_cover_safe_html(html_path, html_content)
+
+        if final_report.get("signalDarkToc"):
+            _apply_signal_dark_toc_safe_mode(page)
+            signal_dark_toc_safe_applied = True
+            persisted_signal_dark_toc_safe = True
+            final_report = _inspect_html_layout(page)
+            final_issues = _summarize_layout_issues(final_report)
+            html_content = _persist_signal_dark_toc_safe_html(html_path, html_content)
+
+        if final_report.get("signalDarkEnding"):
+            _apply_signal_dark_ending_safe_mode(page)
+            signal_dark_ending_safe_applied = True
+            persisted_signal_dark_ending_safe = True
+            final_report = _inspect_html_layout(page)
+            final_issues = _summarize_layout_issues(final_report)
+            html_content = _persist_signal_dark_ending_safe_html(html_path, html_content)
+
+        if final_report.get("tocSparse"):
             _apply_toc_safe_mode(page)
             toc_safe_applied = True
             persisted_toc_safe = True
@@ -1448,6 +2566,14 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
             final_report = _inspect_html_layout(page)
             final_issues = _summarize_layout_issues(final_report)
             html_content = _persist_dense_card_safe_html(html_path, html_content)
+
+        if final_report.get("dualPanelCover") and len(final_issues) >= 1:
+            _apply_dual_panel_cover_safe_mode(page)
+            dual_panel_cover_safe_applied = True
+            persisted_dual_panel_cover_safe = True
+            final_report = _inspect_html_layout(page)
+            final_issues = _summarize_layout_issues(final_report)
+            html_content = _persist_dual_panel_cover_safe_html(html_path, html_content)
 
         if final_report.get("summaryHeavy") and (final_report.get("overlap") or len(final_issues) >= 2):
             _apply_summary_safe_mode(page)
@@ -1497,9 +2623,13 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "summary_safe_applied": summary_safe_applied,
         "timeline_safe_applied": timeline_safe_applied,
         "dense_card_safe_applied": dense_card_safe_applied,
+        "dual_panel_cover_safe_applied": dual_panel_cover_safe_applied,
         "inline_panel_safe_applied": inline_panel_safe_applied,
         "cover_header_safe_applied": cover_header_safe_applied,
         "cover_chain_safe_applied": cover_chain_safe_applied,
+        "signal_dark_cover_safe_applied": signal_dark_cover_safe_applied,
+        "signal_dark_toc_safe_applied": signal_dark_toc_safe_applied,
+        "signal_dark_ending_safe_applied": signal_dark_ending_safe_applied,
         "toc_safe_applied": toc_safe_applied,
         "conclusion_safe_applied": conclusion_safe_applied,
         "step_card_safe_applied": step_card_safe_applied,
@@ -1507,9 +2637,13 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
         "persisted_summary_safe": persisted_summary_safe,
         "persisted_timeline_safe": persisted_timeline_safe,
         "persisted_dense_card_safe": persisted_dense_card_safe,
+        "persisted_dual_panel_cover_safe": persisted_dual_panel_cover_safe,
         "persisted_inline_panel_safe": persisted_inline_panel_safe,
         "persisted_cover_header_safe": persisted_cover_header_safe,
         "persisted_cover_chain_safe": persisted_cover_chain_safe,
+        "persisted_signal_dark_cover_safe": persisted_signal_dark_cover_safe,
+        "persisted_signal_dark_toc_safe": persisted_signal_dark_toc_safe,
+        "persisted_signal_dark_ending_safe": persisted_signal_dark_ending_safe,
         "persisted_cover_sequence_fix": persisted_cover_sequence_fix,
         "persisted_toc_safe": persisted_toc_safe,
         "persisted_conclusion_safe": persisted_conclusion_safe,

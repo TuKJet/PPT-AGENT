@@ -63197,6 +63197,7 @@
   function isTextContainer(node) {
     const hasText = node.textContent.trim().length > 0;
     if (!hasText) return false;
+    if (node.querySelector && node.querySelector('[data-export-as-image="true"]')) return false;
 
     const children = Array.from(node.children);
     if (children.length === 0) return true;
@@ -64878,6 +64879,9 @@
    * Detects Custom Elements AND generic tags (<i>, <span>) with icon classes/pseudo-elements.
    */
   function isIconElement(node) {
+    if (node && node.getAttribute && node.getAttribute('data-export-as-image') === 'true') {
+      return true;
+    }
     if (node && node.getAttribute && node.getAttribute('data-export-icon-materialized') === 'true') {
       return true;
     }
@@ -65377,6 +65381,23 @@
           console.warn('Failed to capture canvas content:', e);
           item.skip = true;
         }
+      };
+
+      return { items: [item], job, stopRecursion: true };
+    }
+
+    if (node && node.getAttribute && node.getAttribute('data-export-as-image') === 'true') {
+      const item = {
+        type: 'image',
+        zIndex,
+        domOrder,
+        options: { x, y, w, h, rotate: rotation, data: null },
+      };
+
+      const job = async () => {
+        const pngData = await elementToCanvasImage(node, widthPx, heightPx);
+        if (pngData) item.options.data = pngData;
+        else item.skip = true;
       };
 
       return { items: [item], job, stopRecursion: true };
