@@ -5,6 +5,7 @@ from pptx.util import Inches, Pt
 from pptx.enum.shapes import MSO_AUTO_SHAPE_TYPE, MSO_CONNECTOR
 from pptx.enum.text import PP_ALIGN, MSO_VERTICAL_ANCHOR, MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
+from playwright_runtime import launch_global_chromium, sync_playwright
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
@@ -181,10 +182,9 @@ def svg_path_to_html(svg_path: Path) -> str:
 
 
 def svg_to_png_bytes(svg_path: Path) -> bytes:
-    from playwright.sync_api import sync_playwright
     html = svg_path_to_html(svg_path)
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = launch_global_chromium(p)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.set_content(html, wait_until="networkidle")
         png = page.locator("svg").first.screenshot(type="png")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,10 @@ from vendor_presentation_core.models import build_project_cache_key, ensure_dire
 from vendor_presentation_core.prompts import prompts_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _ai_style_genes_enabled() -> bool:
+    return os.getenv("HTML_AI_STYLE_GENES_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class MigratedDesignEngine:
@@ -158,6 +163,8 @@ class MigratedDesignEngine:
         return "\n".join(genes)
 
     def extract_style_genes(self, template_html: str) -> str:
+        if not _ai_style_genes_enabled():
+            return self._extract_fallback_style_genes(template_html)
         try:
             prompt = prompts_manager.get_style_genes_extraction_prompt(template_html)
             result = self.client.chat(

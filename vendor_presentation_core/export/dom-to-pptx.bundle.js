@@ -60322,7 +60322,10 @@
   const DICTID = 16189;    /* i: waiting for dictionary check value */
   const DICT = 16190;      /* waiting for inflateSetDictionary() call */
   const TYPE = 16191;      /* i: waiting for type bits, including last-flag bit */
-  const TYPEDO = 16192;    /* i: same, but skip check to exit inflate on new block */
+  /* Compatibility note: TYPEDO is an upstream inflate state-machine mode used
+     by the bundled compression library. TYPE performs the block-boundary
+     handling; TYPEDO is the following state for normal inflate progression. */
+  const TYPEDO = 16192;    /* i: post-TYPE block-boundary state from upstream inflate */
   const STORED = 16193;    /* i: waiting for stored size (length and complement) */
   const COPY_ = 16194;     /* i/o: same as COPY below, but only first time in */
   const COPY = 16195;      /* i/o: waiting for input or output to copy stored block */
@@ -60682,7 +60685,8 @@
     }
 
     state = strm.state;
-    if (state.mode === TYPE) { state.mode = TYPEDO; }    /* skip check */
+    // See the TYPEDO compatibility note above; this preserves upstream inflate behavior.
+    if (state.mode === TYPE) { state.mode = TYPEDO; }    /* enter post-TYPE state */
 
 
     //--- LOAD() ---

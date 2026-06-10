@@ -7,6 +7,42 @@ from config import PROVIDERS, DEFAULT_PROVIDER
 
 VALID_REASONING_EFFORTS = {"minimal", "low", "medium", "high"}
 
+COMPAT_GATEWAY_FALLBACK_SIGNALS = [
+    "request was blocked",
+    "permissiondenied",
+    "unsupported",
+    "status=403",
+    "status=500",
+    "status=502",
+    "status=503",
+    "status=504",
+    "status=524",
+    "403",
+    "500",
+    "502",
+    "503",
+    "504",
+    "524",
+    "internal_server_error",
+    "context canceled",
+    "bad_response_status_code",
+    "openai_error",
+    "timeout",
+    "timed out",
+    "html>",
+    "\\u003chtml",
+    "&lt;html",
+    "cf-wrapper",
+    "cloudflare",
+    "bad gateway",
+    "connection error",
+    "remoteprotocolerror",
+    "server disconnected without sending a response",
+    "incomplete chunked read",
+    "unexpected_eof_while_reading",
+    "eof occurred in violation of protocol",
+]
+
 
 def _get_field(data, key, default=None):
     if isinstance(data, dict):
@@ -119,24 +155,7 @@ def _should_fallback_to_chat(exc: Exception) -> bool:
     text = str(exc).lower()
     fallback_signals = [
         "responses api 未返回可解析文本",
-        "request was blocked",
-        "permissiondenied",
-        "524",
-        "502",
-        "status=502",
-        "bad_response_status_code",
-        "openai_error",
-        "timeout",
-        "timed out",
-        "html>",
-        "cf-wrapper",
-        "bad gateway",
-        "connection error",
-        "remoteprotocolerror",
-        "server disconnected without sending a response",
-        "incomplete chunked read",
-        "unexpected_eof_while_reading",
-        "eof occurred in violation of protocol",
+        *COMPAT_GATEWAY_FALLBACK_SIGNALS,
     ]
     return any(signal in text for signal in fallback_signals)
 
@@ -145,24 +164,7 @@ def _should_fallback_to_responses(exc: Exception) -> bool:
     text = str(exc).lower()
     fallback_signals = [
         "chat completions api 未返回可解析文本",
-        "request was blocked",
-        "permissiondenied",
-        "524",
-        "502",
-        "status=502",
-        "bad_response_status_code",
-        "openai_error",
-        "timeout",
-        "timed out",
-        "html>",
-        "cf-wrapper",
-        "bad gateway",
-        "connection error",
-        "remoteprotocolerror",
-        "server disconnected without sending a response",
-        "incomplete chunked read",
-        "unexpected_eof_while_reading",
-        "eof occurred in violation of protocol",
+        *COMPAT_GATEWAY_FALLBACK_SIGNALS,
     ]
     return any(signal in text for signal in fallback_signals)
 
@@ -181,6 +183,9 @@ def _should_retry_request(exc: Exception) -> bool:
         "503",
         "504",
         "524",
+        "status=500",
+        "internal_server_error",
+        "context canceled",
         "unexpected_eof_while_reading",
         "eof occurred in violation of protocol",
         "bad_response_status_code",
@@ -216,14 +221,19 @@ def _should_retry_compatible_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(signal in text for signal in [
         "status=200",
+        "status=500",
         "status=502",
         "status=503",
         "status=504",
         "status=524",
         "html>",
+        "\\u003chtml",
+        "&lt;html",
         "bad gateway",
         "cf-wrapper",
         "cloudflare",
+        "context canceled",
+        "internal_server_error",
         "expecting value",
         "non-json",
         "empty body",
@@ -234,7 +244,7 @@ class AIClient:
     def _is_compatible_openai_gateway(self) -> bool:
         return self.provider == "openai" and "api.openai.com" not in PROVIDERS[self.provider]["base_url"]
 
-    def _post_compatible(self, path: str, payload: dict):
+    def _post_compatible(self, path: str, payload: dict, max_attempts: int = 2):
         headers = {
             "Authorization": f"Bearer {PROVIDERS[self.provider]['api_key']}",
             "Content-Type": "application/json",
@@ -255,12 +265,12 @@ class AIClient:
                 raise RuntimeError(f"status={response.status_code}, non-json body={preview or '<empty body>'}") from exc
 
         last_exc = None
-        for attempt in range(5):
+        for attempt in range(max(1, max_attempts)):
             try:
                 return _request()
             except Exception as exc:
                 last_exc = exc
-                if attempt < 3 and _should_retry_compatible_error(exc):
+                if attempt + 1 < max(1, max_attempts) and _should_retry_compatible_error(exc):
                     continue
                 raise
         raise last_exc
@@ -274,7 +284,7 @@ class AIClient:
                 {"role": "user", "content": user},
             ],
         }
-        data = self._post_compatible("/chat/completions", payload)
+        data = self._post_compatible("/chat/completions", payload, max_attempts=1)
         choices = data.get("choices") or []
         if not choices:
             raise RuntimeError("Chat Completions API 未返回可解析文本")
@@ -293,7 +303,7 @@ class AIClient:
         }
         if tools:
             payload["tools"] = tools
-        data = self._post_compatible("/responses", payload)
+        data = self._post_compatible("/responses", payload, max_attempts=1)
         text = _extract_responses_text(data)
         if text:
             return text
@@ -333,7 +343,7 @@ class AIClient:
             ],
             "temperature": 0.2,
         }
-        data = self._post_compatible("/chat/completions", payload)
+        data = self._post_compatible("/chat/completions", payload, max_attempts=1)
         choices = data.get("choices") or []
         if not choices:
             raise RuntimeError("Chat Completions API 未返回可解析文本")
@@ -345,12 +355,10 @@ class AIClient:
     def _should_fallback_to_compatible_chat(self, exc: Exception) -> bool:
         text = str(exc).lower()
         fallback_signals = [
-            "request was blocked",
-            "permissiondenied",
-            "unsupported",
             "image",
             "vision",
             "responses api 未返回可解析文本",
+            *COMPAT_GATEWAY_FALLBACK_SIGNALS,
         ]
         return any(signal in text for signal in fallback_signals)
 
@@ -488,11 +496,6 @@ class AIClient:
             try:
                 return self._chat_compatible(system, user, temperature)
             except Exception as e:
-                if allow_responses_fallback and _should_fallback_to_responses(e):
-                    try:
-                        return self.responses(system, user, allow_chat_fallback=False)
-                    except Exception:
-                        pass
                 import traceback
                 traceback.print_exc()
                 raise RuntimeError(f"[{self.provider}/{self.model}] API调用失败: {e}") from e

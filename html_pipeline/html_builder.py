@@ -4,6 +4,7 @@ import json
 import re
 from pptx import Presentation
 from pptx.util import Inches
+from playwright_runtime import launch_global_chromium, sync_playwright
 
 SLIDE_W = Inches(13.33)
 SLIDE_H = Inches(7.5)
@@ -2395,8 +2396,6 @@ def _persist_cover_sequence_fix_html(html_path: Path, original_html: str) -> tup
 
 
 def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
-    from playwright.sync_api import sync_playwright
-
     html_content = html_path.read_text(encoding="utf-8")
     persisted_compact = False
     persisted_summary_safe = False
@@ -2427,7 +2426,7 @@ def render_html_with_validation(html_path: Path) -> tuple[bytes, dict]:
     conclusion_safe_applied = False
     step_card_safe_applied = False
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = launch_global_chromium(p)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         page.set_content(html_content, wait_until="networkidle")
 

@@ -1,334 +1,88 @@
-# PPT-AGENT
+# PPT Deck Workflow Agent
 
-一个基于 LLM 的 PPT 自动生成工具，支持两种输出链路：
+Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and HTML/SVG renderer branches.
 
-- **SVG Pipeline**：AI 生成 SVG 页面，再转为 PPT
-- **HTML Pipeline**：AI 生成单页 HTML 页面，再截图导出 PPT（当前推荐）
+This repository is intended to be distributed as source code. Do not commit machine-local runtimes such as `.venv/`, `.python/`, `.ms-playwright/`, generated `output/`, or a real `.env` file.
 
-## 特性
+## Quick Start
 
-- 自动生成 PPT 大纲
-- 自动扩写每页内容
-- 自动生成单页视觉稿
-- 输出 `.pptx` 文件
-- 支持 OpenAI 兼容接口
-- 支持 HTML 卡片化排版，显著减少文本溢出问题
-
----
-
-## 项目结构
+Install `uv` first:
 
 ```bash
-PPT-AGENT/
-├── main.py                    # SVG pipeline 入口
-├── pipeline.py                # SVG pipeline 核心
-├── svg_checker.py             # SVG 文本问题检测器
-├── pptx_builder.py            # SVG → PNG → PPTX
-├── html_pipeline/
-│   ├── main.py                # HTML pipeline 入口
-│   ├── pipeline.py            # HTML pipeline 核心
-│   └── html_builder.py        # HTML → PNG → PPTX
-├── ai_client.py               # LLM 客户端封装
-├── config.py                  # 配置读取
-├── check_api.py               # API 连通性测试
-├── 顶级架构师.md              # 大纲生成 prompt
-├── 顶级设计师.md              # SVG 设计 prompt
-├── html-ppt优化提示词.md      # HTML 设计 prompt 参考
-├── .env.example               # 环境变量示例
-└── requirements.txt
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
----
+On Windows, use PowerShell:
 
-## 安装
-
-### 1. 克隆项目
-
-```bash
-git clone <your-repo-url>
-cd PPT-AGENT
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-### 2. 安装依赖
+Then initialize the project:
 
 ```bash
-pip install -r requirements.txt
-python -m playwright install chromium
-```
-
----
-
-## 配置
-
-复制 `.env.example` 为 `.env`：
-
-```bash
+uv sync
+uv run playwright install chromium
 cp .env.example .env
+uv run python -m ppt_workflow.runner --help
 ```
 
-最少需要配置：
+On Windows PowerShell, use this instead of `cp`:
 
-```env
-OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
-OPENAI_API_KEY=your_api_key
-OPENAI_MODEL=gpt-5.4
-OPENAI_REASONING_EFFORT=high
-DEFAULT_PROVIDER=openai
-DEFAULT_TOPIC=红茶与绿茶的区别
-DEFAULT_AUDIENCE=销售团队
-DEFAULT_PAGES=3-5页
-HTML_POLISH_MODE=false
+```powershell
+Copy-Item .env.example .env
+uv run python -m ppt_workflow.runner --help
+```
+
+Edit `.env` with your model gateway:
+
+```bash
+OPENAI_API_KEY=your_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
 HTML_AI_REVIEW_ENABLED=false
-REVIEW_PROVIDER=openai
-REVIEW_MODEL=
-REVIEW_REASONING_EFFORT=high
-OUTPUT_DIR=./output
+SVG_AI_REVIEW_ENABLED=false
 ```
 
-### `OPENAI_REASONING_EFFORT` 可选值
+## Workflow
 
-```env
-minimal
-low
-medium
-high
-```
-
-### `HTML_POLISH_MODE` 用法
-
-```env
-HTML_POLISH_MODE=false
-```
-
-- `false`：默认模式，只做自动布局检测与基础兜底
-- `true`：开启逐页精修模式，只对有问题页面追加一轮局部修复
-
-### `HTML_AI_REVIEW_ENABLED` 用法
-
-```env
-HTML_AI_REVIEW_ENABLED=false
-REVIEW_PROVIDER=openai
-REVIEW_MODEL=
-REVIEW_REASONING_EFFORT=high
-```
-
-- `false`：关闭 AI 审查阶段，仅做技术布局校验
-- `true`：在技术校验后增加独立截图审查，并产出 `reviews/` 与 `slide-status.json`
-- `REVIEW_PROVIDER`：审查模型使用的 provider，默认跟随主 provider，也可独立指定
-- `REVIEW_MODEL`：如需与生成模型分离，可单独指定审查模型；留空则使用该 provider 默认模型
-
-命令行也可以临时开启：
+Run commands from the repository root.
 
 ```bash
-python -m html_pipeline.main --polish
+uv run python -u -m ppt_workflow.runner outline --topic "..." --audience "..." --pages "12" --provider openai --research "..."
+uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact outline
+uv run python -u -m ppt_workflow.runner contents --run-dir output/...
+uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact contents
+uv run python -u -m ppt_workflow.runner plans --run-dir output/...
+uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact slide_plans
+uv run python -u -m ppt_workflow.runner choose-renderer --run-dir output/... --renderer html
+HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt_workflow.runner render --run-dir output/...
 ```
 
----
+Use `--renderer svg` for the SVG branch.
 
-## 使用说明
-
-## 1) 测试接口
+Before rerunning a final render, clean only render outputs under the run directory, not approved source artifacts:
 
 ```bash
-python check_api.py
+rm -rf output/.../html output/.../svg output/.../reviews output/.../editable output/.../slide-status.json output/.../editable-ppt-chain.json output/.../*.pptx
 ```
 
-或者只测 responses：
+On Windows PowerShell:
 
-```bash
-python check_api.py --mode responses
+```powershell
+Remove-Item -Recurse -Force output\...\html, output\...\svg, output\...\reviews, output\...\editable -ErrorAction SilentlyContinue
+Remove-Item -Force output\...\slide-status.json, output\...\editable-ppt-chain.json, output\...\*.pptx -ErrorAction SilentlyContinue
 ```
 
-如果成功会看到：
+## Codex Skill
 
-```bash
-[PASS] chat
-[PASS] responses
-```
+The local skill lives at `.codex/skills/ppt-deck-workflow/SKILL.md`. When using Codex in this repository, ask it to use the `ppt-deck-workflow` skill and keep approvals in chat.
 
----
+## Notes
 
-## 2) 使用 SVG pipeline
+- Generated decks are written to `output/`.
+- HTML rendering requires Playwright Chromium.
+- The editable PPTX export is best-effort and may use DOM source preview when platform-specific PowerPoint readback tools are unavailable.
+- Long model calls require a gateway that can handle large `/chat/completions` requests without short timeouts.
 
-适合：保留 SVG 设计稿链路。
-
-```bash
-python main.py -t "主题"
-```
-或
-```bash
-python main.py
-```
-示例：
-
-```bash
-python main.py -t "红茶与绿茶的区别"
-```
-
-输出：
-
-```bash
-output/红茶与绿茶的区别/
-├── outline.json
-├── contents.json
-├── svg/
-└── 红茶与绿茶的区别.pptx
-```
-
----
-
-## 3) 使用 HTML pipeline（推荐）
-
-适合：更稳定的页面排版，减少文字溢出。
-
-HTML pipeline 当前内置了页面自检兜底：
-- 生成后会用 Playwright 检查真实 DOM 布局
-- 轻微超限时会自动应用紧凑模式（compact mode）
-- 对“总结页 + 多模块 + footer”这类高风险布局，会自动触发 `summary-safe mode`
-- 对发展脉络/阶段演进页，会自动触发 `timeline-safe mode`
-- 对高密度信息卡页面，会自动触发 `dense-card-safe mode`
-- 可选开启 `HTML_AI_REVIEW_ENABLED=true`，在技术校验后增加独立截图审查，并把 reviewer 建议回灌修复
-- 修正后的安全样式会回写到生成的 `.html` 文件中，便于直接检查最终版本
-
-```bash
-python -m html_pipeline.main -t "主题"
-```
-或
-```bash
-python -m html_pipeline.main
-```
-示例：
-
-```bash
-python -m html_pipeline.main -t "红茶与绿茶的区别"
-```
-
-输出：
-
-```bash
-output/红茶与绿茶的区别/
-├── outline.json
-├── contents.json
-├── html/
-└── 红茶与绿茶的区别.pptx
-```
-
----
-
-## 可选参数
-
-SVG 和 HTML 两条命令都支持：
-
-```bash
---topic / -t       主题
---audience / -a    目标受众
---pages / -p       页数要求
---provider / -m    openai / claude / domestic
---research / -r    补充调研信息
---polish           启用逐页精修模式（HTML）
-```
-
-示例：
-
-```bash
-python -m html_pipeline.main \
-  -t "红茶与绿茶的区别" \
-  -a "销售团队" \
-  -p "3-5页" \
-  -m openai \
-  -r "重点突出工艺、口感、适饮场景和推荐逻辑"
-```
-
----
-
-## Audience 与风格
-
-HTML pipeline 会根据 `audience` 调整视觉风格：
-
-- `企业管理层 / 政务 / ToB` → 浅色、稳重
-- `学生/教育 / 年轻群体` → 更轻快或暗黑
-- `销售团队 / 通用受众` → 默认浅色商务风格
-
-如果命令行不传 `--audience`，会读取 `.env` 里的：
-
-```env
-DEFAULT_AUDIENCE=销售团队
-```
-
----
-
-## 已知限制
-
-### SVG pipeline
-- 文本布局依赖 SVG 坐标，复杂页面容易出现溢出或重叠
-- 已内置 `svg_checker.py` 做检测，但不能完全根治
-
-### HTML pipeline
-- 最终导出的 PPT 页面本质是截图图片，不是原生可编辑形状
-- 但排版稳定性更好，当前更推荐使用
-- 已内置布局检测、compact mode、`summary-safe mode`、`timeline-safe mode` 与 `dense-card-safe mode`
-- 如需更激进的逐页修复，可通过 `--polish` 或 `.env` 中的 `HTML_POLISH_MODE=true` 开启精修模式
-
----
-
-## 典型工作流
-
-### 推荐顺序
-
-1. 配好 `.env`
-2. 运行接口测试：
-   ```bash
-   python check_api.py
-   ```
-3. 先用 HTML pipeline 生成：
-   ```bash
-   python -m html_pipeline.main -t "你的主题"
-   ```
-4. 打开 `output/.../*.pptx` 查看效果
-
----
-
-## 依赖
-
-```txt
-openai>=1.0.0
-python-dotenv>=1.0.0
-rich>=13.0.0
-python-pptx>=1.0.0
-playwright>=1.40.0
-```
-
----
-
-## License
-
----
-
-## HTML-first 可编辑链路
-
-当前 HTML pipeline 会额外写出 `editable-ppt-chain.json`，把这条链路里的关键产物串起来：
-
-- `html/`：可继续人工修改的源页面
-- `slide-status.json`：逐页校验与审核状态
-- `editable/slide-status.json`：HTML -> scene -> editable PPT 的逐页状态
-- `editable/editable-export-manifest.json`：可编辑导出的 scene / preview / review 清单
-
-如果你已经手改过 `output/<topic>/html/*.html`，现在不需要重跑 AI 生成，可以直接基于现有 HTML 重导出：
-
-```bash
-python -m html_pipeline.main --from-html-dir output/你的主题/html
-```
-
-只导出可编辑版：
-
-```bash
-python -m html_pipeline.main --from-html-dir output/你的主题/html --editable-only
-```
-
-把重导出产物写到新目录：
-
-```bash
-python -m html_pipeline.main \
-  --from-html-dir output/你的主题/html \
-  --output-dir output/你的主题_reexport
-```

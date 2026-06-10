@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageChops, ImageFilter, ImageStat
-from playwright.sync_api import sync_playwright
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
+from filename_utils import safe_filename_part
 from html_pipeline.html_builder import render_html_screenshot, write_slide_status
+from playwright_runtime import launch_global_chromium, sync_playwright
 from vendor_presentation_core.export.powerpoint_preview_renderer import (
     detect_powerpoint_render_support,
     export_powerpoint_slide_previews,
@@ -438,7 +439,7 @@ def _audit_exported_pptx(ppt_path: Path, slides: list[dict[str, Any]]) -> dict[s
 def _render_html_background_only_screenshot(html_path: Path) -> bytes:
     html = html_path.read_text(encoding="utf-8")
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = launch_global_chromium(playwright)
         page = browser.new_page(viewport={"width": 1280, "height": 720})
         try:
             page.set_content(html, wait_until="networkidle")
@@ -603,7 +604,7 @@ class DomPptxExporter:
 
         shell_html = """<!DOCTYPE html><html><head><meta charset='utf-8'><title>dom export</title></head><body></body></html>"""
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = launch_global_chromium(playwright)
             page = browser.new_page(viewport={"width": 1400, "height": 900})
             page.set_content(shell_html, wait_until="domcontentloaded")
             page.add_script_tag(path=str(self.bundle_path))
@@ -1651,7 +1652,7 @@ def build_dom_editable_deck_from_html(
         )
         html_paths_by_index[idx] = html_path
 
-    deck_stem = (deck_name or html_dir.parent.name)[:30]
+    deck_stem = safe_filename_part(deck_name or html_dir.parent.name, max_length=30)
     ppt_path = out_dir.parent / f"{deck_stem}_editable.pptx"
     DomPptxExporter().export_slides(slides, ppt_path)
     _replace_full_slide_background_picture(ppt_path, slides)

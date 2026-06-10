@@ -10,6 +10,7 @@ from config import (
     SVG_REVIEW_PROVIDER,
     SVG_REVIEW_REASONING_EFFORT,
 )
+from filename_utils import safe_filename_part, slide_filename
 from layout_policy import (
     build_budget_refinement_feedback,
     build_layout_content_budget,
@@ -773,7 +774,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
         review_client = AIClient(SVG_REVIEW_PROVIDER)
         if SVG_REVIEW_MODEL:
             review_client.model = SVG_REVIEW_MODEL
-    out = Path(OUTPUT_DIR) / topic.replace(" ", "_")
+    out = Path(OUTPUT_DIR) / safe_filename_part(topic, max_length=80)
     out.mkdir(parents=True, exist_ok=True)
     slide_status = {}
 
@@ -808,7 +809,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
         plan = step3_plan(client, title, material)
         page_role = _infer_page_role(idx, total_pages, title, plan, material)
         svg = step4_svg(client, title, material, plan, audience, page_role)
-        svg_path = svg_dir / f"{idx:02d}_{title[:20]}.svg"
+        svg_path = svg_dir / slide_filename(idx, title, "svg")
         svg_path.write_text(svg, encoding="utf-8")
         svg, validation_issues = _validate_and_optionally_regenerate_svg(
             client, svg_path, title, material, plan, audience, page_role, polish
@@ -835,7 +836,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
 
     print("[4/4] 合成 PPT...")
     from pptx_builder import build_pptx
-    pptx_path = out / f"{topic[:30]}.pptx"
+    pptx_path = out / f"{safe_filename_part(topic, max_length=30)}.pptx"
     build_pptx(svg_dir, pptx_path)
     print(f"完成！PPT 已保存：{pptx_path}")
     return out

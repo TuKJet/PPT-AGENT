@@ -13,6 +13,7 @@ from config import (
     SVG_REVIEW_PROVIDER,
     SVG_REVIEW_REASONING_EFFORT,
 )
+from filename_utils import safe_filename_part, slide_filename
 from pipeline import (
     step1_outline,
     step2_content,
@@ -27,6 +28,7 @@ from layout_policy import (
     build_budget_refinement_feedback,
 )
 from html_pipeline.html_builder import render_html_with_validation
+from playwright_runtime import launch_global_chromium, sync_playwright
 from pptx_builder import build_editable_ppt, write_slide_status, save_svg_screenshot
 
 SLIDE_W_IN = 13.33
@@ -431,10 +433,9 @@ def extract_html_layout_to_scene(html_path: Path, page_role: str = 'summary') ->
     png_bytes, report = render_html_with_validation(html_path)
     final_report = report.get('final_report') or {}
 
-    from playwright.sync_api import sync_playwright
     html_content = html_path.read_text(encoding='utf-8')
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = launch_global_chromium(p)
         page = browser.new_page(viewport={'width': 1280, 'height': 720})
         page.set_content(html_content, wait_until='networkidle')
         dom = page.evaluate(
@@ -857,9 +858,9 @@ def build_editable_deck_from_html(html_dir: Path, out_dir: Path,
         scene, png_bytes, issue_lines = extract_html_layout_to_scene(html_path, page_role=page_role)
         issues = validate_scene(scene)
 
-        scene_path = scene_dir / f'{idx:02d}_{title[:20]}.json'
+        scene_path = scene_dir / slide_filename(idx, title, "json")
         scene_path.write_text(json.dumps(scene, ensure_ascii=False, indent=2), encoding='utf-8')
-        preview_svg = preview_dir / f'{idx:02d}_{title[:20]}.svg'
+        preview_svg = preview_dir / slide_filename(idx, title, "svg")
         preview_svg.write_text(scene_to_svg(scene), encoding='utf-8')
         save_svg_screenshot(preview_svg, preview_dir / f'slide-{idx:02d}.png')
         (preview_dir / f'html-source-{idx:02d}.png').write_bytes(png_bytes)
@@ -919,7 +920,7 @@ def build_editable_deck_from_html(html_dir: Path, out_dir: Path,
         })
         scenes.append(scene)
 
-    deck_stem = (deck_name or html_dir.parent.name)[:30]
+    deck_stem = safe_filename_part(deck_name or html_dir.parent.name, max_length=30)
     ppt_path = out_dir.parent / f'{deck_stem}_editable.pptx'
     build_editable_deck(scenes, ppt_path)
     write_slide_status(out_dir, slide_status)
@@ -2627,7 +2628,7 @@ def run_editable_topic_page(topic: str, audience: str = '通用受众', page_req
     plan = step3_plan(client, title, material)
     page_role = _infer_page_role(page_index, len(all_pages), title, plan, material)
     subtitle = (material.splitlines()[0].lstrip('- ').strip()[:42] if material else title)
-    out_dir = Path(OUTPUT_DIR) / f"{topic.replace(' ', '_')}_editable_page{page_index:02d}"
+    out_dir = Path(OUTPUT_DIR) / f"{safe_filename_part(topic, max_length=80)}_editable_page{page_index:02d}"
     return build_ai_editable_page(title, subtitle, material, page_role, audience, plan, out_dir, provider)
 
 

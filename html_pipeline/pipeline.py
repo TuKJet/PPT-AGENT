@@ -17,6 +17,7 @@ from config import (
     REVIEW_PROVIDER,
     REVIEW_REASONING_EFFORT,
 )
+from filename_utils import safe_filename_part, slide_filename
 from layout_policy import build_layout_role_guidance, build_layout_content_budget
 from pipeline import (
     step1_outline, step2_content, step3_plan,
@@ -318,7 +319,7 @@ def export_from_existing_html(html_dir: Path, topic: str | None = None,
     if export_image_ppt:
         print(f"[Re-export 1/{total_steps}] Building image PPT...")
         from html_pipeline.html_builder import build_pptx
-        image_pptx_path = run_dir / f"{resolved_topic[:30]}.pptx"
+        image_pptx_path = run_dir / f"{safe_filename_part(resolved_topic, max_length=30)}.pptx"
         build_pptx(html_dir, image_pptx_path)
         print(f"Done! Image PPT saved to: {image_pptx_path}")
 
@@ -768,7 +769,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
         review_client = AIClient(REVIEW_PROVIDER)
         if REVIEW_MODEL:
             review_client.model = REVIEW_MODEL
-    out = Path(OUTPUT_DIR) / topic.replace(" ", "_")
+    out = Path(OUTPUT_DIR) / safe_filename_part(topic, max_length=80)
     out.mkdir(parents=True, exist_ok=True)
     slide_status = {}
     editable_slide_meta = []
@@ -821,7 +822,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
         material = slide_job["material"]
         plan = slide_job["plan"]
         page_role = slide_job["page_role"]
-        html_path = html_dir / f"{idx:02d}_{title[:20]}.html"
+        html_path = html_dir / slide_filename(idx, title, "html")
 
         html = step4_html(
             client,
@@ -900,7 +901,7 @@ def run_pipeline(topic: str, audience: str = "通用受众",
 
     print("[4/5] 合成图片版 PPT...")
     from html_pipeline.html_builder import build_pptx
-    pptx_path = out / f"{topic[:30]}.pptx"
+    pptx_path = out / f"{safe_filename_part(topic, max_length=30)}.pptx"
     build_pptx(html_dir, pptx_path)
     print(f"完成！图片版 PPT 已保存：{pptx_path}")
 

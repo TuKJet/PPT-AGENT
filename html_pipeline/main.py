@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from filename_utils import safe_filename_part
 from html_pipeline.pipeline import export_from_existing_html, run_pipeline
 
 
@@ -119,8 +120,9 @@ def main():
             editable_engine=args.editable_engine,
         )
         print(f"\nHTML 文件已保存至：{out}/html/")
-        print(f"图片版 PPT：{out}/{topic[:30]}.pptx")
-        print(f"可编辑版 PPT：{out}/{topic[:30]}_editable.pptx")
+        deck_stem = safe_filename_part(topic, max_length=30)
+        print(f"图片版 PPT：{out}/{deck_stem}.pptx")
+        print(f"可编辑版 PPT：{out}/{deck_stem}_editable.pptx")
         print(f"链路清单：{out}/editable-ppt-chain.json")
     except Exception as exc:
         print(f"[错误] {exc}", file=sys.stderr)
