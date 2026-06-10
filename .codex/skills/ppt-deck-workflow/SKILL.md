@@ -26,16 +26,15 @@ For long runner commands, use unbuffered Python (`-u`) so progress lines stream 
 
 Never ask the user to approve an artifact blindly.
 
-Whenever the workflow reaches a user approval checkpoint, read the generated Markdown preview document and report its substance back to the user before asking for approval. This applies even if the user has not opened the file.
+Whenever the workflow reaches a user approval checkpoint, hand the generated Markdown preview document to the user for direct review. Do not read the preview file and summarize it for the user. The point of the preview Markdown is to give the user the review surface, not to have the agent substitute its own summary.
 
 Required behavior:
 
 - Name the exact Markdown file that was generated.
-- Summarize the key decisions, structure, risks, and approval-relevant findings from that file.
-- Include enough concrete detail that the user can make an informed approval decision in chat.
 - Provide a clickable path to the Markdown file when possible.
-- If the Markdown file reports issues, warnings, failed checks, compromises, or skipped review paths, call those out explicitly.
-- Do not proceed past an approval checkpoint until the user has approved after receiving this summary.
+- Tell the user to review that file and reply with approval or requested changes.
+- Do not summarize, paraphrase, excerpt, or pre-judge the Markdown contents unless the user explicitly asks for a summary.
+- Do not proceed past an approval checkpoint until the user has approved after receiving the file link.
 - Do not describe a checkpoint as approved, reviewed, or complete based only on the artifact existing on disk.
 
 Render-stage review Markdown files such as `reviews/review-*.md` and `editable/review-*.md` are internal QA artifacts, not user approval checkpoints. Do not ask the user to review them one by one, and do not dump per-slide review summaries unless the user asks. At completion, use `slide-status.json` for a concise aggregate status and call out only exceptions: failed checks, warning counts, residual layout issues, fallback behavior, or export caveats.
@@ -61,11 +60,11 @@ Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG bra
 
 ## Approval Checkpoints
 
-After `outline`, read `outline-preview.md`, name the file, summarize the deck structure, audience fit, page count, and any notable risks or assumptions from the Markdown. Ask the user whether to approve or revise only after providing that summary.
+After `outline`, return the `outline-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks.
 
-After `contents`, read `contents-preview.md`, name the file, summarize the page-by-page materials, major claims, evidence/research direction, and any weak spots or missing content noted in the Markdown. Ask the user whether to approve or revise only after providing that summary.
+After `contents`, return the `contents-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks.
 
-After `plans`, read `slide-plans-preview.md`, name the file, summarize the page layout intentions, visual treatment, expected artifacts, and any layout complexity or risk noted in the Markdown. Ask the user whether to approve or revise only after providing that summary.
+After `plans`, return the `slide-plans-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks.
 
 After slide plans are approved, ask:
 
