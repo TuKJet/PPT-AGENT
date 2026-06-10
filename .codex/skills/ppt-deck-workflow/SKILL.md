@@ -22,6 +22,24 @@ Do not use Codex-side web search, `web.run`, or browser/web-search tools to rese
 
 For long runner commands, use unbuffered Python (`-u`) so progress lines stream back to Codex. When the runner prints `[progress]` lines, relay those to the user as the source of truth instead of probing files repeatedly.
 
+## Approval Transparency
+
+Never ask the user to approve an artifact blindly.
+
+Whenever the workflow reaches a user approval checkpoint, read the generated Markdown preview document and report its substance back to the user before asking for approval. This applies even if the user has not opened the file.
+
+Required behavior:
+
+- Name the exact Markdown file that was generated.
+- Summarize the key decisions, structure, risks, and approval-relevant findings from that file.
+- Include enough concrete detail that the user can make an informed approval decision in chat.
+- Provide a clickable path to the Markdown file when possible.
+- If the Markdown file reports issues, warnings, failed checks, compromises, or skipped review paths, call those out explicitly.
+- Do not proceed past an approval checkpoint until the user has approved after receiving this summary.
+- Do not describe a checkpoint as approved, reviewed, or complete based only on the artifact existing on disk.
+
+Render-stage review Markdown files such as `reviews/review-*.md` and `editable/review-*.md` are internal QA artifacts, not user approval checkpoints. Do not ask the user to review them one by one, and do not dump per-slide review summaries unless the user asks. At completion, use `slide-status.json` for a concise aggregate status and call out only exceptions: failed checks, warning counts, residual layout issues, fallback behavior, or export caveats.
+
 ## Commands
 
 Run commands from the project root.
@@ -43,11 +61,11 @@ Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG bra
 
 ## Approval Checkpoints
 
-After `outline`, read `outline-preview.md` and summarize the deck structure. Ask the user whether to approve or revise.
+After `outline`, read `outline-preview.md`, name the file, summarize the deck structure, audience fit, page count, and any notable risks or assumptions from the Markdown. Ask the user whether to approve or revise only after providing that summary.
 
-After `contents`, read `contents-preview.md` and summarize the page materials. Ask the user whether to approve or revise.
+After `contents`, read `contents-preview.md`, name the file, summarize the page-by-page materials, major claims, evidence/research direction, and any weak spots or missing content noted in the Markdown. Ask the user whether to approve or revise only after providing that summary.
 
-After `plans`, read `slide-plans-preview.md` and summarize the page layout intentions. Ask the user whether to approve or revise.
+After `plans`, read `slide-plans-preview.md`, name the file, summarize the page layout intentions, visual treatment, expected artifacts, and any layout complexity or risk noted in the Markdown. Ask the user whether to approve or revise only after providing that summary.
 
 After slide plans are approved, ask:
 
@@ -75,6 +93,7 @@ HTML and SVG render phases can take a long time because they may generate, valid
 - While a render is running, give at most one short heartbeat update per minute.
 - Check generated files or `status` at most once every 10 minutes unless the process exits or the user asks for an update.
 - When `[progress]` lines are available, show progress as `current/total` or a simple progress bar in chat.
+- When the render finishes, read `slide-status.json` before the final answer. Summarize aggregate pass/fail status and only call out exceptions; do not make generated review Markdown files a human review step unless the user asks.
 
 By default, disable AI review for speed:
 
