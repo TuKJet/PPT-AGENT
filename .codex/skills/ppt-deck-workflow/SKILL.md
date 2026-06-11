@@ -47,6 +47,7 @@ Required behavior:
 
 - Put style requirements into `slide-plans.json` before asking for slide-plan approval.
 - If the style guidance arrives after `slide-plans.json` exists, edit `slide-plans.json` directly and regenerate downstream render outputs only after the updated plan is approved.
+- If the user gives style guidance at or before the slide-plan stage, render HTML with `HTML_USE_MIGRATED_CORE=false` so generation uses the legacy HTML prompt path instead of the migrated core template path.
 - Do not wait until HTML/SVG files are generated and then write a rebuild, migration, or batch patch script just to change colors or visual style.
 - Use post-render edits only for small defects or implementation bugs, not for primary art direction.
 
@@ -109,6 +110,12 @@ By default, disable AI review for speed:
 
 ```bash
 HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt_workflow.runner render --run-dir output/...
+```
+
+When user-provided style guidance was encoded in `slide-plans.json`, also disable the migrated core for HTML renders:
+
+```bash
+HTML_USE_MIGRATED_CORE=false HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt_workflow.runner render --run-dir output/...
 ```
 
 Only omit those environment variables when the user explicitly asks to enable the AI review/fix loop.
