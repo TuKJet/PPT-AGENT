@@ -1,6 +1,6 @@
 ---
 name: ppt-deck-workflow
-description: Use this local workflow when the user wants Codex to generate a PPT deck from inside this project, with shared outline/content/planning stages, Codex-in-chat approval checkpoints, and a later choice between HTML and SVG renderer branches.
+description: Use this local workflow when the user wants Codex to generate a PPT deck from inside this project, with shared outline/content/planning stages, Codex-in-chat approval checkpoints, and a later choice between HTML, SVG, or full-page image renderer branches.
 ---
 
 # PPT Deck Workflow
@@ -13,7 +13,7 @@ Run the deck as one Codex workflow:
 
 1. Generate the common artifacts.
 2. Stop at review checkpoints and ask the user to approve or request changes.
-3. Let the user choose `html` or `svg` only after outline, contents, and slide plans are ready.
+3. Let the user choose `html`, `svg`, or `img` only after outline, contents, and slide plans are ready.
 4. Render through the chosen branch.
 
 Do not use the Web UI for this workflow. The approval loop happens in the Codex conversation.
@@ -70,6 +70,57 @@ HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt
 
 Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG branch.
 
+The `img` branch is a Codex-side full-page image generation route. Do not run `ppt_workflow.runner render` for `img`, and do not call `choose-renderer` with `img` unless the project runner explicitly supports it in code. Instead, use the approved `slide-plans.json` as the source of truth, generate one image prompt per slide in chat, call Codex's `imagegen` tool for each full 16:9 slide image, save the resulting images under `output/.../img/`, then package those images into a PPTX.
+
+## IMG Prompt Compilation
+
+For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt.
+
+Keep and translate layout intent from the slide plan:
+
+- Main visual placement: left, right, center, full-bleed, split composition, or staged depth.
+- Title zone placement and hierarchy.
+- Approximate module count and spatial grouping.
+- Intended chart, architecture, process, matrix, or ecosystem structure.
+- Reserved blank areas requested by the user.
+- User-provided screenshot/reference-image layout direction.
+- Visual focus, reading order, density, whitespace, and management-facing tone.
+
+Remove or rewrite implementation-specific layout details:
+
+- Do not pass HTML/CSS terms such as grid, flex, px, rem, class names, DOM nodes, or component implementation notes.
+- Do not pass SVG path/group details or renderer-specific instructions.
+- Do not include dense body bullets, exact long Chinese paragraphs, complex tables, formulas, or small labels.
+- Do not ask imagegen to create editable text boxes, layers, or separately movable page objects.
+
+The compiled prompt must ask for one finished 16:9 presentation page image. It should include:
+
+- Slide title and page role.
+- One concise core message.
+- Semantic composition instructions derived from the slide plan.
+- Visual style, color, texture, depth, and mood.
+- Constraints that keep text minimal, large, and sparse.
+
+Use this prompt shape:
+
+```text
+Create one complete 16:9 presentation slide image.
+
+Slide title: ...
+Page role: ...
+Core message: ...
+
+Composition:
+- ...
+
+Visual style:
+- ...
+
+Text constraints:
+- Use only a few large, legible words if text is needed.
+- Do not render dense paragraphs, small labels, complex tables, equations, or detailed numeric data.
+```
+
 ## Approval Checkpoints
 
 After `outline`, return the `outline-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks.
@@ -82,15 +133,16 @@ After slide plans are approved, ask:
 
 - `html`: recommended for stable layout, image PPTX, and editable PPTX export.
 - `svg`: lighter source files and faster visual drafts.
+- `img`: full-page image generation through Codex imagegen; best for visual-heavy decks, cover pages, concept pages, and cinematic management-facing slides, but not editable and not reliable for dense precise text.
 
 When asking, explicitly mention that the final render defaults to AI review disabled because review can be slow. If the user wants the review/fix loop, they must opt in clearly.
 
-Only run the final render after the user chooses `html` or `svg`.
+Only run the final render after the user chooses `html`, `svg`, or `img`.
 
 Before every final render, clean render-only outputs from previous failed or interrupted runs so exported PPTX files cannot include stale slides:
 
 ```bash
-rm -rf output/.../html output/.../svg output/.../reviews output/.../editable output/.../slide-status.json output/.../*.pptx output/.../editable-ppt-chain.json
+rm -rf output/.../html output/.../svg output/.../img output/.../reviews output/.../editable output/.../slide-status.json output/.../*.pptx output/.../editable-ppt-chain.json
 ```
 
 Do not delete approved source artifacts such as `outline.json`, `contents.json`, `slide-plans.json`, previews, or `workflow-state.json`.
@@ -152,6 +204,17 @@ SVG branch:
 - Generates `svg/`
 - Runs SVG validation/review/fix loop
 - Exports PPTX
+
+IMG branch:
+
+- Does not use runner render.
+- Uses Codex chat orchestration and the `imagegen` tool.
+- Generates `img/`
+- Generates each slide as one complete 16:9 full-page image.
+- Does not split the slide into background, foreground, text overlay, layers, or selective per-page HTML/SVG rendering.
+- Does not create editable slide contents; the exported PPTX uses one full-slide image per page.
+- Must keep exact text minimal. If exact Chinese copy, numbers, labels, equations, or tables are important, warn the user that full-page image generation can distort them and ask whether to continue with full-page image generation anyway.
+- Prompt each slide as a finished presentation page: composition, hierarchy, management-facing visual tone, core message, and visual constraints. Avoid asking imagegen to render dense body text, small labels, or complex tables.
 
 ## References
 
