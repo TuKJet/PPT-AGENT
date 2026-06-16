@@ -90,7 +90,7 @@ Remove or rewrite implementation-specific layout details:
 
 - Do not pass HTML/CSS terms such as grid, flex, px, rem, class names, DOM nodes, or component implementation notes.
 - Do not pass SVG path/group details or renderer-specific instructions.
-- Do not include dense body bullets, exact long Chinese paragraphs, complex tables, formulas, or small labels.
+- Keep user-approved Chinese copy, key numbers, labels, tables, and formulas when they are part of the slide message, but rewrite their presentation as clear visual typography and organized content blocks rather than renderer implementation notes.
 - Do not ask imagegen to create editable text boxes, layers, or separately movable page objects.
 
 The compiled prompt must ask for one finished 16:9 presentation page image. It should include:
@@ -99,7 +99,8 @@ The compiled prompt must ask for one finished 16:9 presentation page image. It s
 - One concise core message.
 - Semantic composition instructions derived from the slide plan.
 - Visual style, color, texture, depth, and mood.
-- Constraints that keep text minimal, large, and sparse.
+- Exact Chinese copy, key numbers, labels, tables, or formulas required by the slide plan.
+- Text rendering constraints that ask for accurate, legible Chinese typography and polished PPT-style information design.
 
 Use this prompt shape:
 
@@ -117,8 +118,9 @@ Visual style:
 - ...
 
 Text constraints:
-- Use only a few large, legible words if text is needed.
-- Do not render dense paragraphs, small labels, complex tables, equations, or detailed numeric data.
+- Preserve the required Chinese text and numbers exactly as provided.
+- Render Chinese text as crisp, legible presentation typography with clear hierarchy.
+- Use polished PPT-style content blocks, callouts, tables, or diagrams when needed.
 ```
 
 ## Approval Checkpoints
@@ -133,7 +135,7 @@ After slide plans are approved, ask:
 
 - `html`: recommended for stable layout, image PPTX, and editable PPTX export.
 - `svg`: lighter source files and faster visual drafts.
-- `img`: full-page image generation through Codex imagegen; best for visual-heavy decks, cover pages, concept pages, and cinematic management-facing slides, but not editable and not reliable for dense precise text.
+- `img`: full-page image generation through Codex imagegen; best for visually polished management-facing slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
 
 When asking, explicitly mention that the final render defaults to AI review disabled because review can be slow. If the user wants the review/fix loop, they must opt in clearly.
 
@@ -213,8 +215,8 @@ IMG branch:
 - Generates each slide as one complete 16:9 full-page image.
 - Does not split the slide into background, foreground, text overlay, layers, or selective per-page HTML/SVG rendering.
 - Does not create editable slide contents; the exported PPTX uses one full-slide image per page.
-- Must keep exact text minimal. If exact Chinese copy, numbers, labels, equations, or tables are important, warn the user that full-page image generation can distort them and ask whether to continue with full-page image generation anyway.
-- Prompt each slide as a finished presentation page: composition, hierarchy, management-facing visual tone, core message, and visual constraints. Avoid asking imagegen to render dense body text, small labels, or complex tables.
+- Do not discourage the user from using `img` because a slide contains Chinese copy, numbers, labels, equations, or tables.
+- Prompt each slide as a finished presentation page: composition, hierarchy, management-facing visual tone, core message, visual constraints, and any required exact Chinese text or structured information.
 
 ## References
 
