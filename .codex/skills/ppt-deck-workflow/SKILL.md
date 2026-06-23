@@ -22,6 +22,8 @@ Do not use Codex-side web search, `web.run`, or browser/web-search tools to rese
 
 For long runner commands, use unbuffered Python (`-u`) so progress lines stream back to Codex. When the runner prints `[progress]` lines, relay those to the user as the source of truth instead of probing files repeatedly.
 
+For long decks, do not first run expensive phases in the foreground and wait for the tool timeout. If the requested deck has more than 10 pages, or the user describes a long/complex deck, run `contents` and `plans` as background runner jobs from the start and monitor them with the long-job cadence below.
+
 ## Approval Transparency
 
 Never ask the user to approve an artifact blindly.
@@ -72,9 +74,37 @@ Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG bra
 
 The `img` branch is a Codex-side full-page image generation route. Do not run `ppt_workflow.runner render` for `img`, and do not call `choose-renderer` with `img` unless the project runner explicitly supports it in code. Instead, use the approved `slide-plans.json` as the source of truth, generate one image prompt per slide in chat, call Codex's `imagegen` tool for each full 16:9 slide image, save the resulting images under `output/.../img/`, then package those images into a PPTX.
 
+## Long Deck Background Execution
+
+Use this for `contents` and `plans` when the deck has more than 10 pages, when the topic implies heavy research/detail, or when an earlier generation phase already took several minutes.
+
+Start the phase as a background job immediately. Do not let it run in the foreground until a 10-minute command timeout kills it.
+
+```bash
+mkdir -p output/.../logs
+nohup uv run python -u -m ppt_workflow.runner contents --run-dir output/... > output/.../logs/contents.log 2>&1 & echo $! > output/.../logs/contents.pid
+nohup uv run python -u -m ppt_workflow.runner plans --run-dir output/... > output/.../logs/plans.log 2>&1 & echo $! > output/.../logs/plans.pid
+```
+
+Run only the current phase; do not start `plans` until `contents` is approved.
+
+Monitoring cadence:
+
+- Check whether the runner process is alive at most once per minute.
+- Tail the phase log at most once per minute and relay meaningful `[progress]` lines or the latest concise status to the user.
+- Check generated artifact files, output directories, or `workflow-state.json` at most once every 10 minutes unless the process exits or the user asks for a status update.
+- Do not kill, restart, or replace a live background phase just because there has been no new file output for several minutes.
+- If the process exits successfully, move to the normal approval checkpoint and provide the preview Markdown path.
+- If the process exits with an error, read the tail of the phase log, summarize the failure, and rerun only after fixing the cause or getting user direction.
+
 ## IMG Prompt Compilation
 
 For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt.
+
+Before calling imagegen, separate slide-plan text into:
+
+- Visible slide copy: titles, headings, labels, table text, numbers, formulas, and sentences that should appear on the final slide.
+- Layout-only notes: placeholders, occupancy markers, future paste areas, scaffold labels, and implementation notes that describe where content goes but should not be drawn.
 
 Keep and translate layout intent from the slide plan:
 
@@ -91,6 +121,8 @@ Remove or rewrite implementation-specific layout details:
 - Do not pass HTML/CSS terms such as grid, flex, px, rem, class names, DOM nodes, or component implementation notes.
 - Do not pass SVG path/group details or renderer-specific instructions.
 - Keep user-approved Chinese copy, key numbers, labels, tables, and formulas when they are part of the slide message, but rewrite their presentation as clear visual typography and organized content blocks rather than renderer implementation notes.
+- Do not pass placeholder or occupancy text as visible copy. Strip or rewrite markers such as `占位`, `待补充`, `待插入`, `TBD`, `TODO`, `XXX`, `Lorem ipsum`, `[文本]`, `[图片]`, `{placeholder}`, `<placeholder>`, repeated punctuation, fake sample labels, or notes that only mean "reserve this area".
+- When a placeholder represents reserved space, translate it into a visual instruction such as "leave a clean empty area for later image placement" or "show an unlabeled content panel", and explicitly say that no placeholder words or symbols should appear.
 - Do not ask imagegen to create editable text boxes, layers, or separately movable page objects.
 
 The compiled prompt must ask for one finished 16:9 presentation page image. It should include:
@@ -99,8 +131,9 @@ The compiled prompt must ask for one finished 16:9 presentation page image. It s
 - One concise core message.
 - Semantic composition instructions derived from the slide plan.
 - Visual style, color, texture, depth, and mood.
-- Exact Chinese copy, key numbers, labels, tables, or formulas required by the slide plan.
+- Exact visible Chinese copy, key numbers, labels, tables, or formulas required by the slide plan.
 - Text rendering constraints that ask for accurate, legible Chinese typography and polished PPT-style information design.
+- A negative instruction that placeholder words, scaffold markers, and occupancy characters must not appear in the image.
 
 Use this prompt shape:
 
@@ -121,6 +154,7 @@ Text constraints:
 - Preserve the required Chinese text and numbers exactly as provided.
 - Render Chinese text as crisp, legible presentation typography with clear hierarchy.
 - Use polished PPT-style content blocks, callouts, tables, or diagrams when needed.
+- Do not render placeholder words, scaffold labels, occupancy markers, bracketed placeholders, or fake sample text.
 ```
 
 ## Approval Checkpoints
