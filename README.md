@@ -24,6 +24,8 @@ The helper command is:
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py ...
 ```
 
+Every deck run must live under `output/<project>/`. Keep all intermediate JSON/Markdown artifacts, renderer files, review files, and exported PPTX files inside that single project folder. If you pass `--run-dir deck-a`, the helper now normalizes it to `output/deck-a`; paths outside `output/` are not allowed.
+
 Typical helper calls:
 
 ```bash

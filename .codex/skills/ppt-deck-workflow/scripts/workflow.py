@@ -36,8 +36,42 @@ def output_root() -> Path:
     return Path(os.getenv("OUTPUT_DIR", "output"))
 
 
+def resolved_output_root() -> Path:
+    root = output_root()
+    if not root.is_absolute():
+        root = REPO_ROOT / root
+    return root.resolve()
+
+
+def is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def normalize_run_dir(raw: str | None, *, topic: str | None = None) -> Path:
+    base = resolved_output_root()
+    if raw is None:
+        if not topic:
+            raise ValueError("topic is required when run_dir is omitted")
+        return (base / safe_filename_part(topic, max_length=80)).resolve()
+
+    run_dir = Path(raw)
+    if run_dir.is_absolute():
+        resolved = run_dir.resolve()
+    else:
+        repo_relative = (REPO_ROOT / run_dir).resolve()
+        resolved = repo_relative if is_within(repo_relative, base) else (base / run_dir).resolve()
+
+    if not is_within(resolved, base):
+        raise ValueError(f"run_dir must stay inside output root: {base}")
+    return resolved
+
+
 def run_dir_for_topic(topic: str) -> Path:
-    return output_root() / safe_filename_part(topic, max_length=80)
+    return normalize_run_dir(None, topic=topic)
 
 
 def read_json(path: Path, default: Any | None = None) -> Any:
@@ -369,14 +403,14 @@ def clean_render_outputs(run_dir: Path) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir) if args.run_dir else run_dir_for_topic(args.topic)
+    run_dir = normalize_run_dir(args.run_dir, topic=args.topic)
     run_dir.mkdir(parents=True, exist_ok=True)
     init_state(run_dir, topic=args.topic, audience=args.audience, pages=args.pages, research=args.research or "")
     print(f"run_dir={run_dir}", flush=True)
 
 
 def cmd_save_artifact(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     source = Path(args.file)
     data = read_json(source)
@@ -387,12 +421,12 @@ def cmd_save_artifact(args: argparse.Namespace) -> None:
 
 
 def cmd_preview(args: argparse.Namespace) -> None:
-    preview = preview_artifact(Path(args.run_dir), args.artifact)
+    preview = preview_artifact(normalize_run_dir(args.run_dir), args.artifact)
     print(f"preview={preview}", flush=True)
 
 
 def cmd_approve(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     if args.artifact not in state.get("artifacts", {}):
         raise ValueError(f"unknown artifact: {args.artifact}")
@@ -407,7 +441,7 @@ def cmd_approve(args: argparse.Namespace) -> None:
 
 
 def cmd_choose_renderer(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     require_approved(run_dir, "slide_plans")
     state = load_state(run_dir)
     state["renderer"] = args.renderer
@@ -431,7 +465,7 @@ def cmd_choose_renderer(args: argparse.Namespace) -> None:
 
 
 def cmd_choose_review(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     renderer = state.get("renderer")
     if renderer not in {"html", "svg"}:
@@ -449,7 +483,7 @@ def cmd_choose_review(args: argparse.Namespace) -> None:
 
 
 def cmd_complete_review(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     renderer = state.get("renderer")
     review = state.get("render_review") or {}
@@ -468,7 +502,7 @@ def cmd_complete_review(args: argparse.Namespace) -> None:
 
 
 def cmd_export(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     renderer = args.renderer or state.get("renderer")
     if renderer:
@@ -485,7 +519,7 @@ def cmd_export(args: argparse.Namespace) -> None:
 
 
 def cmd_status(args: argparse.Namespace) -> None:
-    run_dir = Path(args.run_dir)
+    run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     print(f"run_dir={run_dir}", flush=True)
     print(f"status={state.get('status')}", flush=True)
@@ -556,7 +590,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     clean = sub.add_parser("clean-render")
     clean.add_argument("--run-dir", required=True)
-    clean.set_defaults(func=lambda args: clean_render_outputs(Path(args.run_dir)))
+    clean.set_defaults(func=lambda args: clean_render_outputs(normalize_run_dir(args.run_dir)))
 
     status = sub.add_parser("status")
     status.add_argument("--run-dir", required=True)

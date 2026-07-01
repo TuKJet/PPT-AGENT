@@ -18,3 +18,20 @@ output/
 *.pptx
 *.log
 
+# Root-level workflow run artifacts accidentally created outside output/
+/codex_write_test.txt
+/*/workflow-state.json
+/*/outline.json
+/*/contents.json
+/*/slide-plans.json
+/*/outline-preview.md
+/*/contents-preview.md
+/*/slide-plans-preview.md
+/*/slide-status.json
+/*/editable-ppt-chain.json
+/*/html/
+/*/svg/
+/*/img/
+/*/editable/
+/*/reviews/
+

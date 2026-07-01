@@ -34,6 +34,13 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-rende
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
+Run-directory discipline is mandatory:
+
+- Every new PPT request must create one project folder under `output/`.
+- Keep all intermediate artifacts, render files, review files, and exported decks inside that single `output/<project>/` folder.
+- Do not create workflow run directories in the repository root or elsewhere outside `output/`.
+- If you pass `--run-dir`, it must resolve inside `output/`; a bare relative name such as `project-a` is treated as `output/project-a`.
+
 Before generating any outline, contents, slide plans, HTML, SVG, IMG prompts, screenshot review, or repair pass, read `references/prompt-contracts.md`. It carries the old runner/pipeline prompt behavior in skill form: content rules, planning rules, role budgets, HTML/SVG generation constraints, screenshot review criteria, and repair feedback policy.
 
 Audience control begins at the outline stage, not only at slide planning or rendering. When the user indicates a deck is for technical readers, management, investors, executives, government, operators, or similar groups, carry that choice through outline structure, page-count allocation, content depth, slide-plan style, and final page visuals.

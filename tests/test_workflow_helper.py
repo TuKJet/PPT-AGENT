@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
 import tempfile
 import unittest
 from argparse import Namespace
@@ -20,7 +22,10 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = load_workflow_module()
         self.tmpdir = tempfile.TemporaryDirectory()
-        self.run_dir = Path(self.tmpdir.name)
+        self.output_root = Path(self.tmpdir.name) / "output-root"
+        self.previous_output_dir = os.environ.get("OUTPUT_DIR")
+        os.environ["OUTPUT_DIR"] = str(self.output_root)
+        self.run_dir = self.output_root / "review-flow"
         self.workflow.init_state(
             self.run_dir,
             topic="Test Topic",
@@ -53,6 +58,10 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
 
     def tearDown(self) -> None:
+        if self.previous_output_dir is None:
+            os.environ.pop("OUTPUT_DIR", None)
+        else:
+            os.environ["OUTPUT_DIR"] = self.previous_output_dir
         self.tmpdir.cleanup()
 
     def test_html_renderer_requires_explicit_review_choice(self) -> None:
@@ -77,3 +86,69 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkflowHelperRunDirTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.workflow = load_workflow_module()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.output_root = Path(self.tmpdir.name) / "output-root"
+        self.repo_root = Path(__file__).resolve().parents[1]
+        self.previous_output_dir = os.environ.get("OUTPUT_DIR")
+        os.environ["OUTPUT_DIR"] = str(self.output_root)
+
+    def tearDown(self) -> None:
+        if self.previous_output_dir is None:
+            os.environ.pop("OUTPUT_DIR", None)
+        else:
+            os.environ["OUTPUT_DIR"] = self.previous_output_dir
+        for name in ("deck-run-relative", "deck-run-preview"):
+            accidental = self.repo_root / name
+            if accidental.exists():
+                shutil.rmtree(accidental, ignore_errors=True)
+        self.tmpdir.cleanup()
+
+    def test_init_places_relative_run_dir_under_output_root(self) -> None:
+        relative = "deck-run-relative"
+        expected = self.output_root / relative
+        accidental = self.repo_root / relative
+
+        self.workflow.cmd_init(
+            Namespace(
+                topic="Test Topic",
+                audience="Test Audience",
+                pages="3",
+                research="",
+                run_dir=relative,
+            )
+        )
+
+        self.assertTrue((expected / "workflow-state.json").exists())
+        self.assertFalse(accidental.exists())
+
+    def test_preview_uses_same_relative_run_dir_mapping(self) -> None:
+        relative = "deck-run-preview"
+        expected = self.output_root / relative
+        outline = {
+            "pages": [
+                {
+                    "title": "Intro",
+                    "sections": ["One"],
+                }
+            ]
+        }
+
+        self.workflow.cmd_init(
+            Namespace(
+                topic="Test Topic",
+                audience="Test Audience",
+                pages="3",
+                research="",
+                run_dir=relative,
+            )
+        )
+        self.workflow.write_json(expected / "outline.json", outline)
+
+        self.workflow.cmd_preview(Namespace(run_dir=relative, artifact="outline"))
+
+        self.assertTrue((expected / "outline-preview.md").exists())
