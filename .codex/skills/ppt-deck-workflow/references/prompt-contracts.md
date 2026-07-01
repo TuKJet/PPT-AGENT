@@ -118,7 +118,7 @@ For each slide, produce page-ready PPT material rather than research notes.
 
 Research may come from Codex-native research capability, not repository AI provider code:
 
-- Prefer a Codex-installed research skill when one is available in the current session.
+- Prefer a Codex-installed local research skill when one is available in the current session, and use it first to structure or gather evidence for `contents`.
 - Otherwise use Codex web search/browsing directly when freshness or external evidence is needed.
 - Do not route research through `pipeline.py`, `html_pipeline/pipeline.py`, `AIClient`, or repository model tools.
 
@@ -150,6 +150,38 @@ For each slide plan, specify:
 The audience decision made in the outline stage must carry forward into `slide-plans.json`; do not silently switch the deck into a different audience style later.
 
 Express audience fit through composition, emphasis, evidence density, ordering, and tone. Do not turn the slide plan into visible rhetoric about what the audience cares about unless the user explicitly requests that framing.
+
+## Render Job Contract
+
+Use this when the main agent wants subagents to render page-local `html`, `svg`, or `img` files without carrying the whole deck context in one conversation window.
+
+The helper command:
+
+```bash
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
+```
+
+materializes:
+
+- `render-jobs/<renderer>/shared-context.json`
+- `render-jobs/<renderer>/slide-01.json`
+- `render-jobs/<renderer>/manifest.json`
+
+Subagent contract:
+
+- Read exactly one slide job plus the referenced shared context.
+- Treat the job file as page-local source of truth for index, title, page role, material, plan, target path, and renderer.
+- Use the shared context only to maintain cross-page consistency in tone, density, naming, and visual rhythm.
+- Write exactly one renderer source file to the job's `target_path`.
+- Do not mutate outline, contents, slide plans, or workflow approval state from a page subagent.
+- If repair feedback arrives, reuse the same job file and apply only the requested page-local fix.
+
+Main-agent contract:
+
+- Own renderer choice, review preference, renderer job preparation, and final export.
+- Aggregate quality across pages.
+- Send only failed pages back to subagents for revision.
+- Keep all generated renderer files inside the same run directory as the approved deck artifacts.
 
 ## Role And Content Budgets
 

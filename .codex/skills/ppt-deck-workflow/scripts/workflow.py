@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from filename_utils import safe_filename_part
+from filename_utils import safe_filename_part, slide_filename
 
 STATE_FILE = "workflow-state.json"
 ARTIFACT_FILES = {
@@ -26,6 +26,40 @@ PREVIEW_FILES = {
     "contents": "contents-preview.md",
     "slide_plans": "slide-plans-preview.md",
 }
+COMMON_ARTIFACT_KEYS = set(ARTIFACT_FILES)
+RENDER_REVIEW_NOT_APPLICABLE = {
+    "mode": "off",
+    "status": "not_applicable",
+}
+
+
+def default_state() -> dict[str, Any]:
+    return {
+        "version": 4,
+        "status": "new",
+        "approvals": {},
+        "artifacts": {},
+        "renderer": None,
+        "render_review": {
+            "mode": None,
+            "status": "not_applicable",
+        },
+        "renderers": {},
+        "execution": "codex-skill",
+    }
+
+
+def default_renderer_state(renderer: str | None = None) -> dict[str, Any]:
+    review = {"mode": None, "status": "not_applicable"}
+    if renderer in {"html", "svg"}:
+        review = {"mode": None, "status": "pending_choice"}
+    elif renderer == "img":
+        review = dict(RENDER_REVIEW_NOT_APPLICABLE)
+    return {
+        "status": "new",
+        "artifacts": {},
+        "review": review,
+    }
 
 
 def utc_now() -> str:
@@ -88,26 +122,67 @@ def write_json(path: Path, data: Any) -> Path:
     return path
 
 
+def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
+    merged = default_state()
+    merged.update(state or {})
+    merged["approvals"] = dict(merged.get("approvals") or {})
+    artifacts = dict(merged.get("artifacts") or {})
+    renderers = merged.get("renderers")
+    if not isinstance(renderers, dict):
+        renderers = {}
+
+    active_renderer = merged.get("renderer")
+    if active_renderer and active_renderer not in renderers:
+        common_artifacts = {key: value for key, value in artifacts.items() if key in COMMON_ARTIFACT_KEYS}
+        renderer_artifacts = {key: value for key, value in artifacts.items() if key not in COMMON_ARTIFACT_KEYS}
+        if renderer_artifacts:
+            artifacts = common_artifacts
+        renderers[active_renderer] = {
+            **default_renderer_state(active_renderer),
+            "status": merged.get("status", "new"),
+            "artifacts": renderer_artifacts,
+            "review": dict(merged.get("render_review") or default_renderer_state(active_renderer)["review"]),
+        }
+
+    normalized_renderers: dict[str, Any] = {}
+    for renderer, entry in renderers.items():
+        normalized = default_renderer_state(renderer)
+        if isinstance(entry, dict):
+            normalized.update(entry)
+            normalized["artifacts"] = dict(normalized.get("artifacts") or {})
+            normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
+        normalized_renderers[renderer] = normalized
+
+    merged["artifacts"] = artifacts
+    merged["renderers"] = normalized_renderers
+    return merged
+
+
+def renderer_state(state: dict[str, Any], renderer: str) -> dict[str, Any]:
+    renderers = state.setdefault("renderers", {})
+    entry = renderers.get(renderer)
+    if not isinstance(entry, dict):
+        entry = default_renderer_state(renderer)
+        renderers[renderer] = entry
+        return entry
+    normalized = default_renderer_state(renderer)
+    normalized.update(entry)
+    normalized["artifacts"] = dict(normalized.get("artifacts") or {})
+    normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
+    renderers[renderer] = normalized
+    return normalized
+
+
 def load_state(run_dir: Path) -> dict[str, Any]:
-    return read_json(run_dir / STATE_FILE, default={
-        "version": 3,
-        "status": "new",
-        "approvals": {},
-        "artifacts": {},
-        "renderer": None,
-        "render_review": {
-            "mode": None,
-            "status": "not_applicable",
-        },
-        "execution": "codex-skill",
-    })
+    return _normalize_state(read_json(run_dir / STATE_FILE, default=default_state()))
 
 
 def save_state(run_dir: Path, state: dict[str, Any]) -> Path:
-    state["version"] = 3
-    state["execution"] = "codex-skill"
-    state["updated_at"] = utc_now()
-    return write_json(run_dir / STATE_FILE, state)
+    normalized = _normalize_state(state)
+    normalized["version"] = 4
+    normalized["execution"] = "codex-skill"
+    normalized["updated_at"] = utc_now()
+    return write_json(run_dir / STATE_FILE, normalized)
 
 
 def init_state(run_dir: Path, *, topic: str, audience: str, pages: str, research: str) -> dict[str, Any]:
@@ -126,6 +201,7 @@ def init_state(run_dir: Path, *, topic: str, audience: str, pages: str, research
             "mode": None,
             "status": "not_applicable",
         },
+        "renderers": state.get("renderers") or {},
     })
     save_state(run_dir, state)
     return state
@@ -135,7 +211,7 @@ def ensure_render_ready(run_dir: Path, renderer: str) -> None:
     state = load_state(run_dir)
     if renderer not in {"html", "svg"}:
         return
-    review = state.get("render_review") or {}
+    review = renderer_state(state, renderer).get("review") or {}
     review_status = review.get("status")
     review_mode = review.get("mode")
     if review_status == "pending_choice":
@@ -246,8 +322,21 @@ def slide_jobs(run_dir: Path) -> list[dict[str, Any]]:
     return list(data.get("slides") or [])
 
 
-def write_slide_status(run_dir: Path, slides: dict[str, Any]) -> Path:
-    return write_json(run_dir / "slide-status.json", {"slides": slides})
+def renderer_pptx_name(run_dir: Path, renderer: str) -> str:
+    topic = safe_filename_part(infer_topic(run_dir), max_length=30)
+    return f"{topic}-{renderer}.pptx"
+
+
+def slide_status_path(run_dir: Path, renderer: str | None = None) -> Path:
+    return run_dir / ("slide-status.json" if renderer is None else f"slide-status-{renderer}.json")
+
+
+def write_slide_status(run_dir: Path, slides: dict[str, Any], renderer: str | None = None) -> Path:
+    payload: dict[str, Any] = {"slides": slides}
+    if renderer:
+        payload["renderer"] = renderer
+        write_json(slide_status_path(run_dir, renderer), payload)
+    return write_json(slide_status_path(run_dir), payload)
 
 
 def infer_topic(run_dir: Path) -> str:
@@ -256,19 +345,134 @@ def infer_topic(run_dir: Path) -> str:
 
 def mark_completed(run_dir: Path, renderer: str, artifacts: dict[str, Path]) -> None:
     state = load_state(run_dir)
-    state["status"] = "completed"
     state["renderer"] = renderer
-    for name, path in artifacts.items():
-        state.setdefault("artifacts", {})[name] = {"path": str(path), "status": "completed"}
+    entry = renderer_state(state, renderer)
+    entry["status"] = "completed"
+    entry["completed_at"] = utc_now()
+    entry["artifacts"] = {
+        **entry.get("artifacts", {}),
+        **{
+            name: {"path": str(path), "status": "completed"}
+            for name, path in artifacts.items()
+        },
+    }
+    state["render_review"] = dict(entry.get("review") or {})
+    state["status"] = "completed"
     save_state(run_dir, state)
+
+
+def render_jobs_root(run_dir: Path, renderer: str) -> Path:
+    return run_dir / "render-jobs" / renderer
+
+
+def render_target_path(run_dir: Path, renderer: str, index: int, title: str) -> Path:
+    extensions = {
+        "html": "html",
+        "svg": "svg",
+        "img": "png",
+    }
+    return run_dir / renderer / slide_filename(index, title, extensions[renderer])
+
+
+def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
+    require_approved(run_dir, "slide_plans")
+    if renderer not in {"html", "svg", "img"}:
+        raise ValueError("renderer must be html, svg, or img")
+
+    state = load_state(run_dir)
+    slides = slide_jobs(run_dir)
+    jobs_dir = render_jobs_root(run_dir, renderer)
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = run_dir / renderer
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    shared_context_path = jobs_dir / "shared-context.json"
+    shared_context = {
+        "version": 1,
+        "topic": infer_topic(run_dir),
+        "audience": state.get("audience"),
+        "renderer": renderer,
+        "slide_count": len(slides),
+        "slides": [
+            {
+                "index": int(job.get("index", idx)),
+                "title": job.get("title", f"Slide {idx}"),
+                "page_role": job.get("page_role", "content"),
+                "material": job.get("material", ""),
+                "plan": job.get("plan", ""),
+            }
+            for idx, job in enumerate(slides, start=1)
+        ],
+    }
+    write_json(shared_context_path, shared_context)
+
+    manifest_slides: list[dict[str, Any]] = []
+    for idx, job in enumerate(slides, start=1):
+        slide_index = int(job.get("index", idx))
+        title = str(job.get("title") or f"Slide {slide_index}")
+        job_path = jobs_dir / f"slide-{slide_index:02d}.json"
+        target_path = render_target_path(run_dir, renderer, slide_index, title)
+        payload = {
+            "version": 1,
+            "topic": shared_context["topic"],
+            "audience": shared_context["audience"],
+            "renderer": renderer,
+            "index": slide_index,
+            "title": title,
+            "page_role": job.get("page_role", "content"),
+            "material": job.get("material", ""),
+            "plan": job.get("plan", ""),
+            "total_pages": len(slides),
+            "target_path": str(target_path),
+            "shared_context_path": str(shared_context_path),
+        }
+        write_json(job_path, payload)
+        manifest_slides.append({
+            "index": slide_index,
+            "title": title,
+            "job_path": str(job_path),
+            "target_path": str(target_path),
+        })
+
+    manifest_path = jobs_dir / "manifest.json"
+    write_json(manifest_path, {
+        "version": 1,
+        "renderer": renderer,
+        "topic": shared_context["topic"],
+        "audience": shared_context["audience"],
+        "slide_count": len(slides),
+        "shared_context_path": str(shared_context_path),
+        "slides": manifest_slides,
+    })
+
+    entry = renderer_state(state, renderer)
+    entry["jobs"] = {
+        "manifest_path": str(manifest_path),
+        "shared_context_path": str(shared_context_path),
+        "status": "prepared",
+        "updated_at": utc_now(),
+    }
+    state["renderer"] = renderer
+    state["render_review"] = dict(entry.get("review") or {})
+    state["status"] = "render_jobs_prepared"
+    save_state(run_dir, state)
+    return manifest_path
 
 
 def export_svg(run_dir: Path) -> Path:
     require_approved(run_dir, "slide_plans")
     from pptx_builder import build_pptx
 
-    pptx_path = run_dir / f"{safe_filename_part(infer_topic(run_dir), max_length=30)}.pptx"
-    build_pptx(run_dir / "svg", pptx_path)
+    svg_dir = run_dir / "svg"
+    svg_files = sorted(svg_dir.glob("*.svg")) if svg_dir.exists() else []
+    if not svg_files:
+        raise ValueError(
+            f"SVG directory is empty: {svg_dir}. "
+            "This branch needs Codex-authored SVG source files before export."
+        )
+
+    pptx_path = run_dir / renderer_pptx_name(run_dir, "svg")
+    build_pptx(svg_dir, pptx_path)
     jobs = slide_jobs(run_dir)
     write_slide_status(run_dir, {
         f"{int(job.get('index', i)):02d}": {
@@ -278,7 +482,7 @@ def export_svg(run_dir: Path) -> Path:
             "export_ready": True,
         }
         for i, job in enumerate(jobs, start=1)
-    })
+    }, renderer="svg")
     mark_completed(run_dir, "svg", {"pptx": pptx_path})
     return pptx_path
 
@@ -289,11 +493,19 @@ def export_html(run_dir: Path, editable_engine: str | None = None) -> Path:
 
     topic = infer_topic(run_dir)
     html_dir = run_dir / "html"
-    image_pptx = run_dir / f"{safe_filename_part(topic, max_length=30)}.pptx"
+    html_files = sorted(html_dir.glob("*.html")) if html_dir.exists() else []
+    if not html_files:
+        raise ValueError(
+            f"HTML directory is empty: {html_dir}. "
+            "This branch needs Codex-authored HTML source files before export. "
+            "If you used clean-render, note that it only clears derived outputs; "
+            "HTML pages still must exist in this branch."
+        )
+
+    image_pptx = run_dir / renderer_pptx_name(run_dir, "html")
     build_pptx(html_dir, image_pptx)
 
     jobs = slide_jobs(run_dir)
-    html_files = sorted(html_dir.glob("*.html"))
     slide_meta = []
     for i, html_path in enumerate(html_files, start=1):
         job = jobs[i - 1] if i - 1 < len(jobs) else {}
@@ -314,7 +526,7 @@ def export_html(run_dir: Path, editable_engine: str | None = None) -> Path:
         }
         for item in slide_meta
     }
-    write_slide_status(run_dir, status)
+    write_slide_status(run_dir, status, renderer="html")
 
     artifacts = {"image_pptx": image_pptx}
     editable_dir = run_dir / "editable"
@@ -368,7 +580,7 @@ def export_img(run_dir: Path) -> Path:
         slide = prs.slides.add_slide(blank)
         slide.shapes.add_picture(str(image), 0, 0, width=prs.slide_width, height=prs.slide_height)
 
-    pptx_path = run_dir / f"{safe_filename_part(infer_topic(run_dir), max_length=30)}.pptx"
+    pptx_path = run_dir / renderer_pptx_name(run_dir, "img")
     prs.save(str(pptx_path))
     write_slide_status(run_dir, {
         f"{i:02d}": {
@@ -379,14 +591,16 @@ def export_img(run_dir: Path) -> Path:
             "image_path": str(image),
         }
         for i, image in enumerate(images, start=1)
-    })
+    }, renderer="img")
     mark_completed(run_dir, "img", {"pptx": pptx_path})
     return pptx_path
 
 
 def clean_render_outputs(run_dir: Path) -> None:
     root = run_dir.resolve()
-    for name in ("html", "svg", "img", "reviews", "editable"):
+    # Keep renderer source dirs. Codex authors html/svg/img directly in this branch,
+    # so default cleanup should only remove derived outputs and review artifacts.
+    for name in ("reviews", "editable"):
         target = (run_dir / name).resolve()
         if target.exists():
             if root not in target.parents:
@@ -445,18 +659,22 @@ def cmd_choose_renderer(args: argparse.Namespace) -> None:
     require_approved(run_dir, "slide_plans")
     state = load_state(run_dir)
     state["renderer"] = args.renderer
+    entry = renderer_state(state, args.renderer)
     if args.renderer in {"html", "svg"}:
-        state["render_review"] = {
+        entry["review"] = {
             "mode": None,
             "status": "pending_choice",
         }
+        entry["status"] = "review_choice_pending"
+        state["render_review"] = dict(entry["review"])
         state["status"] = "review_choice_pending"
     else:
-        state["render_review"] = {
-            "mode": "off",
-            "status": "not_applicable",
+        entry["review"] = {
+            **RENDER_REVIEW_NOT_APPLICABLE,
             "confirmed_at": utc_now(),
         }
+        entry["status"] = "render_ready"
+        state["render_review"] = dict(entry["review"])
         state["status"] = "render_ready"
     save_state(run_dir, state)
     print(f"renderer={args.renderer}", flush=True)
@@ -470,12 +688,15 @@ def cmd_choose_review(args: argparse.Namespace) -> None:
     renderer = state.get("renderer")
     if renderer not in {"html", "svg"}:
         raise RuntimeError("review choice is only available for html or svg renderer")
-    state["render_review"] = {
+    entry = renderer_state(state, renderer)
+    entry["review"] = {
         "mode": args.mode,
         "status": "pending" if args.mode == "on" else "skipped",
         "confirmed_at": utc_now(),
     }
-    state["status"] = "render_review_pending" if args.mode == "on" else "render_ready"
+    entry["status"] = "render_review_pending" if args.mode == "on" else "render_ready"
+    state["render_review"] = dict(entry["review"])
+    state["status"] = entry["status"]
     save_state(run_dir, state)
     print(f"review_mode={args.mode}", flush=True)
     if args.mode == "on":
@@ -486,19 +707,31 @@ def cmd_complete_review(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     renderer = state.get("renderer")
-    review = state.get("render_review") or {}
     if renderer not in {"html", "svg"}:
         raise RuntimeError("render review completion is only available for html or svg renderer")
+    entry = renderer_state(state, renderer)
+    review = entry.get("review") or {}
     if review.get("mode") != "on":
         raise RuntimeError("render review is not enabled")
-    state["render_review"] = {
+    entry["review"] = {
         **review,
         "status": "completed",
         "completed_at": utc_now(),
     }
+    entry["status"] = "render_ready"
+    state["render_review"] = dict(entry["review"])
     state["status"] = "render_ready"
     save_state(run_dir, state)
     print(f"review_completed={renderer}", flush=True)
+
+
+def cmd_prepare_render_jobs(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    renderer = args.renderer or load_state(run_dir).get("renderer")
+    if renderer not in {"html", "svg", "img"}:
+        raise RuntimeError("renderer must be html, svg, or img")
+    manifest = prepare_render_jobs(run_dir, renderer)
+    print(f"render_jobs={manifest}", flush=True)
 
 
 def cmd_export(args: argparse.Namespace) -> None:
@@ -529,6 +762,15 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"review_status={review.get('status')}", flush=True)
     for name, entry in sorted((state.get("artifacts") or {}).items()):
         print(f"{name}: {entry.get('status')} {entry.get('path')}", flush=True)
+    for renderer_name, entry in sorted((state.get("renderers") or {}).items()):
+        renderer_review = entry.get("review") or {}
+        print(
+            f"renderer[{renderer_name}]: status={entry.get('status')} "
+            f"review={renderer_review.get('mode')}/{renderer_review.get('status')}",
+            flush=True,
+        )
+        for artifact_name, artifact_entry in sorted((entry.get("artifacts") or {}).items()):
+            print(f"renderer[{renderer_name}].{artifact_name}: {artifact_entry.get('status')} {artifact_entry.get('path')}", flush=True)
     slides = read_json(run_dir / "slide-status.json", default={}).get("slides") or {}
     if slides:
         ready = sum(1 for item in slides.values() if item.get("export_ready"))
@@ -577,6 +819,11 @@ def build_parser() -> argparse.ArgumentParser:
     choose_review.add_argument("--run-dir", required=True)
     choose_review.add_argument("--mode", choices=["off", "on"], required=True)
     choose_review.set_defaults(func=cmd_choose_review)
+
+    jobs = sub.add_parser("prepare-render-jobs")
+    jobs.add_argument("--run-dir", required=True)
+    jobs.add_argument("--renderer", choices=["html", "svg", "img"], default=None)
+    jobs.set_defaults(func=cmd_prepare_render_jobs)
 
     complete_review = sub.add_parser("complete-review")
     complete_review.add_argument("--run-dir", required=True)

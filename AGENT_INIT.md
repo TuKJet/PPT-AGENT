@@ -68,6 +68,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
@@ -87,19 +89,21 @@ The helper removes render-only outputs and preserves approved source artifacts.
 For HTML:
 
 - `output/<run>/html/*.html`
-- `output/<run>/<deck>.pptx`
+- `output/<run>/<deck>-html.pptx`
 - `output/<run>/<deck>_editable.pptx` when DOM editable export succeeds
 - `output/<run>/editable-ppt-chain.json`
 
 For SVG:
 
 - `output/<run>/svg/*.svg`
-- `output/<run>/<deck>.pptx`
+- `output/<run>/<deck>-svg.pptx`
 
 For IMG:
 
 - `output/<run>/img/*.{png,jpg,jpeg}`
-- `output/<run>/<deck>.pptx`
+- `output/<run>/<deck>-img.pptx`
+
+For multi-renderer comparison, keep those artifacts in the same run directory and compare `html/`, `svg/`, `img/`, and the renderer-specific PPTX files side by side.
 
 ## Troubleshooting
 

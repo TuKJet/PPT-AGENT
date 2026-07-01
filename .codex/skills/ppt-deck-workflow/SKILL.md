@@ -29,6 +29,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-review --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
@@ -40,6 +41,8 @@ Run-directory discipline is mandatory:
 - Keep all intermediate artifacts, render files, review files, and exported decks inside that single `output/<project>/` folder.
 - Do not create workflow run directories in the repository root or elsewhere outside `output/`.
 - If you pass `--run-dir`, it must resolve inside `output/`; a bare relative name such as `project-a` is treated as `output/project-a`.
+- Do not reuse an existing run directory, empty directory, backup directory, smoke-test directory, or any other pre-existing folder as a shortcut for a new deck unless the user explicitly asks for reuse.
+- If creating the new `output/<project>/` folder fails because of sandbox, ACL, or helper-init restrictions, request the needed permission or escalation instead of reusing an existing folder or copying an old run as a workaround.
 
 Before generating any outline, contents, slide plans, HTML, SVG, IMG prompts, screenshot review, or repair pass, read `references/prompt-contracts.md`. It carries the old runner/pipeline prompt behavior in skill form: content rules, planning rules, role budgets, HTML/SVG generation constraints, screenshot review criteria, and repair feedback policy.
 
@@ -85,7 +88,7 @@ Concrete prohibitions:
 
 Do not use the Web UI for this workflow. The approval loop happens in the Codex conversation.
 
-Do not use repository model-provider code for research or synthesis. For `contents` generation, use Codex-native research capability directly: a Codex-installed research skill when available in the current session, or Codex web search/browsing. If the user requests freshness or current facts, follow higher-priority browsing policy in Codex, then cite or record research notes in the generated artifacts.
+Do not use repository model-provider code for research or synthesis. For `contents` generation, prefer this order: a Codex-installed local research skill when one is available in the current session, then direct Codex web search/browsing to primary sources when needed, then repo-local synthesis. If a suitable local research skill is available, invoke it first and let it structure the evidence-gathering pass instead of jumping straight to ad hoc web browsing. If the user requests freshness or current facts, follow higher-priority browsing policy in Codex, then cite or record research notes in the generated artifacts.
 
 For helper commands, use unbuffered Python (`-u`) so status lines stream back to Codex.
 
@@ -114,6 +117,7 @@ Encoding safety:
 
 - When manually editing Chinese or other non-ASCII artifact files from the shell, prefer ASCII-safe escaped JSON content if the local shell or path handling has shown encoding instability.
 - If a Windows shell path cannot reliably address the intended run directory because of encoding issues, locate the run directory programmatically first, then update only the current checkpoint artifact.
+- If the intended new run directory cannot be created or initialized in the current permission mode, stop and request approval for directory creation; do not fall back to any existing folder, even if it is empty.
 
 Render-stage review Markdown files such as `reviews/review-*.md` and `editable/review-*.md` are internal QA artifacts, not user approval checkpoints. Do not ask the user to review them one by one, and do not dump per-slide review summaries unless the user asks. At completion, use `slide-status.json` for a concise aggregate status and call out only exceptions: failed checks, warning counts, residual layout issues, fallback behavior, or export caveats.
 
@@ -148,6 +152,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-review --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
@@ -172,6 +177,32 @@ Monitoring cadence:
 - Do not kill, restart, or replace a live background phase just because there has been no new file output for several minutes.
 - If the process exits successfully, move to the normal approval checkpoint and provide the preview Markdown path.
 - If the process exits with an error, read the tail of the phase log, summarize the failure, and rerun only after fixing the cause or getting user direction.
+
+## Subagent Render Decomposition
+
+Use this when rendering `html` or `svg` decks with many pages, when the slide plans are dense, or when you want to keep the main Codex context focused on review and coordination instead of carrying every page draft inline.
+
+Recommended flow:
+
+1. Keep outline, contents, and slide-plan generation in the main agent because they are deck-global checkpoints.
+2. After `slide_plans` is approved and the renderer is chosen, materialize page jobs:
+
+```bash
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
+```
+
+3. The helper writes a shared deck context plus one job file per slide under `render-jobs/<renderer>/`.
+4. Dispatch one subagent per page job. Each subagent should read only its `slide-xx.json`, the shared context it references, and the prompt contract for the chosen renderer.
+5. Each subagent writes exactly one renderer source file into the same run directory, such as `output/<project>/html/...` or `output/<project>/svg/...`.
+6. The main agent stays responsible for naming consistency, spot-checking the results, running any render-review subflow, and deciding whether a page needs a follow-up subagent repair pass.
+7. If a page needs revision, send the same job file back to a subagent with the repair feedback instead of letting the main agent absorb the full page-generation context again.
+
+Guardrails:
+
+- Use the same run directory for subagent work; do not fork page jobs into separate project folders.
+- Treat `render-jobs/<renderer>/shared-context.json` as the deck-level source for cross-page consistency.
+- Keep the subagent scope page-local: one job file in, one renderer source file out.
+- The main agent should aggregate quality, not rewrite every page itself unless the change is trivial.
 
 ## IMG Prompt Compilation
 
@@ -270,7 +301,20 @@ Before every final render, clean render-only outputs from previous failed or int
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 ```
 
-Do not delete approved source artifacts such as `outline.json`, `contents.json`, `slide-plans.json`, previews, or `workflow-state.json`.
+In this Codex-authored branch, `clean-render` is for derived outputs only. It must not be used as a way to wipe `html/`, `svg/`, or `img/` source pages. If you truly need to rebuild renderer source files from scratch, do that intentionally after confirming the branch state instead of assuming cleanup should delete them.
+
+Do not delete approved source artifacts such as `outline.json`, `contents.json`, `slide-plans.json`, previews, `workflow-state.json`, or renderer source pages that were already authored for the active branch.
+
+## Multi-Renderer Compare Discipline
+
+When the user wants `html` and `img`, or any multi-renderer comparison:
+
+- Keep all renderer outputs in the same run directory under `output/<project>/`.
+- Renderer source files stay separated by subdirectory inside that same run directory, for example `output/<project>/html`, `output/<project>/svg`, and `output/<project>/img`.
+- Renderer-specific exports must also stay in the same run directory, using distinct filenames so compare artifacts do not overwrite each other.
+- Use renderer-specific status snapshots or manifests when available, but preserve the common checkpoint artifacts in place.
+- Never fork a comparison into sibling project directories unless the user explicitly asks for isolated branches.
+- If cleanup is needed, use `clean-render` only to remove derived outputs; do not use it as a shortcut to clear authored renderer source pages from the active run directory.
 
 ## Long-Running Render Etiquette
 
