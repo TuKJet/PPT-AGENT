@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280, height=720, initial-scale=1.0">
+  <title>各国接受度分层</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --card: #ffffff;
+      --ink: #152033;
+      --muted: #5d6879;
+      --line: #dbe3ee;
+      --navy: #153759;
+      --blue: #37679d;
+      --mid: #6f91b6;
+      --light: #cbd8e8;
+      --gold: #b98a47;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(circle at 12% 12%, rgba(55, 103, 157, 0.1), transparent 28%),
+        radial-gradient(circle at 88% 14%, rgba(185, 138, 71, 0.08), transparent 22%),
+        linear-gradient(180deg, #f8f9fc 0%, #f1f4f9 100%);
+      color: var(--ink);
+    }
+    .slide {
+      width: 1280px;
+      height: 720px;
+      padding: 28px 34px 24px;
+      display: grid;
+      grid-template-rows: 98px 1fr 78px;
+      gap: 16px;
+    }
+    .header {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .eyebrow {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      color: var(--blue);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      max-width: 1120px;
+    }
+    .sub {
+      margin-top: 7px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .main {
+      display: grid;
+      grid-template-columns: 1.02fr 0.98fr;
+      gap: 18px;
+      min-height: 0;
+    }
+    .card {
+      min-height: 0;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(219, 227, 238, 0.98);
+      border-radius: 24px;
+      box-shadow: 0 22px 48px rgba(21, 32, 51, 0.08);
+    }
+    .stack {
+      padding: 24px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+    }
+    .label {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: #e9f0fb;
+      color: var(--navy);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .pyramid {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: end;
+      gap: 12px;
+      padding: 10px 0 4px;
+    }
+    .layer {
+      color: #f9fbff;
+      border-radius: 22px;
+      padding: 16px 18px;
+      box-shadow: 0 16px 28px rgba(21, 32, 51, 0.08);
+    }
+    .layer strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1.12;
+      margin-bottom: 6px;
+    }
+    .layer span {
+      display: block;
+      font-size: 13px;
+      line-height: 1.45;
+      color: rgba(246, 249, 255, 0.92);
+      max-width: 520px;
+    }
+    .layer.one {
+      width: 62%;
+      margin-left: 19%;
+      background: linear-gradient(180deg, #274f7d 0%, #18385d 100%);
+    }
+    .layer.two {
+      width: 80%;
+      margin-left: 10%;
+      background: linear-gradient(180deg, #5d81a8 0%, #3d638c 100%);
+    }
+    .layer.three {
+      width: 100%;
+      background: linear-gradient(180deg, #9eb4cc 0%, #809dbd 100%);
+    }
+    .side {
+      padding: 22px;
+      display: grid;
+      grid-template-rows: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .note {
+      border-radius: 20px;
+      padding: 16px 18px;
+      background: #fbfcfe;
+      border: 1px solid #e6edf5;
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+    .note .tag {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--navy);
+      background: #eaf1fb;
+    }
+    .note strong {
+      display: block;
+      font-size: 16px;
+      line-height: 1.25;
+      margin-bottom: 5px;
+      color: var(--ink);
+    }
+    .note p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .region {
+      background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+    }
+    .region .tag {
+      background: #fff5e8;
+      color: #8d6228;
+    }
+    .footer {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 16px;
+    }
+    .footer-box {
+      border-radius: 18px;
+      padding: 16px 18px;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid #dce5ef;
+      box-shadow: 0 12px 24px rgba(21, 32, 51, 0.05);
+    }
+    .footer-box strong {
+      display: block;
+      font-size: 13px;
+      color: var(--blue);
+      margin-bottom: 6px;
+    }
+    .footer-box span {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <div class="slide">
+    <div class="header">
+      <div class="eyebrow">Global Pattern</div>
+      <h1>各国正在形成“三层接受度”格局：接受 AI 辅助、限制 AI 署名、严查创造性归属</h1>
+      <div class="sub">全球不是简单分成“支持”与“反对”，而是在形成一套更细的法域分层和举证逻辑</div>
+    </div>
+
+    <div class="main">
+      <section class="card stack">
+        <div class="label">接受度结构</div>
+        <div class="pyramid">
+          <div class="layer one">
+            <strong>接受 AI 辅助</strong>
+            <span>只要能证明自然人对发明构思作出实质贡献，AI 参与并不当然阻断申请。</span>
+          </div>
+          <div class="layer two">
+            <strong>限制 AI 署名</strong>
+            <span>机器可以参与生成，但不能替代人类承担发明人资格、权利归属与法律责任。</span>
+          </div>
+          <div class="layer three">
+            <strong>严查创造性归属</strong>
+            <span>共同审查底线已收敛到三个问题：谁提出问题、谁做关键技术选择、谁能证明技术效果与创造性判断来自人类。</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="card side">
+        <div class="note">
+          <div class="tag">Layer 1</div>
+          <div>
+            <strong>务实审查</strong>
+            <p>以美国为代表，更关注申请材料能否完整说明人类主导与实质贡献。</p>
+          </div>
+        </div>
+        <div class="note">
+          <div class="tag">Layer 2</div>
+          <div>
+            <strong>审慎署名</strong>
+            <p>以欧洲为代表，更明确区分“AI 可参与创新过程”与“AI 不能成为法定发明人”。</p>
+          </div>
+        </div>
+        <div class="note region">
+          <div class="tag">法域分组</div>
+          <div>
+            <strong>美国 / 中国 / 日本 / 韩国</strong>
+            <p>更接近“务实审查”框架，重点看申请文件如何证明人为主导。</p>
+          </div>
+        </div>
+        <div class="note region">
+          <div class="tag">法域分组</div>
+          <div>
+            <strong>欧洲</strong>
+            <p>更接近“审慎审查”框架，对发明人资格、创造性判断和权利主体口径更严格。</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="footer">
+      <div class="footer-box">
+        <strong>共同底线</strong>
+        <span>AI 不能替代人类承担发明人资格与创造性证明。</span>
+      </div>
+      <div class="footer-box">
+        <strong>管理含义</strong>
+        <span>企业不能只问“哪些国家更友好”，而要问“在不同法域下，如何设计申请表述、权利归属与举证策略”。</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

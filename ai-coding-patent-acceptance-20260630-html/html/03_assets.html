@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280, height=720, initial-scale=1.0">
+  <title>可授权资产的分水岭</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --card: #ffffff;
+      --ink: #142033;
+      --muted: #5e697b;
+      --line: #dce4ef;
+      --navy: #17395d;
+      --blue: #315f94;
+      --gold: #b98a47;
+      --soft-gold: #fbf4e9;
+      --soft-gray: #f7f9fc;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(49, 95, 148, 0.1), transparent 26%),
+        radial-gradient(circle at 90% 14%, rgba(185, 138, 71, 0.07), transparent 22%),
+        linear-gradient(180deg, #f8f9fc 0%, #f1f4f9 100%);
+      color: var(--ink);
+    }
+    .slide {
+      width: 1280px;
+      height: 720px;
+      padding: 28px 34px 24px;
+      display: grid;
+      grid-template-rows: 96px 1fr 92px;
+      gap: 16px;
+    }
+    .eyebrow {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      color: var(--blue);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 31px;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      max-width: 1120px;
+    }
+    .sub {
+      margin-top: 6px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .panel {
+      min-height: 0;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(220, 228, 239, 0.98);
+      border-radius: 24px;
+      box-shadow: 0 22px 48px rgba(21, 32, 51, 0.08);
+      padding: 22px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-size: 23px;
+      line-height: 1.15;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .badge.good {
+      background: var(--soft-gold);
+      color: #8a6224;
+    }
+    .badge.risk {
+      background: #edf2f8;
+      color: #64748b;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      min-height: 0;
+    }
+    .item {
+      border-radius: 18px;
+      padding: 16px 16px 14px;
+      border: 1px solid #e6ecf4;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item strong {
+      font-size: 16px;
+      line-height: 1.2;
+      color: var(--ink);
+    }
+    .item span {
+      font-size: 13px;
+      line-height: 1.48;
+      color: var(--muted);
+    }
+    .item.good {
+      border-color: #ead5af;
+      background: linear-gradient(180deg, #fffdf8 0%, #faf4e8 100%);
+    }
+    .item.risk {
+      background: linear-gradient(180deg, #fbfcfe 0%, #f3f6fa 100%);
+    }
+    .chain {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 10px;
+      align-items: center;
+    }
+    .chain-step {
+      position: relative;
+      padding: 16px 10px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid #dce4ef;
+      text-align: center;
+      box-shadow: 0 12px 24px rgba(21, 32, 51, 0.05);
+    }
+    .chain-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -10px;
+      width: 10px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--blue), rgba(49,95,148,0.2));
+    }
+    .chain-step strong {
+      display: block;
+      font-size: 15px;
+      color: var(--navy);
+      margin-bottom: 4px;
+    }
+    .chain-step span {
+      font-size: 11px;
+      line-height: 1.35;
+      color: var(--muted);
+    }
+    .footer {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 16px;
+    }
+    .footer-box {
+      border-radius: 18px;
+      padding: 16px 18px;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid #dce5ef;
+      box-shadow: 0 12px 24px rgba(21, 32, 51, 0.05);
+    }
+    .footer-box strong {
+      display: block;
+      font-size: 13px;
+      color: var(--blue);
+      margin-bottom: 6px;
+    }
+    .footer-box span {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--ink);
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <div class="slide">
+    <div>
+      <div class="eyebrow">Asset Conversion</div>
+      <h1>企业竞争的分水岭，不在是否使用 AI Coding，而在能否把共创过程沉淀为可授权资产</h1>
+      <div class="sub">最稀缺的能力不是“生成代码”，而是把工程创新组织化、证据化、资产化</div>
+    </div>
+
+    <div class="main">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>高价值可专利区</h2>
+          <div class="badge good">更适合重点投入</div>
+        </div>
+        <div class="grid">
+          <div class="item good"><strong>工程方法</strong><span>围绕 AI Coding 构建的新流程、新校验、新协作机制。</span></div>
+          <div class="item good"><strong>系统架构</strong><span>模型、工具链、平台能力与研发系统的协同设计。</span></div>
+          <div class="item good"><strong>质量提升</strong><span>代码正确性、稳定性、缺陷率下降等可验证技术效果。</span></div>
+          <div class="item good"><strong>效率优化</strong><span>交付周期、算力利用、评审效率与工程吞吐的改进。</span></div>
+          <div class="item good"><strong>场景化方案</strong><span>在特定行业或复杂业务场景中的落地型解决方案。</span></div>
+          <div class="item good"><strong>组合能力</strong><span>把方法、系统和数据反馈闭环为可复制的技术资产。</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>低稳定性区域</h2>
+          <div class="badge risk">不宜作为壁垒核心</div>
+        </div>
+        <div class="grid">
+          <div class="item risk"><strong>单一提示词</strong><span>表达容易被替代，难形成稳定专利边界。</span></div>
+          <div class="item risk"><strong>通用代码片段</strong><span>缺少足够独特性与技术效果支撑，授权稳定性较弱。</span></div>
+          <div class="item risk"><strong>纯业务逻辑</strong><span>如果没有技术实现改进，难以构成高强度专利保护。</span></div>
+          <div class="item risk"><strong>无留痕方案</strong><span>即使做出了创新，也可能因举证不足而无法稳定授权。</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="footer">
+      <div class="footer-box">
+        <strong>证据链流程</strong>
+        <div class="chain">
+          <div class="chain-step"><strong>提示</strong><span>问题定义</span></div>
+          <div class="chain-step"><strong>选择</strong><span>方案取舍</span></div>
+          <div class="chain-step"><strong>实验</strong><span>效果对比</span></div>
+          <div class="chain-step"><strong>评审</strong><span>人类判断</span></div>
+          <div class="chain-step"><strong>迭代</strong><span>持续优化</span></div>
+          <div class="chain-step"><strong>资产化</strong><span>申请布局</span></div>
+        </div>
+      </div>
+      <div class="footer-box">
+        <strong>结论</strong>
+        <span>专利竞争力最终取决于证据链，而非代码生成速度。</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

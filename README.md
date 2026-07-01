@@ -1,88 +1,56 @@
 # PPT Deck Workflow Agent
 
-Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and HTML/SVG renderer branches.
+Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and HTML/SVG/IMG renderer branches.
 
-This repository is intended to be distributed as source code. Do not commit machine-local runtimes such as `.venv/`, `.python/`, `.ms-playwright/`, generated `output/`, or a real `.env` file.
+This branch is skill-first. Codex generates deck content inside the Codex conversation; repository code only handles deterministic artifact bookkeeping, render cleanup, screenshots, and PPTX export.
 
 ## Quick Start
 
-Install `uv` first:
-
-```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-On Windows, use PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Then initialize the project:
+Install `uv`, then initialize the project:
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env
-uv run python -m ppt_workflow.runner --help
-```
-
-On Windows PowerShell, use this instead of `cp`:
-
-```powershell
-Copy-Item .env.example .env
-uv run python -m ppt_workflow.runner --help
-```
-
-Edit `.env` with your model gateway:
-
-```bash
-OPENAI_API_KEY=your_key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
-HTML_AI_REVIEW_ENABLED=false
-SVG_AI_REVIEW_ENABLED=false
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py --help
 ```
 
 ## Workflow
 
-Run commands from the repository root.
+Use the local skill at `.codex/skills/ppt-deck-workflow/SKILL.md`.
+
+The helper command is:
 
 ```bash
-uv run python -u -m ppt_workflow.runner outline --topic "..." --audience "..." --pages "12" --provider openai --research "..."
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact outline
-uv run python -u -m ppt_workflow.runner contents --run-dir output/...
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact contents
-uv run python -u -m ppt_workflow.runner plans --run-dir output/...
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact slide_plans
-uv run python -u -m ppt_workflow.runner choose-renderer --run-dir output/... --renderer html
-HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt_workflow.runner render --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py ...
 ```
 
-Use `--renderer svg` for the SVG branch.
-
-Before rerunning a final render, clean only render outputs under the run directory, not approved source artifacts:
+Typical helper calls:
 
 ```bash
-rm -rf output/.../html output/.../svg output/.../reviews output/.../editable output/.../slide-status.json output/.../editable-ppt-chain.json output/.../*.pptx
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "12"
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact outline
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact outline
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact contents
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
-On Windows PowerShell:
+Codex writes `outline.json`, `contents.json`, `slide-plans.json`, and the final `html/`, `svg/`, or `img/` renderer files. The helper does not call model APIs.
 
-```powershell
-Remove-Item -Recurse -Force output\...\html, output\...\svg, output\...\reviews, output\...\editable -ErrorAction SilentlyContinue
-Remove-Item -Force output\...\slide-status.json, output\...\editable-ppt-chain.json, output\...\*.pptx -ErrorAction SilentlyContinue
-```
+For `html` and `svg`, renderer choice is followed by an explicit render-review preference:
 
-## Codex Skill
-
-The local skill lives at `.codex/skills/ppt-deck-workflow/SKILL.md`. When using Codex in this repository, ask it to use the `ppt-deck-workflow` skill and keep approvals in chat.
+- `off`: default and recommended unless the user wants an extra review/repair pass
+- `on`: Codex runs a screenshot review subflow before export, then records completion with `complete-review`
 
 ## Notes
 
 - Generated decks are written to `output/`.
-- HTML rendering requires Playwright Chromium.
-- The editable PPTX export is best-effort and may use DOM source preview when platform-specific PowerPoint readback tools are unavailable.
-- Long model calls require a gateway that can handle large `/chat/completions` requests without short timeouts.
-
+- Content research should use Codex-native research/web capability directly, not repository AI provider code.
+- HTML and SVG export require Playwright Chromium.
+- HTML export creates an image PPTX and attempts a DOM-based editable PPTX.
+- Do not use `ppt_workflow.runner`; it is intentionally removed in this branch.

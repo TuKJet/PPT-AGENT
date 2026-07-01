@@ -1,5 +1,7 @@
 import json
+import math
 import re
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from ai_client import AIClient
@@ -96,6 +98,7 @@ def _generate_with_retry(label: str, func, attempts: int = 5):
             last_exc = exc
             if attempt < attempts:
                 print(f"    [重试] {label} 第 {attempt} 次失败，准备重试：{exc}")
+                time.sleep(min(60, 8 * attempt))
             else:
                 raise
     raise last_exc
@@ -197,8 +200,15 @@ def _apply_issue_aware_svg_fixes(svg: str, issues: list[dict]) -> str:
                 y_val = float(y)
             except ValueError:
                 break
+            if not math.isfinite(y_val):
+                break
 
-            overflow = float(issue.get("overflow_y", 0) or 0)
+            try:
+                overflow = float(issue.get("overflow_y", 0) or 0)
+            except (TypeError, ValueError):
+                overflow = 0
+            if not math.isfinite(overflow):
+                overflow = 0
             shift = max(8, int(overflow) + 6)
             elem.set('y', str(int(y_val - shift)))
             cls = elem.get('class', '')
@@ -216,6 +226,13 @@ def _apply_issue_aware_svg_fixes(svg: str, issues: list[dict]) -> str:
         card_x = issue.get("card_x")
         card_y = issue.get("card_y")
         if card_x is not None and card_y is not None:
+            try:
+                card_x_val = float(card_x)
+                card_y_val = float(card_y)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(card_x_val) or not math.isfinite(card_y_val):
+                continue
             for elem in root.iter():
                 if elem.tag.split('}')[-1] != 'rect':
                     continue
@@ -225,8 +242,16 @@ def _apply_issue_aware_svg_fixes(svg: str, issues: list[dict]) -> str:
                     h = float(elem.get('height', 'nan'))
                 except ValueError:
                     continue
-                if int(x) == int(card_x) and int(y) == int(card_y):
-                    elem.set('height', str(int(h + max(8, int(issue.get("overflow_y", 0) or 0) + 6))))
+                if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(h):
+                    continue
+                try:
+                    overflow = float(issue.get("overflow_y", 0) or 0)
+                except (TypeError, ValueError):
+                    overflow = 0
+                if not math.isfinite(overflow):
+                    overflow = 0
+                if int(x) == int(card_x_val) and int(y) == int(card_y_val):
+                    elem.set('height', str(int(h + max(8, int(overflow) + 6))))
                     changed = True
                     break
 
@@ -245,6 +270,8 @@ def _apply_issue_aware_svg_fixes(svg: str, issues: list[dict]) -> str:
             try:
                 y_val = float(y)
             except ValueError:
+                break
+            if not math.isfinite(y_val):
                 break
             elem.set('y', str(int(y_val + 10)))
             changed = True
@@ -366,7 +393,11 @@ def _validate_and_optionally_regenerate_svg(client: AIClient, svg_path: Path,
             print(f"    [检查] {svg_path.name} 存在结构性 SVG 问题，执行一次重生成...")
         else:
             print(f"    [精修] {svg_path.name} 仍有问题，执行逐页精修重生成...")
-        current_svg = step4_svg(client, title, material, plan, audience, page_role, layout_feedback=regen_feedback)
+        try:
+            current_svg = step4_svg(client, title, material, plan, audience, page_role, layout_feedback=regen_feedback)
+        except Exception as exc:
+            print(f"    [检查] {svg_path.name} optional regeneration failed; continuing with current best SVG: {exc}")
+            return current_svg, current_issues
         current_svg = _apply_issue_aware_svg_fixes(current_svg, current_issues)
         current_svg = _apply_final_svg_compaction(current_svg)
         svg_path.write_text(current_svg, encoding="utf-8")

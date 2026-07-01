@@ -6,6 +6,7 @@
 .venv/
 .python/
 .ms-playwright/
+.uv-cache/
 .ppt_agent_cache/
 .pycache-check/
 .omx/

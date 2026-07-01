@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280, height=720, initial-scale=1.0">
+  <title>AI Coding的专利接受度正在转向</title>
+  <style>
+    :root {
+      --bg: #f4f6fa;
+      --card: rgba(255, 255, 255, 0.92);
+      --ink: #152033;
+      --muted: #5f6b7d;
+      --line: #d8dfeb;
+      --navy: #16385f;
+      --blue: #2f5f95;
+      --gold: #b98a47;
+      --pale: #edf3fb;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      overflow: hidden;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(circle at 10% 8%, rgba(47, 95, 149, 0.12), transparent 28%),
+        radial-gradient(circle at 92% 18%, rgba(185, 138, 71, 0.09), transparent 22%),
+        linear-gradient(180deg, #f8f9fc 0%, #f1f4f9 100%);
+      color: var(--ink);
+    }
+    .slide {
+      width: 1280px;
+      height: 720px;
+      padding: 28px 34px 26px;
+      display: grid;
+      grid-template-rows: 112px 1fr 72px;
+      gap: 16px;
+    }
+    .header {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 0;
+    }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      color: var(--blue);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 34px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--navy), var(--gold));
+    }
+    h1 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.14;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      max-width: 1030px;
+    }
+    .sub {
+      margin-top: 8px;
+      font-size: 15px;
+      color: var(--muted);
+    }
+    .main {
+      display: grid;
+      grid-template-columns: 1.38fr 0.92fr;
+      gap: 18px;
+      min-height: 0;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid rgba(216, 223, 235, 0.95);
+      border-radius: 24px;
+      box-shadow: 0 22px 48px rgba(21, 32, 51, 0.08);
+      min-height: 0;
+    }
+    .journey {
+      padding: 28px 28px 24px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 20px;
+    }
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: #eaf1fb;
+      color: var(--navy);
+      font-size: 12px;
+      font-weight: 800;
+      width: fit-content;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      align-items: stretch;
+      gap: 14px;
+      min-height: 0;
+    }
+    .step {
+      position: relative;
+      padding: 18px 16px 16px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+      border: 1px solid #e5ebf3;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      right: -12px;
+      top: 50%;
+      width: 20px;
+      height: 2px;
+      background: linear-gradient(90deg, var(--blue), rgba(47, 95, 149, 0.25));
+    }
+    .num {
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: 0.08em;
+    }
+    .step h2 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.16;
+      font-weight: 800;
+    }
+    .step p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .thesis {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 14px;
+    }
+    .thesis-card {
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: #f8fafc;
+      border: 1px solid #e7edf5;
+    }
+    .thesis-card strong {
+      display: block;
+      font-size: 13px;
+      color: var(--navy);
+      margin-bottom: 6px;
+    }
+    .thesis-card span {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .callout {
+      padding: 26px 24px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 16px;
+      background:
+        linear-gradient(180deg, rgba(22, 56, 95, 0.96) 0%, rgba(24, 67, 112, 0.97) 100%);
+      color: #f8fbff;
+      position: relative;
+      overflow: hidden;
+    }
+    .callout::after {
+      content: "";
+      position: absolute;
+      inset: auto -40px -52px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(185, 138, 71, 0.22), transparent 66%);
+    }
+    .callout-badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      color: #dbe9ff;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+    .callout h3 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.16;
+      font-weight: 800;
+      max-width: 320px;
+    }
+    .callout p {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+      color: rgba(244, 248, 255, 0.9);
+      max-width: 360px;
+    }
+    .quote {
+      align-self: end;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.18);
+      font-size: 14px;
+      line-height: 1.55;
+      color: #f4f7fb;
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 0 4px;
+    }
+    .tags {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 9px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--navy);
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid #dce4ef;
+      box-shadow: 0 8px 18px rgba(21, 32, 51, 0.06);
+    }
+    .footnote {
+      font-size: 12px;
+      color: #7a8697;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+  </style>
+<style id="claude-step-card-safe-style">
+
+.steps,
+.process-grid,
+.process-wrap {
+  gap: 8px !important;
+}
+.step {
+  grid-template-columns: 40px 1fr !important;
+  gap: 8px !important;
+  padding: 10px !important;
+  min-width: 0 !important;
+}
+.step-num,
+.step-no {
+  width: 40px !important;
+  height: 40px !important;
+  font-size: 18px !important;
+  border-radius: 10px !important;
+  flex: 0 0 40px !important;
+}
+.step-body,
+.step-head {
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+.step-title,
+.step h4 {
+  font-size: 16px !important;
+  line-height: 1.12 !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+.step-text,
+.step-desc,
+.step p,
+.card-sub,
+.mini-note {
+  font-size: 12px !important;
+  line-height: 1.26 !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+.step-note,
+.step-time {
+  font-size: 11px !important;
+  line-height: 1.15 !important;
+}
+.split,
+.mini-tags,
+.step-tags {
+  gap: 6px !important;
+}
+.mini-tag,
+.pill-green,
+.pill-red,
+.step-tag {
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+</style>
+<style id="claude-compact-style">
+
+.slide {
+  gap: 12px !important;
+  padding: 16px 18px 14px 18px !important;
+}
+.header {
+  gap: 6px !important;
+  max-height: 104px !important;
+}
+.title {
+  font-size: 30px !important;
+  line-height: 1.15 !important;
+}
+.subtitle {
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+}
+.card,
+.summary-card,
+.footer-card {
+  padding: 14px 16px !important;
+}
+.card-inner {
+  padding: 14px 16px !important;
+}
+.card-title,
+.mini-title,
+.side-title,
+.panel-title {
+  font-size: 19px !important;
+  line-height: 1.18 !important;
+  margin-bottom: 10px !important;
+}
+.step,
+.stage,
+.launch-box {
+  padding: 12px !important;
+}
+.timeline-card {
+  justify-content: flex-start !important;
+  gap: 10px !important;
+}
+.flow,
+.summary,
+.decision-steps,
+.interest-grid,
+.top-right,
+.bottom-right,
+.timeline,
+.main,
+.platforms,
+.tags,
+.stage-tags {
+  gap: 10px !important;
+}
+.metric-main {
+  gap: 12px !important;
+  margin: 8px 0 8px !important;
+}
+.num-block {
+  padding: 12px 12px 10px !important;
+}
+.tag,
+.pill,
+.platform {
+  font-size: 11px !important;
+  padding: 5px 9px !important;
+}
+.footer,
+.summary-card,
+.footer-card {
+  height: 84px !important;
+  min-height: 84px !important;
+}
+.summary-quote,
+.footer-key {
+  font-size: 22px !important;
+  line-height: 1.15 !important;
+}
+.summary-sub,
+.footer-text,
+.metric-desc,
+.step-text,
+.stage-desc,
+.panel-desc,
+.launch-text,
+.accept-line,
+.lead,
+.box-sub,
+.metric-sub,
+.mini-text {
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+.metric,
+.metric-big,
+.metric.small,
+.launch-date,
+.num {
+  font-size: 32px !important;
+  line-height: 1 !important;
+}
+.step-num,
+.icon {
+  transform: scale(0.92);
+  transform-origin: center;
+}
+
+</style>
+</head>
+<body>
+  <div class="slide">
+    <div class="header">
+      <div class="eyebrow">Strategic Framing</div>
+      <h1>AI Coding 的专利接受度，正在从“能否申请”转向“如何证明人类创造贡献”</h1>
+      <div class="sub">全球共识不是排斥 AI 参与研发，而是收紧发明人资格、创造性归属与证据责任</div>
+    </div>
+
+    <div class="main">
+      <section class="panel journey">
+        <div class="section-label">判断路径正在改变</div>
+        <div class="steps">
+          <div class="step">
+            <div class="num">01 / 早期问题</div>
+            <h2>能否申请</h2>
+            <p>AI 参与研发会不会直接让专利申请失去合法性。</p>
+          </div>
+          <div class="step">
+            <div class="num">02 / 当前焦点</div>
+            <h2>谁是发明人</h2>
+            <p>AI 可以参与生成，但法律主体、责任主体仍需回到自然人。</p>
+          </div>
+          <div class="step">
+            <div class="num">03 / 核心门槛</div>
+            <h2>如何证明贡献</h2>
+            <p>决定授权稳定性的，是人类贡献、技术效果与全过程证据链。</p>
+          </div>
+        </div>
+        <div class="thesis">
+          <div class="thesis-card">
+            <strong>主结论</strong>
+            <span>AI 辅助创新正在被接受，AI 独立发明并未被接受。</span>
+          </div>
+          <div class="thesis-card">
+            <strong>组织含义</strong>
+            <span>专利治理能力正在取代“是否上工具”成为新的竞争分水岭。</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel callout">
+        <div class="callout-badge">管理层核心命题</div>
+        <h3>从工具使用，升级到 IP 治理</h3>
+        <p>管理层真正需要回答的，不是要不要用 AI，而是如何把人机共创结果稳定沉淀为可申请、可授权、可维权的资产。</p>
+        <div class="quote">如果组织没有对“人类贡献”和“证据链”形成标准动作，再高的编码效率也很难转化为跨法域可保护资产。</div>
+      </aside>
+    </div>
+
+    <div class="footer">
+      <div class="tags">
+        <div class="tag">人类贡献</div>
+        <div class="tag">技术效果</div>
+        <div class="tag">证据链</div>
+      </div>
+      <div class="footnote">AI-assisted innovation is accepted; unassigned inventorship is not.</div>
+    </div>
+  </div>
+</body>
+</html>

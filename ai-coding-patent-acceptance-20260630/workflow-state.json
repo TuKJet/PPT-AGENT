@@ -1,0 +1,44 @@
+{
+  "version": 3,
+  "status": "slide_plans_approved",
+  "approvals": {
+    "outline": true,
+    "contents": true,
+    "slide_plans": true
+  },
+  "artifacts": {
+    "outline": {
+      "path": "ai-coding-patent-acceptance-20260630\\outline.json",
+      "preview_path": "ai-coding-patent-acceptance-20260630\\outline-preview.md",
+      "status": "approved",
+      "updated_at": "2026-06-30T11:23:00.929729Z",
+      "approved_at": "2026-06-30T11:26:26.216519Z"
+    },
+    "contents": {
+      "path": "ai-coding-patent-acceptance-20260630\\contents.json",
+      "preview_path": "ai-coding-patent-acceptance-20260630\\contents-preview.md",
+      "status": "approved",
+      "updated_at": "2026-06-30T11:27:24.262453Z",
+      "approved_at": "2026-06-30T11:28:20.811009Z"
+    },
+    "slide_plans": {
+      "path": "ai-coding-patent-acceptance-20260630\\slide-plans.json",
+      "preview_path": "ai-coding-patent-acceptance-20260630\\slide-plans-preview.md",
+      "status": "approved",
+      "updated_at": "2026-06-30T11:29:38.892558Z",
+      "approved_at": "2026-06-30T11:31:24.150386Z"
+    }
+  },
+  "renderer": null,
+  "render_review": {
+    "mode": null,
+    "status": "not_applicable"
+  },
+  "execution": "codex-skill",
+  "topic": "介绍AI coding在各国专利侧的接受程度",
+  "audience": "management",
+  "pages": "4",
+  "research": "宏观管理层视角，聚焦各国专利实践对AI辅助发明与申请归属的接受程度，不提前展开细节研究",
+  "created_at": "2026-06-30T11:22:22.672447Z",
+  "updated_at": "2026-06-30T11:31:24.150386Z"
+}

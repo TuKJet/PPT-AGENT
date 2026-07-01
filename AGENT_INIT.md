@@ -1,10 +1,10 @@
 # Agent Initialization Guide
 
-Use this guide when an agent is asked to set up this project on a fresh machine, including Windows.
+Use this guide when an agent is asked to set up this project on a fresh machine.
 
 ## Goal
 
-Prepare the repository so the PPT workflow can run from source with `uv`, without relying on copied local runtime folders.
+Prepare the repository so the Codex skill can manage PPT artifacts and export decks without relying on copied local runtime folders or repository model API credentials.
 
 ## Do Not Commit Or Copy
 
@@ -18,8 +18,6 @@ Do not commit these machine-local or generated paths:
 - `__pycache__/`
 - `.omx/`
 - `.ppt_agent_cache/`
-
-They are intentionally excluded because Python virtual environments, Python runtime builds, and Playwright browser caches are OS/architecture-specific.
 
 ## Required Setup
 
@@ -49,120 +47,61 @@ uv sync
 uv run playwright install chromium
 ```
 
-4. Create local environment config.
-
-macOS/Linux:
+4. Verify the skill helper.
 
 ```bash
-cp .env.example .env
-```
-
-Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-5. Edit `.env`.
-
-Set at least:
-
-```bash
-OPENAI_API_KEY=
-OPENAI_BASE_URL=
-OPENAI_MODEL=
-HTML_AI_REVIEW_ENABLED=false
-SVG_AI_REVIEW_ENABLED=false
-```
-
-6. Verify the runner.
-
-```bash
-uv run python -m ppt_workflow.runner --help
-```
-
-7. Optional API smoke test.
-
-```bash
-uv run python -c "from ai_client import AIClient; c=AIClient('openai'); print(c.provider, c.model); print(c.chat('test', '只回复 OK', temperature=0.1)[:80])"
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py --help
 ```
 
 ## Running The Workflow
 
-Always run from the repository root.
+Always run from the repository root and use the local `ppt-deck-workflow` skill.
 
-Generate outline:
-
-```bash
-uv run python -u -m ppt_workflow.runner outline --topic "..." --audience "..." --pages "12" --provider openai --research "..."
-```
-
-Approve artifacts only after the user approves in chat:
+Codex generates `outline.json`, `contents.json`, `slide-plans.json`, and renderer source files. The helper only manages state, previews, cleanup, and export:
 
 ```bash
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact outline
-uv run python -u -m ppt_workflow.runner contents --run-dir output/...
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact contents
-uv run python -u -m ppt_workflow.runner plans --run-dir output/...
-uv run python -u -m ppt_workflow.runner approve --run-dir output/... --artifact slide_plans
-```
-
-Choose renderer after slide plans are approved:
-
-```bash
-uv run python -u -m ppt_workflow.runner choose-renderer --run-dir output/... --renderer html
-```
-
-Final render with review disabled by default:
-
-```bash
-HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt_workflow.runner render --run-dir output/...
-```
-
-Windows PowerShell equivalent:
-
-```powershell
-$env:HTML_AI_REVIEW_ENABLED="false"
-$env:SVG_AI_REVIEW_ENABLED="false"
-uv run python -u -m ppt_workflow.runner render --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "12"
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact outline
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact outline
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact contents
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
 ## Rerun Hygiene
 
-Before rerunning final render for the same run directory, remove render-only outputs so stale slides cannot enter the exported PPTX.
-
-Do not delete approved source artifacts such as:
-
-- `outline.json`
-- `contents.json`
-- `slide-plans.json`
-- `workflow-state.json`
-
-macOS/Linux:
+Before rerunning final export for the same run directory, call:
 
 ```bash
-rm -rf output/.../html output/.../svg output/.../reviews output/.../editable output/.../slide-status.json output/.../editable-ppt-chain.json output/.../*.pptx
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 ```
 
-Windows PowerShell:
-
-```powershell
-Remove-Item -Recurse -Force output\...\html, output\...\svg, output\...\reviews, output\...\editable -ErrorAction SilentlyContinue
-Remove-Item -Force output\...\slide-status.json, output\...\editable-ppt-chain.json, output\...\*.pptx -ErrorAction SilentlyContinue
-```
+The helper removes render-only outputs and preserves approved source artifacts.
 
 ## Expected Outputs
 
-For the HTML renderer, expect:
+For HTML:
 
 - `output/<run>/html/*.html`
-- `output/<run>/reviews/slide-*.png`
 - `output/<run>/<deck>.pptx`
-- `output/<run>/<deck>_editable.pptx`
+- `output/<run>/<deck>_editable.pptx` when DOM editable export succeeds
 - `output/<run>/editable-ppt-chain.json`
+
+For SVG:
+
+- `output/<run>/svg/*.svg`
+- `output/<run>/<deck>.pptx`
+
+For IMG:
+
+- `output/<run>/img/*.{png,jpg,jpeg}`
+- `output/<run>/<deck>.pptx`
 
 ## Troubleshooting
 
 - If Playwright cannot launch Chromium, rerun `uv run playwright install chromium`.
-- If API smoke tests pass but rendering fails with `504`, `502`, or server disconnects, the model gateway likely cannot handle long generation requests. Use a more stable gateway/model or increase upstream timeout.
-- If Windows shell syntax fails, use the PowerShell examples above instead of POSIX environment-variable prefixes.
+- If editable export fails, the image PPTX can still be valid; check `workflow-state.json` and `slide-status.json`.
