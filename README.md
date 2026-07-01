@@ -62,6 +62,8 @@ HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt
 
 Use `--renderer svg` for the SVG branch.
 
+Use `--renderer img` for the full-slide image branch. This branch requires `KRILL_IMAGE_API_URL`, `KRILL_IMAGE_API_KEY`, and optionally `KRILL_IMAGE_MODEL` in `.env`. If they are missing, the workflow will stop and ask you to either configure them or choose `html`/`svg` instead.
+
 Before rerunning a final render, clean only render outputs under the run directory, not approved source artifacts:
 
 ```bash
@@ -85,4 +87,5 @@ The local skill lives at `.codex/skills/ppt-deck-workflow/SKILL.md`. When using 
 - HTML rendering requires Playwright Chromium.
 - The editable PPTX export is best-effort and may use DOM source preview when platform-specific PowerPoint readback tools are unavailable.
 - Long model calls require a gateway that can handle large `/chat/completions` requests without short timeouts.
+- The `img` renderer generates one image per slide via the configured third-party image API and exports a non-editable image PPTX.
 

@@ -208,6 +208,32 @@ def write_slide_status(out_dir: Path, slide_status: dict) -> Path:
     return status_path
 
 
+def build_pptx_from_images(image_dir: Path, output_path: Path) -> Path:
+    prs = Presentation()
+    prs.slide_width = SLIDE_W
+    prs.slide_height = SLIDE_H
+    blank_layout = prs.slide_layouts[6]
+
+    image_files = sorted(
+        [
+            *image_dir.glob("*.png"),
+            *image_dir.glob("*.jpg"),
+            *image_dir.glob("*.jpeg"),
+        ]
+    )
+    if not image_files:
+        raise ValueError(f"Image directory is empty: {image_dir}")
+
+    for image_path in image_files:
+        print(f"  鎻掑叆: {image_path.name}")
+        slide = prs.slides.add_slide(blank_layout)
+        slide.shapes.add_picture(str(image_path), left=0, top=0, width=SLIDE_W, height=SLIDE_H)
+
+    prs.save(str(output_path))
+    print(f"PPT 宸蹭繚瀛? {output_path}")
+    return output_path
+
+
 def build_pptx(svg_dir: Path, output_path: Path) -> Path:
     prs = Presentation()
     prs.slide_width = SLIDE_W

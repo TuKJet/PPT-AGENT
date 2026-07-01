@@ -840,3 +840,104 @@ def run_pipeline(topic: str, audience: str = "通用受众",
     build_pptx(svg_dir, pptx_path)
     print(f"完成！PPT 已保存：{pptx_path}")
     return out
+
+
+def _get_pages(outline: dict) -> list:
+    """Compatibly read pages from both legacy and current outline schemas."""
+    if "slides" in outline:
+        return outline["slides"]
+    if "pages" in outline:
+        return outline["pages"]
+    inner = outline.get("ppt_outline", outline)
+    pages = []
+    for key in ("cover", "table_of_contents"):
+        page = inner.get(key)
+        if page:
+            pages.append(page)
+    for part in inner.get("parts", []):
+        pages.extend(part.get("pages", []))
+    end_page = inner.get("end_page")
+    if end_page:
+        pages.append(end_page)
+    return pages
+
+
+def _get_title(page: dict) -> str:
+    return (
+        page.get("title")
+        or page.get("page_title")
+        or page.get("slide_title")
+        or f"Page {page.get('page', '')}"
+    )
+
+
+def _get_page_hint_points(page: dict) -> list[str]:
+    sections = page.get("sections") or page.get("content") or []
+    if sections:
+        if isinstance(sections, list):
+            return [str(item) for item in sections if str(item).strip()]
+        return [str(sections)]
+
+    content_blocks = page.get("content_blocks") or []
+    points: list[str] = []
+    for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_title = str(block.get("block_title") or "").strip()
+        if block_title:
+            points.append(block_title)
+        for bullet in block.get("bullets") or []:
+            bullet_text = str(bullet).strip()
+            if bullet_text:
+                points.append(bullet_text)
+    return points
+
+
+def step2_content(client: AIClient, outline: dict) -> dict:
+    pages = _get_pages(outline)
+    contents = {}
+    for page in pages:
+        title = _get_title(page)
+        hint = "\n".join(_get_page_hint_points(page))
+        user = f"""Slide title: {title}
+Reference points:
+{hint or '(none)'}
+
+Write body content suitable for a PPT slide.
+Requirements:
+- Keep only information directly relevant to the slide title.
+- Output 3-5 short bullet points.
+- Keep each bullet concise and presentation-ready.
+- Prefer concrete capabilities, practical guidance, or verifiable conclusions.
+- Do not output URLs, sources, footnotes, or bibliography.
+- Avoid vague hedging language.
+- If evidence is limited, provide conservative and useful guidance instead of inventing facts.
+
+Return bullets only, in Chinese."""
+        try:
+            if client.provider == "openai":
+                tools = [{"type": "web_search", "search_context_size": "high"}]
+                contents[title] = client.responses(
+                    CONTENT_SYSTEM,
+                    user,
+                    reasoning_effort="low",
+                    tools=tools,
+                )
+            else:
+                contents[title] = client.chat(CONTENT_SYSTEM, user, temperature=0.5)
+        except Exception as exc:
+            print(f"    [fallback] slide '{title}' web expansion failed, using conservative generation: {exc}")
+            fallback_user = f"""Slide title: {title}
+Reference points:
+{hint or '(none)'}
+
+Do not browse the web. Based only on the title and reference points, output 2-3 conservative bullets in Chinese for a PPT slide.
+Requirements:
+- Do not invent specific years, metrics, institutions, or claims.
+- Prefer practical usage guidance, definitions, decision logic, and common pitfalls.
+- Return bullets only."""
+            try:
+                contents[title] = client.chat(CONTENT_SYSTEM, fallback_user, temperature=0.3)
+            except Exception:
+                contents[title] = _fallback_page_content(title, hint)
+    return contents

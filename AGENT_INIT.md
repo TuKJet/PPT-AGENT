@@ -113,6 +113,14 @@ Choose renderer after slide plans are approved:
 uv run python -u -m ppt_workflow.runner choose-renderer --run-dir output/... --renderer html
 ```
 
+For the image branch:
+
+```bash
+uv run python -u -m ppt_workflow.runner choose-renderer --run-dir output/... --renderer img
+```
+
+Before using `img`, configure `KRILL_IMAGE_API_URL`, `KRILL_IMAGE_API_KEY`, and optionally `KRILL_IMAGE_MODEL` in `.env`. If those settings are missing, the workflow should stop and ask the user to either configure the image API or switch to `html`/`svg`.
+
 Final render with review disabled by default:
 
 ```bash

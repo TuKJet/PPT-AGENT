@@ -143,3 +143,32 @@ def write_plans_preview(slide_jobs: list[dict[str, Any]], path: Path) -> Path:
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
     return path
 
+
+def write_outline_preview(outline: dict[str, Any], path: Path) -> Path:
+    from pipeline import _get_pages, _get_title
+
+    lines = ["# Outline Preview", ""]
+    for index, page in enumerate(_get_pages(outline), start=1):
+        title = _get_title(page)
+        lines.append(f"## {index:02d}. {title}")
+        sections = page.get("sections") or page.get("content") or []
+        if isinstance(sections, list) and sections:
+            for item in sections[:6]:
+                lines.append(f"- {item}")
+        elif sections:
+            lines.append(f"- {sections}")
+        else:
+            for block in (page.get("content_blocks") or [])[:3]:
+                if not isinstance(block, dict):
+                    continue
+                block_title = str(block.get("block_title") or "").strip()
+                if block_title:
+                    lines.append(f"- {block_title}")
+                for bullet in (block.get("bullets") or [])[:3]:
+                    bullet_text = str(bullet).strip()
+                    if bullet_text:
+                        lines.append(f"  - {bullet_text}")
+        lines.append("")
+    path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    return path
+

@@ -44,3 +44,16 @@ HTML_USE_MIGRATED_CORE = os.getenv("HTML_USE_MIGRATED_CORE", "true").lower() in 
 EDITABLE_EXPORT_ENGINE = os.getenv("EDITABLE_EXPORT_ENGINE", "dom_export")
 
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "./output")
+
+KRILL_IMAGE_API_URL = os.getenv("KRILL_IMAGE_API_URL", "").strip()
+KRILL_IMAGE_API_KEY = os.getenv("KRILL_IMAGE_API_KEY", "").strip()
+KRILL_IMAGE_MODEL = os.getenv("KRILL_IMAGE_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+
+
+def missing_krill_image_settings() -> list[str]:
+    missing = []
+    if not KRILL_IMAGE_API_URL:
+        missing.append("KRILL_IMAGE_API_URL")
+    if not KRILL_IMAGE_API_KEY:
+        missing.append("KRILL_IMAGE_API_KEY")
+    return missing

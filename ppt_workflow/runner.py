@@ -13,6 +13,7 @@ from config import (
     SVG_REVIEW_ENABLED,
     SVG_REVIEW_MODEL,
     SVG_REVIEW_PROVIDER,
+    missing_krill_image_settings,
 )
 from filename_utils import safe_filename_part, slide_filename
 import pipeline as svg_pipeline
@@ -153,6 +154,14 @@ def cmd_approve(args: argparse.Namespace) -> None:
 def cmd_choose_renderer(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     require_approved(run_dir, "slide_plans")
+    if args.renderer == "img":
+        missing = missing_krill_image_settings()
+        if missing:
+            names = ", ".join(missing)
+            raise RuntimeError(
+                "IMG renderer is not configured. Missing env settings: "
+                f"{names}. Configure them and retry `img`, or choose `html`/`svg` instead."
+            )
     state = load_state(run_dir)
     state["renderer"] = args.renderer
     state["status"] = "renderer_chosen"
@@ -371,13 +380,24 @@ def cmd_render(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
     renderer = args.renderer or state.get("renderer")
-    if renderer not in {"html", "svg"}:
-        raise ValueError("renderer must be html or svg")
+    if renderer not in {"html", "svg", "img"}:
+        raise ValueError("renderer must be html, svg, or img")
     if renderer == "html":
         out = render_html(run_dir, polish=args.polish, editable_engine=args.editable_engine)
+    elif renderer == "img":
+        from img_renderer import render_img
+        out = render_img(run_dir)
     else:
         out = render_svg(run_dir, polish=args.polish)
     _log(f"completed={out}")
+
+
+def cmd_edit_img(args: argparse.Namespace) -> None:
+    from img_renderer import revise_img_slide
+
+    run_dir = Path(args.run_dir)
+    out = revise_img_slide(run_dir, page_index=args.page_index, feedback=args.feedback)
+    _log(f"revised={out}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -395,10 +415,13 @@ def cmd_status(args: argparse.Namespace) -> None:
         _log(f"slides_ready={ready}/{len(slide_status)}")
     html_count = len(list((run_dir / "html").glob("*.html"))) if (run_dir / "html").exists() else 0
     svg_count = len(list((run_dir / "svg").glob("*.svg"))) if (run_dir / "svg").exists() else 0
+    img_count = len(list((run_dir / "img").glob("*.png"))) if (run_dir / "img").exists() else 0
     if html_count:
         _log(f"html_files={html_count}")
     if svg_count:
         _log(f"svg_files={svg_count}")
+    if img_count:
+        _log(f"img_files={img_count}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -440,15 +463,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     choose = sub.add_parser("choose-renderer")
     choose.add_argument("--run-dir", required=True)
-    choose.add_argument("--renderer", choices=["html", "svg"], required=True)
+    choose.add_argument("--renderer", choices=["html", "svg", "img"], required=True)
     choose.set_defaults(func=cmd_choose_renderer)
 
     render = sub.add_parser("render")
     render.add_argument("--run-dir", required=True)
-    render.add_argument("--renderer", choices=["html", "svg"], default=None)
+    render.add_argument("--renderer", choices=["html", "svg", "img"], default=None)
     render.add_argument("--polish", action="store_true")
     render.add_argument("--editable-engine", default=None)
     render.set_defaults(func=cmd_render)
+
+    edit_img = sub.add_parser("edit-img")
+    edit_img.add_argument("--run-dir", required=True)
+    edit_img.add_argument("--page-index", required=True, type=int)
+    edit_img.add_argument("--feedback", required=True)
+    edit_img.set_defaults(func=cmd_edit_img)
 
     status = sub.add_parser("status")
     status.add_argument("--run-dir", required=True)

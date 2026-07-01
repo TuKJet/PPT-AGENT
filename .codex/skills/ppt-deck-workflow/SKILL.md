@@ -72,7 +72,15 @@ HTML_AI_REVIEW_ENABLED=false SVG_AI_REVIEW_ENABLED=false uv run python -u -m ppt
 
 Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG branch.
 
-The `img` branch is a Codex-side full-page image generation route. Do not run `ppt_workflow.runner render` for `img`, and do not call `choose-renderer` with `img` unless the project runner explicitly supports it in code. Instead, use the approved `slide-plans.json` as the source of truth, generate one image prompt per slide in chat, call Codex's `imagegen` tool for each full 16:9 slide image, save the resulting images under `output/.../img/`, then package those images into a PPTX.
+The `img` branch is a full-page image generation route backed by the configured third-party image client. If the runner supports `img` in code, use it. For the first pass, compile one prompt per slide from `slide-plans.json` and call the client's `generate_image` path for each slide. Save the resulting images under `output/.../img/`, then package those images into a PPTX.
+
+If the user is unhappy with one or more specific pages after the first `img` render:
+
+- Ask for page-specific feedback, not vague deck-wide dissatisfaction.
+- Keep the existing image for that page as the edit source.
+- Compile a page-specific revision prompt that preserves the original slide topic and layout intent unless the user asks to change them.
+- Call the client's `edit_image` path for that specific page instead of regenerating the whole deck.
+- Rebuild the PPTX after any page edit so the deck stays in sync.
 
 ## Long Deck Background Execution
 
@@ -99,9 +107,9 @@ Monitoring cadence:
 
 ## IMG Prompt Compilation
 
-For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt.
+For the `img` branch, do not pass raw `slide-plans.json` text directly to the image client. Treat each slide plan as source material and compile it into a clean image-generation prompt.
 
-Before calling imagegen, separate slide-plan text into:
+Before calling the first-pass `generate_image` request, separate slide-plan text into:
 
 - Visible slide copy: titles, headings, labels, table text, numbers, formulas, and sentences that should appear on the final slide.
 - Layout-only notes: placeholders, occupancy markers, future paste areas, scaffold labels, and implementation notes that describe where content goes but should not be drawn.
@@ -123,7 +131,7 @@ Remove or rewrite implementation-specific layout details:
 - Keep user-approved Chinese copy, key numbers, labels, tables, and formulas when they are part of the slide message, but rewrite their presentation as clear visual typography and organized content blocks rather than renderer implementation notes.
 - Do not pass placeholder or occupancy text as visible copy. Strip or rewrite markers such as `占位`, `待补充`, `待插入`, `TBD`, `TODO`, `XXX`, `Lorem ipsum`, `[文本]`, `[图片]`, `{placeholder}`, `<placeholder>`, repeated punctuation, fake sample labels, or notes that only mean "reserve this area".
 - When a placeholder represents reserved space, translate it into a visual instruction such as "leave a clean empty area for later image placement" or "show an unlabeled content panel", and explicitly say that no placeholder words or symbols should appear.
-- Do not ask imagegen to create editable text boxes, layers, or separately movable page objects.
+- Do not ask the image client to create editable text boxes, layers, or separately movable page objects.
 
 The compiled prompt must ask for one finished 16:9 presentation page image. It should include:
 
@@ -134,6 +142,13 @@ The compiled prompt must ask for one finished 16:9 presentation page image. It s
 - Exact visible Chinese copy, key numbers, labels, tables, or formulas required by the slide plan.
 - Text rendering constraints that ask for accurate, legible Chinese typography and polished PPT-style information design.
 - A negative instruction that placeholder words, scaffold markers, and occupancy characters must not appear in the image.
+
+For page-specific revisions through `edit_image`, keep the same prompt structure but append a revision block that:
+
+- Names the specific page being changed.
+- Preserves the original slide topic and core message.
+- States the user-requested edits as explicit visual changes.
+- Tells the model to revise the existing page image rather than invent a new page concept.
 
 Use this prompt shape:
 
@@ -169,7 +184,7 @@ After slide plans are approved, ask:
 
 - `html`: recommended for stable layout, image PPTX, and editable PPTX export.
 - `svg`: lighter source files and faster visual drafts.
-- `img`: full-page image generation through Codex imagegen; best for visually polished management-facing slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
+- `img`: full-page image generation through the configured third-party image client; best for visually polished management-facing slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
 
 When asking, explicitly mention that the final render defaults to AI review disabled because review can be slow. If the user wants the review/fix loop, they must opt in clearly.
 
@@ -182,6 +197,25 @@ rm -rf output/.../html output/.../svg output/.../img output/.../reviews output/.
 ```
 
 Do not delete approved source artifacts such as `outline.json`, `contents.json`, `slide-plans.json`, previews, or `workflow-state.json`.
+
+## Renderer Compare And Retry Guardrails
+
+When the user explicitly asks to compare multiple renderers for the same approved run:
+
+- Render one branch at a time in the same `run-dir`; do not regenerate `outline`, `contents`, or `slide-plans` unless the user asked for content changes.
+- Before cleaning render-only outputs to run the next branch, archive the finished PPTX outputs into a sibling compare location such as `output/.../compare/` or clearly suffixed filenames.
+- Keep compare archives outside the render-only cleanup target so the next renderer run cannot delete the previous branch's PPTX by accident.
+- After archiving, clean only render outputs such as `html/`, `svg/`, `img/`, `reviews/`, `editable/`, `slide-status.json`, `editable-ppt-chain.json`, and top-level `.pptx` files in the active run directory.
+
+When `html` is the chosen renderer and slide-plan style guidance was already encoded:
+
+- On the first retry of the final HTML render, prefer `HTML_USE_MIGRATED_CORE=false` together with AI review disabled before trying broader recovery steps.
+- Do not silently switch provider/model, do not replace the renderer branch, and do not hand-build substitute slides just because the first HTML render failed.
+
+When `html` fails before content/layout review can even happen:
+
+- If Playwright cannot launch Chromium or a browser executable is missing, run `uv run playwright install chromium` before blaming the HTML prompt, slide plan, or renderer logic.
+- If the current provider/model gateway disconnects or times out during HTML generation, retry the same provider/model workflow chain first. Do not silently change provider/model or hand-build fallback slides unless the user explicitly asks for that deviation.
 
 ## Long-Running Render Etiquette
 
@@ -243,9 +277,9 @@ SVG branch:
 
 IMG branch:
 
-- Does not use runner render.
-- Uses Codex chat orchestration and the `imagegen` tool.
-- Generates `img/`
+- Uses the configured third-party image client through the project code path.
+- First pass uses `generate_image` once per slide and writes `img/`.
+- Follow-up page revisions use `edit_image` for the specific page image the user calls out.
 - Generates each slide as one complete 16:9 full-page image.
 - Does not split the slide into background, foreground, text overlay, layers, or selective per-page HTML/SVG rendering.
 - Does not create editable slide contents; the exported PPTX uses one full-slide image per page.
