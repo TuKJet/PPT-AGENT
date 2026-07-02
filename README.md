@@ -81,6 +81,8 @@ Remove-Item -Force output\...\slide-status.json, output\...\editable-ppt-chain.j
 
 The local skill lives at `.codex/skills/ppt-deck-workflow/SKILL.md`. When using Codex in this repository, ask it to use the `ppt-deck-workflow` skill and keep approvals in chat.
 
+This repo is intended to prefer the project-local workflow skill by default. Do not default to `superpowers` skills here unless the user explicitly asks for one or the task clearly requires a different non-project skill.
+
 ## Notes
 
 - Generated decks are written to `output/`.

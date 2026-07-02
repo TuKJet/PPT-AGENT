@@ -400,6 +400,14 @@ def cmd_edit_img(args: argparse.Namespace) -> None:
     _log(f"revised={out}")
 
 
+def cmd_regenerate_img(args: argparse.Namespace) -> None:
+    from img_renderer import regenerate_img_slide
+
+    run_dir = Path(args.run_dir)
+    out = regenerate_img_slide(run_dir, page_index=args.page_index)
+    _log(f"regenerated={out}")
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
@@ -478,6 +486,11 @@ def build_parser() -> argparse.ArgumentParser:
     edit_img.add_argument("--page-index", required=True, type=int)
     edit_img.add_argument("--feedback", required=True)
     edit_img.set_defaults(func=cmd_edit_img)
+
+    regenerate_img = sub.add_parser("regenerate-img")
+    regenerate_img.add_argument("--run-dir", required=True)
+    regenerate_img.add_argument("--page-index", required=True, type=int)
+    regenerate_img.set_defaults(func=cmd_regenerate_img)
 
     status = sub.add_parser("status")
     status.add_argument("--run-dir", required=True)

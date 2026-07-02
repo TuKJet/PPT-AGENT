@@ -82,6 +82,13 @@ If the user is unhappy with one or more specific pages after the first `img` ren
 - Call the client's `edit_image` path for that specific page instead of regenerating the whole deck.
 - Rebuild the PPTX after any page edit so the deck stays in sync.
 
+If the user updates `slide-plans.json` for one specific page and wants that page regenerated from the latest approved plan without using the old image as a source:
+
+- Do not rerender the whole deck just for that case.
+- Regenerate only that page with the client's `generate_image` path, using the latest single-page plan-derived prompt.
+- Overwrite that page's image in `output/.../img/` and rebuild the PPTX so the deck stays in sync.
+- Use this path when the user explicitly wants a fresh page concept based on updated plan text rather than an image edit of the old page.
+
 ## Long Deck Background Execution
 
 Use this for `contents` and `plans` when the deck has more than 10 pages, when the topic implies heavy research/detail, or when an earlier generation phase already took several minutes.

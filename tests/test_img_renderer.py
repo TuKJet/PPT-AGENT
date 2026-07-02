@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -30,6 +32,7 @@ class ImgRendererTests(unittest.TestCase):
         self.assertIn("generate_image", skill_text)
         self.assertIn("edit_image", skill_text)
         self.assertIn("specific page", skill_text.lower())
+        self.assertIn("latest approved plan", skill_text)
 
     def test_skill_documents_compare_and_html_retry_guardrails(self):
         skill_text = Path("D:/work/PPT-AGENT/.codex/skills/ppt-deck-workflow/SKILL.md").read_text(encoding="utf-8")
@@ -146,6 +149,65 @@ class ImgRendererTests(unittest.TestCase):
             self.assertEqual("img", state["renderer"])
             self.assertIn("image_pptx", state["artifacts"])
 
+    def test_render_img_emits_page_progress_lines(self):
+        from img_renderer import render_img
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "demo-run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "slide-plans.json").write_text(json.dumps({
+                "version": 1,
+                "slides": [
+                    {
+                        "index": 1,
+                        "title": "第一页",
+                        "material": "第一页素材",
+                        "plan": "第一页布局",
+                        "page_role": "cover",
+                    },
+                    {
+                        "index": 2,
+                        "title": "第二页",
+                        "material": "第二页素材",
+                        "plan": "第二页布局",
+                        "page_role": "summary",
+                    },
+                ],
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            (run_dir / "workflow-state.json").write_text(json.dumps({
+                "version": 1,
+                "topic": "Demo Deck",
+                "audience": "企业管理层",
+                "provider": "openai",
+                "status": "slide_plans_approved",
+                "renderer": "img",
+                "approvals": {"slide_plans": True},
+                "artifacts": {},
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            class FakeClient:
+                def generate_image(self, prompt: str, output_path: Path):
+                    output_path.write_bytes(MINIMAL_PNG)
+                    return output_path
+
+            def fake_build_pptx_from_images(image_dir: Path, output_path: Path):
+                output_path.write_bytes(b"pptx")
+                return output_path
+
+            stdout = io.StringIO()
+            with patch("img_renderer.ensure_img_renderer_configured", return_value=None), \
+                 patch("img_renderer.KrillImageClient", return_value=FakeClient()), \
+                 patch("img_renderer.build_pptx_from_images", side_effect=fake_build_pptx_from_images), \
+                 contextlib.redirect_stdout(stdout):
+                render_img(run_dir)
+
+            logs = stdout.getvalue()
+            self.assertIn("[progress] render-img", logs)
+            self.assertIn("1/2 generating: 第一页", logs)
+            self.assertIn("1/2 done: 第一页", logs)
+            self.assertIn("2/2 generating: 第二页", logs)
+            self.assertIn("2/2 done: 第二页", logs)
+
     def test_revise_img_slide_uses_edit_image_and_updates_status(self):
         from img_renderer import revise_img_slide
 
@@ -224,6 +286,89 @@ class ImgRendererTests(unittest.TestCase):
             slide_status = json.loads((run_dir / "slide-status.json").read_text(encoding="utf-8"))
             self.assertEqual("REVISED", slide_status["slides"]["02"]["review_status"])
             self.assertEqual(1, slide_status["slides"]["02"]["review_rounds"])
+
+    def test_regenerate_img_slide_uses_generate_image_and_rebuilds_pptx(self):
+        from img_renderer import regenerate_img_slide
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "demo-run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            img_dir = run_dir / "img"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            existing_image = img_dir / "02_slide-two.png"
+            existing_image.write_bytes(MINIMAL_PNG)
+            prompt_path = img_dir / "02_slide-two.prompt.txt"
+            prompt_path.write_text("original prompt", encoding="utf-8")
+            (run_dir / "slide-plans.json").write_text(json.dumps({
+                "version": 1,
+                "slides": [
+                    {
+                        "index": 2,
+                        "title": "Slide Two",
+                        "material": "Updated copy with tighter wording for a management-style slide.",
+                        "plan": "Regenerate this page from the latest plan without referencing the old image.",
+                        "page_role": "summary",
+                    },
+                ],
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            (run_dir / "workflow-state.json").write_text(json.dumps({
+                "version": 1,
+                "topic": "Demo Deck",
+                "audience": "浼佷笟绠＄悊灞?",
+                "provider": "openai",
+                "status": "completed",
+                "renderer": "img",
+                "approvals": {"slide_plans": True},
+                "artifacts": {"image_pptx": {"path": str(run_dir / "Demo_Deck.pptx"), "status": "completed"}},
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            (run_dir / "slide-status.json").write_text(json.dumps({
+                "slides": {
+                    "02": {
+                        "title": "Slide Two",
+                        "page_role": "summary",
+                        "validation_status": "pass",
+                        "final_issues_count": 0,
+                        "review_status": "SKIPPED",
+                        "review_rounds": 0,
+                        "export_ready": True,
+                        "image_path": str(existing_image),
+                        "prompt_path": str(prompt_path),
+                    }
+                }
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            captured = {}
+
+            class FakeClient:
+                def generate_image(self, prompt: str, output_path: Path):
+                    captured["prompt"] = prompt
+                    captured["output_path"] = output_path
+                    output_path.write_bytes(MINIMAL_PNG)
+                    return output_path
+
+            def fake_build_pptx_from_images(image_dir: Path, output_path: Path):
+                output_path.write_bytes(b"pptx")
+                return output_path
+
+            stdout = io.StringIO()
+            with patch("img_renderer.ensure_img_renderer_configured", return_value=None), \
+                 patch("img_renderer.KrillImageClient", return_value=FakeClient()), \
+                 patch("img_renderer.build_pptx_from_images", side_effect=fake_build_pptx_from_images), \
+                 contextlib.redirect_stdout(stdout):
+                regenerated_path = regenerate_img_slide(run_dir, page_index=2)
+
+            self.assertTrue(regenerated_path.exists())
+            self.assertEqual(existing_image, captured["output_path"])
+            self.assertIn("Slide title:", captured["prompt"])
+            self.assertIn("Required visible copy:", captured["prompt"])
+
+            logs = stdout.getvalue()
+            self.assertIn("[progress] render-img-page regenerating: 2", logs)
+            self.assertIn("[progress] render-img-page done: 2", logs)
+
+            slide_status = json.loads((run_dir / "slide-status.json").read_text(encoding="utf-8"))
+            self.assertEqual("REGENERATED", slide_status["slides"]["02"]["review_status"])
+            self.assertEqual(1, slide_status["slides"]["02"]["regeneration_count"])
 
 
 class KrillImageClientTests(unittest.TestCase):

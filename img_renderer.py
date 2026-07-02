@@ -139,6 +139,14 @@ def _slide_prompt_path(img_dir: Path, index: int, title: str) -> Path:
     return img_dir / f"{index:02d}_{safe_title}.prompt.txt"
 
 
+def _img_progress(current: int, total: int, detail: str) -> None:
+    width = 20
+    filled = round(width * current / total) if total else width
+    bar = "#" * filled + "-" * (width - filled)
+    suffix = f" {detail}" if detail else ""
+    print(f"[progress] render-img [{bar}] {current}/{total}{suffix}", flush=True)
+
+
 def _load_slide_status(run_dir: Path) -> dict:
     return read_json(run_dir / "slide-status.json", default={}).get("slides") or {}
 
@@ -176,15 +184,17 @@ def render_img(run_dir: Path) -> Path:
     slide_jobs = list((read_json(run_dir / "slide-plans.json").get("slides") or []))
     if not slide_jobs:
         raise RuntimeError("slide-plans.json does not contain any slides")
+    total_pages = len(slide_jobs)
 
     img_dir = run_dir / "img"
     img_dir.mkdir(parents=True, exist_ok=True)
     client = KrillImageClient()
     slide_status = {}
 
-    for job in slide_jobs:
+    for sequence, job in enumerate(slide_jobs, start=1):
         index = int(job["index"])
         title = str(job.get("title", f"slide-{index}"))
+        _img_progress(sequence, total_pages, f"generating: {title}")
         prompt = compile_img_prompt(job)
         prompt_path = _slide_prompt_path(img_dir, index, title)
         prompt_path.write_text(prompt, encoding="utf-8")
@@ -202,6 +212,7 @@ def render_img(run_dir: Path) -> Path:
             "prompt_path": str(prompt_path),
         }
         _write_slide_status_entry(run_dir, slide_status)
+        _img_progress(sequence, total_pages, f"done: {title}")
 
     pptx_path = run_dir / f"{safe_filename_part(topic, max_length=30)}.pptx"
     build_pptx_from_images(img_dir, pptx_path)
@@ -248,6 +259,53 @@ def revise_img_slide(run_dir: Path, page_index: int, feedback: str) -> Path:
         "image_path": str(image_path),
         "prompt_path": str(prompt_path),
         "revision_feedback": feedback,
+    }
+    _write_slide_status_entry(run_dir, slide_status)
+
+    pptx_path = run_dir / f"{safe_filename_part(topic, max_length=30)}.pptx"
+    build_pptx_from_images(img_dir, pptx_path)
+    state["status"] = "completed"
+    state["renderer"] = "img"
+    state.setdefault("artifacts", {})["image_pptx"] = {"path": str(pptx_path), "status": "completed"}
+    save_state(run_dir, state)
+    return image_path
+
+
+def regenerate_img_slide(run_dir: Path, page_index: int) -> Path:
+    require_approved(run_dir, "slide_plans")
+    ensure_img_renderer_configured()
+
+    state = load_state(run_dir)
+    topic = state.get("topic") or run_dir.name
+    slide_job = _find_slide_job(run_dir, page_index)
+    slide_status = _load_slide_status(run_dir)
+    key = f"{int(page_index):02d}"
+    entry = slide_status.get(key, {})
+    title = str(slide_job.get("title", f"slide-{page_index}"))
+    img_dir = run_dir / "img"
+    img_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = compile_img_prompt(slide_job)
+    prompt_path = _slide_prompt_path(img_dir, int(page_index), title)
+    prompt_path.write_text(prompt, encoding="utf-8")
+
+    image_path = Path(entry.get("image_path") or (img_dir / slide_filename(page_index, title, "png")))
+    client = KrillImageClient()
+    print(f"[progress] render-img-page regenerating: {page_index} {title}", flush=True)
+    client.generate_image(prompt, image_path)
+    print(f"[progress] render-img-page done: {page_index} {title}", flush=True)
+
+    slide_status[key] = {
+        "title": title,
+        "page_role": slide_job.get("page_role", "content"),
+        "validation_status": "pass",
+        "final_issues_count": 0,
+        "review_status": "REGENERATED",
+        "review_rounds": int(entry.get("review_rounds", 0) or 0),
+        "export_ready": True,
+        "image_path": str(image_path),
+        "prompt_path": str(prompt_path),
+        "regeneration_count": int(entry.get("regeneration_count", 0) or 0) + 1,
     }
     _write_slide_status_entry(run_dir, slide_status)
 

@@ -2,6 +2,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 from ai_client import AIClient
 from config import (
     OUTPUT_DIR,
@@ -69,14 +70,160 @@ def load_svg_prompt() -> str:
     return SVG_PROMPT_FILE.read_text(encoding="utf-8")
 
 
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _as_text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = []
+        for line in value.splitlines():
+            text = re.sub(r"^[-*]\s*", "", line.strip())
+            if text:
+                items.append(text)
+        return items
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            items.extend(_as_text_list(item))
+        return items
+    if isinstance(value, dict):
+        for key in ("text", "label", "title", "name", "value"):
+            text = _clean_text(value.get(key))
+            if text:
+                return _as_text_list(text)
+        return []
+    return []
+
+
+def _extract_outline_pages(raw_outline: dict[str, Any]) -> list[dict[str, Any]]:
+    slides = raw_outline.get("slides")
+    if isinstance(slides, list):
+        return [item for item in slides if isinstance(item, dict)]
+
+    pages = raw_outline.get("pages")
+    if isinstance(pages, list):
+        return [item for item in pages if isinstance(item, dict)]
+
+    inner = raw_outline.get("ppt_outline", raw_outline)
+    pages_out: list[dict[str, Any]] = []
+    for key in ("cover", "table_of_contents"):
+        page = inner.get(key)
+        if isinstance(page, dict):
+            pages_out.append(page)
+    for part in inner.get("parts", []):
+        if not isinstance(part, dict):
+            continue
+        for page in part.get("pages", []):
+            if isinstance(page, dict):
+                pages_out.append(page)
+    end_page = inner.get("end_page")
+    if isinstance(end_page, dict):
+        pages_out.append(end_page)
+    return pages_out
+
+
+def _normalize_outline_modules(page: dict[str, Any]) -> list[dict[str, Any]]:
+    modules: list[dict[str, Any]] = []
+    raw_groups = page.get("modules") or page.get("content_blocks") or page.get("blocks") or []
+    if isinstance(raw_groups, list):
+        for group in raw_groups:
+            if not isinstance(group, dict):
+                continue
+            title = _first_text(
+                group.get("module_title"),
+                group.get("block_title"),
+                group.get("heading"),
+                group.get("title"),
+                group.get("name"),
+            )
+            points: list[str] = []
+            for key in ("points", "bullets", "items", "content", "sections"):
+                points = _as_text_list(group.get(key))
+                if points:
+                    break
+            if title or points:
+                modules.append({
+                    "module_title": title,
+                    "points": points,
+                })
+
+    if modules:
+        return modules
+
+    direct_points = _as_text_list(page.get("sections") or page.get("content"))
+    if direct_points:
+        return [{"module_title": "要点", "points": direct_points}]
+
+    return []
+
+
+def _normalize_outline_page(page: dict[str, Any], index: int) -> dict[str, Any]:
+    normalized = {
+        "page": index,
+        "title": _first_text(
+            page.get("title"),
+            page.get("page_title"),
+            page.get("slide_title"),
+            f"Page {index}",
+        ),
+        "delivery_hint": _first_text(page.get("delivery_hint")),
+        "purpose": _first_text(page.get("purpose")),
+        "key_message": _first_text(page.get("key_message"), page.get("core_message")),
+        "modules": _normalize_outline_modules(page),
+        "visual_suggestion": _first_text(page.get("visual_suggestion")),
+        "speaker_notes": _first_text(page.get("speaker_notes")),
+    }
+    if page.get("time_minutes") is not None:
+        normalized["time_minutes"] = page.get("time_minutes")
+    return normalized
+
+
+def normalize_outline_schema(raw_outline: dict[str, Any]) -> dict[str, Any]:
+    slides = [
+        _normalize_outline_page(page, index)
+        for index, page in enumerate(_extract_outline_pages(raw_outline), start=1)
+    ]
+    return {
+        "version": 1,
+        "deck_title": _first_text(raw_outline.get("deck_title"), raw_outline.get("title"), raw_outline.get("topic")),
+        "language": _first_text(raw_outline.get("language"), "zh-CN"),
+        "audience": _as_text_list(raw_outline.get("audience") or raw_outline.get("target_audience")),
+        "time_basis": _first_text(raw_outline.get("time_basis"), raw_outline.get("date_baseline")),
+        "deck_goal": _first_text(raw_outline.get("deck_goal")),
+        "style_note": _first_text(raw_outline.get("style_note")),
+        "recommended_duration": _first_text(
+            raw_outline.get("recommended_duration"),
+            raw_outline.get("recommended_duration_minutes"),
+        ),
+        "narrative_arc": _as_text_list(raw_outline.get("narrative_arc")),
+        "total_pages": len(slides),
+        "slides": slides,
+    }
+
+
 def extract_outline(text: str) -> dict:
     match = re.search(r'\[PPT_OUTLINE\](.*?)\[/PPT_OUTLINE\]', text, re.DOTALL)
     if match:
-        return json.loads(match.group(1).strip())
+        return normalize_outline_schema(json.loads(match.group(1).strip()))
     # 模型未加标签，直接尝试解析 JSON
     json_match = re.search(r'\{.*\}', text, re.DOTALL)
     if json_match:
-        return json.loads(json_match.group(0))
+        return normalize_outline_schema(json.loads(json_match.group(0)))
     raise ValueError("无法从模型输出中提取大纲 JSON")
 
 
@@ -872,6 +1019,26 @@ def _get_title(page: dict) -> str:
 
 
 def _get_page_hint_points(page: dict) -> list[str]:
+    modules = page.get("modules") or []
+    if isinstance(modules, list):
+        points: list[str] = []
+        for module in modules:
+            if not isinstance(module, dict):
+                continue
+            title = _clean_text(
+                module.get("module_title")
+                or module.get("block_title")
+                or module.get("heading")
+                or module.get("title")
+            )
+            if title and title not in {"要点", "内容", "概览", "概要"}:
+                points.append(title)
+            for point in _as_text_list(module.get("points") or module.get("bullets") or module.get("items")):
+                if point:
+                    points.append(point)
+        if points:
+            return points
+
     sections = page.get("sections") or page.get("content") or []
     if sections:
         if isinstance(sections, list):
