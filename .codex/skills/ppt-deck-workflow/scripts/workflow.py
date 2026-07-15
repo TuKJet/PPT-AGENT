@@ -8,6 +8,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -33,9 +34,16 @@ RENDER_REVIEW_NOT_APPLICABLE = {
 }
 
 
+def default_img_svg_conversion() -> dict[str, Any]:
+    return {
+        "mode": None,
+        "status": "waiting_for_img_export",
+    }
+
+
 def default_state() -> dict[str, Any]:
     return {
-        "version": 4,
+        "version": 5,
         "status": "new",
         "approvals": {},
         "artifacts": {},
@@ -55,11 +63,14 @@ def default_renderer_state(renderer: str | None = None) -> dict[str, Any]:
         review = {"mode": None, "status": "pending_choice"}
     elif renderer == "img":
         review = dict(RENDER_REVIEW_NOT_APPLICABLE)
-    return {
+    state = {
         "status": "new",
         "artifacts": {},
         "review": review,
     }
+    if renderer == "img":
+        state["svg_conversion"] = default_img_svg_conversion()
+    return state
 
 
 def utc_now() -> str:
@@ -151,6 +162,12 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
             normalized.update(entry)
             normalized["artifacts"] = dict(normalized.get("artifacts") or {})
             normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
+        if renderer == "img":
+            conversion = normalized.get("svg_conversion")
+            normalized["svg_conversion"] = {
+                **default_img_svg_conversion(),
+                **(dict(conversion) if isinstance(conversion, dict) else {}),
+            }
         normalized_renderers[renderer] = normalized
 
     merged["artifacts"] = artifacts
@@ -169,6 +186,12 @@ def renderer_state(state: dict[str, Any], renderer: str) -> dict[str, Any]:
     normalized.update(entry)
     normalized["artifacts"] = dict(normalized.get("artifacts") or {})
     normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
+    if renderer == "img":
+        conversion = normalized.get("svg_conversion")
+        normalized["svg_conversion"] = {
+            **default_img_svg_conversion(),
+            **(dict(conversion) if isinstance(conversion, dict) else {}),
+        }
     renderers[renderer] = normalized
     return normalized
 
@@ -179,7 +202,7 @@ def load_state(run_dir: Path) -> dict[str, Any]:
 
 def save_state(run_dir: Path, state: dict[str, Any]) -> Path:
     normalized = _normalize_state(state)
-    normalized["version"] = 4
+    normalized["version"] = 5
     normalized["execution"] = "codex-skill"
     normalized["updated_at"] = utc_now()
     return write_json(run_dir / STATE_FILE, normalized)
@@ -459,6 +482,200 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     return manifest_path
 
 
+def img_source_images(run_dir: Path) -> list[Path]:
+    img_dir = run_dir / "img"
+    return sorted(
+        [path for path in img_dir.iterdir() if path.suffix.lower() in {".png", ".jpg", ".jpeg"}]
+    ) if img_dir.exists() else []
+
+
+def require_complete_img_sources(run_dir: Path) -> list[Path]:
+    images = img_source_images(run_dir)
+    if not images:
+        raise ValueError(f"IMG directory is empty: {run_dir / 'img'}")
+    expected = len(slide_jobs(run_dir))
+    if expected and len(images) != expected:
+        raise ValueError(
+            f"IMG page count mismatch: expected {expected} pages from slide-plans.json, found {len(images)}"
+        )
+    return images
+
+
+def mark_img_exported_pending_svg_choice(run_dir: Path, pptx_path: Path, images: list[Path]) -> None:
+    state = load_state(run_dir)
+    state["renderer"] = "img"
+    entry = renderer_state(state, "img")
+    entry["artifacts"] = {
+        **entry.get("artifacts", {}),
+        "pptx": {"path": str(pptx_path), "status": "completed"},
+    }
+    entry["svg_conversion"] = {
+        "mode": None,
+        "status": "pending_choice",
+        "source_pptx_path": str(pptx_path),
+        "source_images": [str(path) for path in images],
+        "requested_after_img_export": True,
+        "updated_at": utc_now(),
+    }
+    entry["status"] = "img_svg_choice_pending"
+    state["render_review"] = dict(entry.get("review") or {})
+    state["status"] = "img_svg_choice_pending"
+    save_state(run_dir, state)
+
+
+def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
+    images = require_complete_img_sources(run_dir)
+    jobs = slide_jobs(run_dir)
+    jobs_dir = render_jobs_root(run_dir, "img-svg")
+    target_dir = run_dir / "img-svg"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # A fresh opt-in must regenerate every SVG from the current IMG pages.
+    for stale in target_dir.glob("*.svg"):
+        stale.unlink()
+    for stale in jobs_dir.glob("*.json"):
+        stale.unlink()
+
+    shared_context_path = jobs_dir / "shared-context.json"
+    write_json(shared_context_path, {
+        "version": 1,
+        "topic": infer_topic(run_dir),
+        "audience": state.get("audience"),
+        "renderer": "img-svg",
+        "source_renderer": "img",
+        "slide_count": len(images),
+        "model_input_rule": (
+            "Pass each source_image_path directly to a vision-capable model and recreate that page as native SVG."
+        ),
+        "output_rule": (
+            "Write one 1280x720 pure-vector SVG per source image; do not embed or reference raster images."
+        ),
+    })
+
+    manifest_slides: list[dict[str, Any]] = []
+    for index, image_path in enumerate(images, start=1):
+        plan = jobs[index - 1] if index - 1 < len(jobs) else {}
+        target_path = target_dir / f"{image_path.stem}.svg"
+        job_path = jobs_dir / f"slide-{index:02d}.json"
+        payload = {
+            "version": 1,
+            "renderer": "img-svg",
+            "source_renderer": "img",
+            "index": int(plan.get("index", index)),
+            "title": plan.get("title", image_path.stem),
+            "page_role": plan.get("page_role", "content"),
+            "source_image_path": str(image_path),
+            "target_path": str(target_path),
+            "shared_context_path": str(shared_context_path),
+            "prompt_contract_path": str(
+                Path(__file__).resolve().parents[1] / "references" / "prompt-contracts.md"
+            ),
+            "prompt_contract_section": "IMG-to-SVG Model Conversion Contract",
+        }
+        write_json(job_path, payload)
+        manifest_slides.append({
+            "index": payload["index"],
+            "title": payload["title"],
+            "source_image_path": str(image_path),
+            "job_path": str(job_path),
+            "target_path": str(target_path),
+        })
+
+    manifest_path = jobs_dir / "manifest.json"
+    write_json(manifest_path, {
+        "version": 1,
+        "renderer": "img-svg",
+        "source_renderer": "img",
+        "topic": infer_topic(run_dir),
+        "slide_count": len(images),
+        "shared_context_path": str(shared_context_path),
+        "slides": manifest_slides,
+    })
+
+    entry = renderer_state(state, "img")
+    conversion = dict(entry.get("svg_conversion") or {})
+    entry["svg_conversion"] = {
+        **conversion,
+        "mode": "on",
+        "status": "pending_generation",
+        "manifest_path": str(manifest_path),
+        "shared_context_path": str(shared_context_path),
+        "target_dir": str(target_dir),
+        "updated_at": utc_now(),
+    }
+    entry["status"] = "img_svg_generation_pending"
+    state["status"] = "img_svg_generation_pending"
+    save_state(run_dir, state)
+    return manifest_path
+
+
+def validate_ppt_compatible_svg(path: Path) -> None:
+    try:
+        root = ElementTree.fromstring(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ElementTree.ParseError) as exc:
+        raise ValueError(f"Invalid SVG XML: {path}: {exc}") from exc
+
+    root_name = root.tag.rsplit("}", 1)[-1].lower()
+    if root_name != "svg":
+        raise ValueError(f"SVG root element is required: {path}")
+
+    view_box = (root.attrib.get("viewBox") or root.attrib.get("viewbox") or "").replace(",", " ").split()
+    try:
+        normalized_view_box = [float(value) for value in view_box]
+    except ValueError as exc:
+        raise ValueError(f"SVG viewBox must be numeric: {path}") from exc
+    if normalized_view_box != [0.0, 0.0, 1280.0, 720.0]:
+        raise ValueError(f"SVG viewBox must be exactly '0 0 1280 720': {path}")
+
+    forbidden = {"image", "foreignobject", "script"}
+    for element in root.iter():
+        local_name = element.tag.rsplit("}", 1)[-1].lower()
+        if local_name in forbidden:
+            raise ValueError(f"SVG contains forbidden <{local_name}> element: {path}")
+        for attribute, value in element.attrib.items():
+            if attribute.rsplit("}", 1)[-1].lower() == "href" and value and not value.startswith("#"):
+                raise ValueError(f"SVG contains an external href: {path}")
+
+    source = path.read_text(encoding="utf-8").lower()
+    if any(marker in source for marker in ("data:image", "url(http://", "url(https://", "@import")):
+        raise ValueError(f"SVG contains embedded or external image data: {path}")
+
+
+def complete_img_svg_generation(run_dir: Path) -> list[Path]:
+    state = load_state(run_dir)
+    if state.get("renderer") != "img":
+        raise RuntimeError("IMG-to-SVG completion is only available for the img renderer")
+    entry = renderer_state(state, "img")
+    conversion = dict(entry.get("svg_conversion") or {})
+    if conversion.get("mode") != "on":
+        raise RuntimeError("IMG-to-SVG conversion is not enabled")
+    if conversion.get("status") != "pending_generation":
+        raise RuntimeError("IMG-to-SVG generation is not pending")
+
+    manifest = read_json(Path(conversion["manifest_path"]))
+    expected_paths = [Path(item["target_path"]) for item in manifest.get("slides", [])]
+    actual_paths = sorted((run_dir / "img-svg").glob("*.svg"))
+    if {path.resolve() for path in actual_paths} != {path.resolve() for path in expected_paths}:
+        raise ValueError(
+            f"IMG-to-SVG output mismatch: expected {len(expected_paths)} exact page files, found {len(actual_paths)}"
+        )
+    for svg_path in actual_paths:
+        validate_ppt_compatible_svg(svg_path)
+
+    entry["svg_conversion"] = {
+        **conversion,
+        "status": "completed",
+        "svg_count": len(actual_paths),
+        "svg_paths": [str(path) for path in actual_paths],
+        "completed_at": utc_now(),
+    }
+    entry["status"] = "img_svg_export_ready"
+    state["status"] = "img_svg_export_ready"
+    save_state(run_dir, state)
+    return actual_paths
+
+
 def export_svg(run_dir: Path) -> Path:
     require_approved(run_dir, "slide_plans")
     from pptx_builder import build_pptx
@@ -565,12 +782,7 @@ def export_img(run_dir: Path) -> Path:
     from pptx import Presentation
     from pptx.util import Inches
 
-    img_dir = run_dir / "img"
-    images = sorted(
-        [p for p in img_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-    ) if img_dir.exists() else []
-    if not images:
-        raise ValueError(f"IMG directory is empty: {img_dir}")
+    images = require_complete_img_sources(run_dir)
 
     prs = Presentation()
     prs.slide_width = Inches(13.33)
@@ -592,7 +804,69 @@ def export_img(run_dir: Path) -> Path:
         }
         for i, image in enumerate(images, start=1)
     }, renderer="img")
-    mark_completed(run_dir, "img", {"pptx": pptx_path})
+    mark_img_exported_pending_svg_choice(run_dir, pptx_path, images)
+    return pptx_path
+
+
+def export_img_svg(run_dir: Path) -> Path:
+    require_approved(run_dir, "slide_plans")
+    state = load_state(run_dir)
+    if state.get("renderer") != "img":
+        raise RuntimeError("IMG-to-SVG export is only available for the img renderer")
+    entry = renderer_state(state, "img")
+    conversion = dict(entry.get("svg_conversion") or {})
+    if conversion.get("mode") != "on" or conversion.get("status") != "completed":
+        raise RuntimeError("IMG-to-SVG pages are not complete. Finish the model conversion before export.")
+
+    from pptx_builder import build_native_svg_pptx
+
+    svg_dir = run_dir / "img-svg"
+    svg_paths = sorted(svg_dir.glob("*.svg"))
+    for svg_path in svg_paths:
+        validate_ppt_compatible_svg(svg_path)
+
+    pptx_path = run_dir / renderer_pptx_name(run_dir, "img-svg")
+    build_native_svg_pptx(svg_dir, pptx_path)
+
+    manifest = read_json(Path(conversion["manifest_path"]))
+    slides = manifest.get("slides", [])
+    write_slide_status(run_dir, {
+        f"{int(item.get('index', i)):02d}": {
+            "title": item.get("title", f"Slide {i}"),
+            "page_role": "vectorized_image",
+            "validation_status": "codex_img_to_native_svg",
+            "export_ready": True,
+            "source_image_path": item.get("source_image_path"),
+            "svg_path": item.get("target_path"),
+        }
+        for i, item in enumerate(slides, start=1)
+    }, renderer="img-svg")
+
+    chain_manifest = write_json(run_dir / "img-svg-chain.json", {
+        "version": 1,
+        "source_renderer": "img",
+        "conversion": "vision_model_img_to_native_svg",
+        "source_pptx_path": conversion.get("source_pptx_path"),
+        "svg_dir": str(svg_dir),
+        "svg_pptx_path": str(pptx_path),
+        "slides": slides,
+        "updated_at": utc_now(),
+    })
+
+    state = load_state(run_dir)
+    entry = renderer_state(state, "img")
+    conversion = dict(entry.get("svg_conversion") or {})
+    entry["svg_conversion"] = {
+        **conversion,
+        "status": "exported",
+        "pptx_path": str(pptx_path),
+        "exported_at": utc_now(),
+    }
+    save_state(run_dir, state)
+    mark_completed(run_dir, "img", {
+        "svg_pptx": pptx_path,
+        "svg_chain_manifest": chain_manifest,
+    })
     return pptx_path
 
 
@@ -607,7 +881,7 @@ def clean_render_outputs(run_dir: Path) -> None:
                 raise RuntimeError(f"refusing to delete outside run dir: {target}")
             shutil.rmtree(target)
             print(f"deleted={target}", flush=True)
-    for pattern in ("*.pptx", "slide-status.json", "editable-ppt-chain.json"):
+    for pattern in ("*.pptx", "slide-status*.json", "editable-ppt-chain.json", "img-svg-chain.json"):
         for target in run_dir.glob(pattern):
             resolved = target.resolve()
             if root != resolved.parent:
@@ -673,6 +947,7 @@ def cmd_choose_renderer(args: argparse.Namespace) -> None:
             **RENDER_REVIEW_NOT_APPLICABLE,
             "confirmed_at": utc_now(),
         }
+        entry["svg_conversion"] = default_img_svg_conversion()
         entry["status"] = "render_ready"
         state["render_review"] = dict(entry["review"])
         state["status"] = "render_ready"
@@ -725,6 +1000,62 @@ def cmd_complete_review(args: argparse.Namespace) -> None:
     print(f"review_completed={renderer}", flush=True)
 
 
+def cmd_choose_img_svg(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    state = load_state(run_dir)
+    if state.get("renderer") != "img":
+        raise RuntimeError("IMG-to-SVG choice is only available for the img renderer")
+    entry = renderer_state(state, "img")
+    conversion = dict(entry.get("svg_conversion") or {})
+    if conversion.get("status") != "pending_choice":
+        raise RuntimeError(
+            "IMG-to-SVG choice is only allowed after the IMG PPT has been exported and shown to the user"
+        )
+    source_pptx = Path(str(conversion.get("source_pptx_path") or ""))
+    if not source_pptx.is_file():
+        raise RuntimeError("The exported IMG PPTX is missing; re-export it before asking for IMG-to-SVG choice")
+
+    if args.mode == "on":
+        conversion.update({
+            "mode": "on",
+            "status": "pending_generation",
+            "confirmed_at": utc_now(),
+        })
+        entry["svg_conversion"] = conversion
+        save_state(run_dir, state)
+        manifest = prepare_img_svg_jobs(run_dir, load_state(run_dir))
+        print("img_svg_mode=on", flush=True)
+        print(f"img_svg_jobs={manifest}", flush=True)
+        print("next=complete-img-svg", flush=True)
+        return
+
+    entry["svg_conversion"] = {
+        **conversion,
+        "mode": "off",
+        "status": "skipped",
+        "confirmed_at": utc_now(),
+    }
+    entry["status"] = "completed"
+    entry["completed_at"] = utc_now()
+    state["status"] = "completed"
+    save_state(run_dir, state)
+    print("img_svg_mode=off", flush=True)
+    print("completed=img", flush=True)
+
+
+def cmd_complete_img_svg(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    svg_paths = complete_img_svg_generation(run_dir)
+    print(f"img_svg_completed={len(svg_paths)}", flush=True)
+    print("next=export-img-svg", flush=True)
+
+
+def cmd_export_img_svg(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    out = export_img_svg(run_dir)
+    print(f"completed={out}", flush=True)
+
+
 def cmd_prepare_render_jobs(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     renderer = args.renderer or load_state(run_dir).get("renderer")
@@ -748,7 +1079,11 @@ def cmd_export(args: argparse.Namespace) -> None:
         out = export_img(run_dir)
     else:
         raise ValueError("renderer must be html, svg, or img")
-    print(f"completed={out}", flush=True)
+    if renderer == "img":
+        print(f"img_pptx={out}", flush=True)
+        print("next=ask-user-img-svg", flush=True)
+    else:
+        print(f"completed={out}", flush=True)
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -760,6 +1095,13 @@ def cmd_status(args: argparse.Namespace) -> None:
     review = state.get("render_review") or {}
     print(f"review_mode={review.get('mode')}", flush=True)
     print(f"review_status={review.get('status')}", flush=True)
+    next_steps = {
+        "img_svg_choice_pending": "ask-user-img-svg",
+        "img_svg_generation_pending": "complete-img-svg",
+        "img_svg_export_ready": "export-img-svg",
+    }
+    if state.get("status") in next_steps:
+        print(f"next={next_steps[state['status']]}", flush=True)
     for name, entry in sorted((state.get("artifacts") or {}).items()):
         print(f"{name}: {entry.get('status')} {entry.get('path')}", flush=True)
     for renderer_name, entry in sorted((state.get("renderers") or {}).items()):
@@ -769,13 +1111,20 @@ def cmd_status(args: argparse.Namespace) -> None:
             f"review={renderer_review.get('mode')}/{renderer_review.get('status')}",
             flush=True,
         )
+        if renderer_name == "img":
+            conversion = entry.get("svg_conversion") or {}
+            print(
+                f"renderer[img].svg_conversion: mode={conversion.get('mode')} "
+                f"status={conversion.get('status')}",
+                flush=True,
+            )
         for artifact_name, artifact_entry in sorted((entry.get("artifacts") or {}).items()):
             print(f"renderer[{renderer_name}].{artifact_name}: {artifact_entry.get('status')} {artifact_entry.get('path')}", flush=True)
     slides = read_json(run_dir / "slide-status.json", default={}).get("slides") or {}
     if slides:
         ready = sum(1 for item in slides.values() if item.get("export_ready"))
         print(f"slides_ready={ready}/{len(slides)}", flush=True)
-    patterns = {"html": "*.html", "svg": "*.svg", "img": "*.*"}
+    patterns = {"html": "*.html", "svg": "*.svg", "img": "*.*", "img-svg": "*.svg"}
     for name, pattern in patterns.items():
         count = len(list((run_dir / name).glob(pattern))) if (run_dir / name).exists() else 0
         if count:
@@ -820,6 +1169,11 @@ def build_parser() -> argparse.ArgumentParser:
     choose_review.add_argument("--mode", choices=["off", "on"], required=True)
     choose_review.set_defaults(func=cmd_choose_review)
 
+    choose_img_svg = sub.add_parser("choose-img-svg")
+    choose_img_svg.add_argument("--run-dir", required=True)
+    choose_img_svg.add_argument("--mode", choices=["off", "on"], required=True)
+    choose_img_svg.set_defaults(func=cmd_choose_img_svg)
+
     jobs = sub.add_parser("prepare-render-jobs")
     jobs.add_argument("--run-dir", required=True)
     jobs.add_argument("--renderer", choices=["html", "svg", "img"], default=None)
@@ -828,6 +1182,14 @@ def build_parser() -> argparse.ArgumentParser:
     complete_review = sub.add_parser("complete-review")
     complete_review.add_argument("--run-dir", required=True)
     complete_review.set_defaults(func=cmd_complete_review)
+
+    complete_img_svg = sub.add_parser("complete-img-svg")
+    complete_img_svg.add_argument("--run-dir", required=True)
+    complete_img_svg.set_defaults(func=cmd_complete_img_svg)
+
+    export_img_svg_parser = sub.add_parser("export-img-svg")
+    export_img_svg_parser.add_argument("--run-dir", required=True)
+    export_img_svg_parser.set_defaults(func=cmd_export_img_svg)
 
     export = sub.add_parser("export")
     export.add_argument("--run-dir", required=True)

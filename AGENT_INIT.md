@@ -17,7 +17,6 @@ Do not commit these machine-local or generated paths:
 - `output/`
 - `__pycache__/`
 - `.omx/`
-- `.ppt_agent_cache/`
 
 ## Required Setup
 
@@ -74,6 +73,18 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-rende
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
+For the IMG renderer, the normal export is not the end of the workflow. It creates the original IMG PPTX, then the agent must show it to the user and ask the post-export IMG-to-SVG question. Record the answer only after that handoff:
+
+```bash
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode off
+# or
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
+```
+
+When `on`, pass each `render-jobs/img-svg/slide-xx.json` `source_image_path` directly to a vision-capable model and save the pure-vector result to its exact `target_path`.
+
 ## Rerun Hygiene
 
 Before rerunning final export for the same run directory, call:
@@ -102,6 +113,13 @@ For IMG:
 
 - `output/<run>/img/*.{png,jpg,jpeg}`
 - `output/<run>/<deck>-img.pptx`
+
+For the optional post-export IMG-to-SVG derivative:
+
+- `output/<run>/render-jobs/img-svg/*.json`
+- `output/<run>/img-svg/*.svg`
+- `output/<run>/<deck>-img-svg.pptx` with native SVG media
+- `output/<run>/img-svg-chain.json`
 
 For multi-renderer comparison, keep those artifacts in the same run directory and compare `html/`, `svg/`, `img/`, and the renderer-specific PPTX files side by side.
 

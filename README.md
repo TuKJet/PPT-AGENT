@@ -4,6 +4,18 @@ Codex-facing PPT generation workflow with explicit outline, content, slide-plan 
 
 This branch is skill-first. Codex generates deck content inside the Codex conversation; repository code only handles deterministic artifact bookkeeping, render cleanup, screenshots, and PPTX export.
 
+## Repository Surface
+
+The executable surface is intentionally small:
+
+- `.codex/skills/ppt-deck-workflow/`: workflow instructions, contracts, and the state/export helper
+- `html_pipeline/html_builder.py`: deterministic 1280x720 HTML screenshot and image-PPTX export
+- `pptx_builder.py`: deterministic SVG image-PPTX export and native-SVG PPTX export
+- `vendor_presentation_core/export/`: retained DOM editable export and bundled browser runtime
+- `playwright_runtime.py`, `filename_utils.py`: shared deterministic utilities
+
+There is no repository model client, provider configuration, generation pipeline, or runner. HTML/SVG source files are authored by Codex and exporters do not silently rewrite them.
+
 ## Quick Start
 
 Install `uv`, then initialize the project:
@@ -50,6 +62,20 @@ For `html` and `svg`, renderer choice is followed by an explicit render-review p
 - `off`: default and recommended unless the user wants an extra review/repair pass
 - `on`: Codex runs a screenshot review subflow before export, then records completion with `complete-review`
 
+For `img`, the first `export` creates the original full-image PPTX and deliberately stops at `img_svg_choice_pending`. Only then must Codex show that PPTX to the user and ask whether to run the IMG-to-SVG post-process. The helper rejects an early choice.
+
+```bash
+# after the IMG PPTX exists and the user answers in chat
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode off
+
+# or, to create one direct-image model job per page
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
+```
+
+With `on`, every `render-jobs/img-svg/slide-xx.json` contains a `source_image_path` that must be passed directly to a vision-capable model. The returned page must be a pure-vector 1280x720 SVG under `img-svg/`; the final `<topic>-img-svg.pptx` embeds native SVG media rather than rasterizing it.
+
 For multi-renderer comparison, keep everything in the same run directory under `output/<project>/`. Compare outputs by subdirectory and renderer-specific export filenames instead of forking separate `-html` / `-img` project folders.
 
 For long HTML or SVG decks, prefer `prepare-render-jobs` and let subagents generate one page each while the main agent stays focused on consistency review and export coordination.
@@ -59,5 +85,6 @@ For long HTML or SVG decks, prefer `prepare-render-jobs` and let subagents gener
 - Generated decks are written to `output/`.
 - Content research should use Codex-native research/web capability directly, not repository AI provider code.
 - HTML and SVG export require Playwright Chromium.
+- Native IMG-to-SVG PPT export also requires Playwright Chromium because the bundled exporter creates PowerPoint's native SVG media plus its PNG preview.
 - HTML export creates an image PPTX and attempts a DOM-based editable PPTX.
-- Do not use `ppt_workflow.runner`; it is intentionally removed in this branch.
+- The former `ppt_workflow.runner`, provider client, generation pipeline, prompt/template runtime, and `.env.example` are intentionally removed from this branch.

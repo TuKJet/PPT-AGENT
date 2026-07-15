@@ -1,13 +1,11 @@
 .DS_Store
 .env
 .env.*
-!.env.example
 
 .venv/
 .python/
 .ms-playwright/
 .uv-cache/
-.ppt_agent_cache/
 .pycache-check/
 .omx/
 
@@ -17,6 +15,8 @@ __pycache__/
 output/
 *.pptx
 *.log
+/tmp_run_area/
+/tmp_*_test.txt
 
 # Root-level workflow run artifacts accidentally created outside output/
 /codex_write_test.txt

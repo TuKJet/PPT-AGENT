@@ -7,6 +7,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent
 LOCAL_PLAYWRIGHT_CACHE = PROJECT_ROOT / ".ms-playwright"
 GLOBAL_PLAYWRIGHT_CACHE = Path.home() / "Library" / "Caches" / "ms-playwright"
+WINDOWS_PLAYWRIGHT_CACHE = Path(os.getenv("LOCALAPPDATA", "")) / "ms-playwright"
 
 
 def playwright_cache() -> Path:
@@ -34,6 +35,9 @@ def global_chromium_executable() -> str | None:
     ]
     candidates.extend(sorted(cache.glob("chromium-*/chrome-mac-*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")))
     candidates.extend(sorted(cache.glob("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell")))
+    if WINDOWS_PLAYWRIGHT_CACHE.exists():
+        candidates.extend(sorted(WINDOWS_PLAYWRIGHT_CACHE.glob("chromium_headless_shell-*/chrome-headless-shell-win*/chrome-headless-shell.exe"), reverse=True))
+        candidates.extend(sorted(WINDOWS_PLAYWRIGHT_CACHE.glob("chromium-*/chrome-win*/chrome.exe"), reverse=True))
 
     for candidate in candidates:
         if candidate.exists():

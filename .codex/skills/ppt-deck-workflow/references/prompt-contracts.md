@@ -272,6 +272,35 @@ When generating SVG slides:
 - Keep visual language aligned with the audience profile chosen during outline generation rather than re-deciding audience from scratch at render time.
 - Output only SVG code, no Markdown fences or explanatory text in the generated slide file.
 
+## IMG-to-SVG Model Conversion Contract
+
+Use this only after the IMG renderer has produced and exported the complete IMG PPT, the workflow has stopped, and the user has explicitly chosen `choose-img-svg --mode on` in chat.
+
+For every `render-jobs/img-svg/slide-xx.json`:
+
+- Pass that job's `source_image_path` directly to a vision-capable model. The source IMG is the primary and mandatory visual source of truth; do not recreate the page from `slide-plans.json` alone.
+- Ask the model to faithfully reconstruct the visible page as one complete, native 1280x720 SVG with `viewBox="0 0 1280 720"`.
+- Preserve the page's visible wording, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order as closely as the image allows.
+- Produce real vector content using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
+- Do not place the original IMG inside an `<image>` element. Do not use base64/data-URI images, external image URLs, linked files, `<foreignObject>`, scripts, animation, or external stylesheets/fonts.
+- Prefer PowerPoint-compatible SVG primitives and attributes. Avoid filters or experimental SVG features when a simpler vector construction can reproduce the same visual result.
+- Keep text as `<text>`/`<tspan>` whenever legibility and fidelity permit, so PowerPoint can retain useful vector/text structure after import.
+- Write only the SVG document to the job's exact `target_path`; do not write Markdown fences or explanatory prose into the file.
+
+Use this model prompt shape:
+
+```text
+Reconstruct the attached presentation-slide image as one native, PowerPoint-compatible SVG.
+
+Canvas: 1280x720, viewBox="0 0 1280 720".
+Faithfulness: preserve all visible text, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order from the attached image.
+Vector requirement: use SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths. Do not embed or reference the attached raster image.
+Compatibility: no <image>, data URI, external URL/file, <foreignObject>, script, animation, or external stylesheet/font. Prefer simple PowerPoint-compatible SVG primitives.
+Output: the complete SVG document only, with no Markdown fence or explanation.
+```
+
+Before marking conversion complete, the helper validates the exact one-to-one page set, the 1280x720 viewBox, XML validity, and the absence of raster/external wrappers. The final exporter must embed native `.svg` media in the PPTX rather than rasterizing the generated SVG pages.
+
 ## Technical Layout Checks
 
 For HTML, inspect rendered screenshots and layout reports for:

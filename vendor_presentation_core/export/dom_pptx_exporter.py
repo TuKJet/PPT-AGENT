@@ -1635,8 +1635,7 @@ def build_dom_editable_deck_from_html(
         page_role = meta.get("page_role", "summary")
         source_png = preview_dir / f"html-source-{idx:02d}.png"
         source_png.write_bytes(render_html_screenshot(html_path))
-        # `render_html_screenshot()` 会触发 HTML validation / safe-style 回写，
-        # 导出 DOM 时必须读取回写后的版本，避免 preview 已修正但 editable 仍沿用旧布局。
+        # Rendering is deterministic and never rewrites the Codex-authored HTML.
         html = html_path.read_text(encoding="utf-8")
         dom_preview_png = preview_dir / f"editable-preview-{idx:02d}.png"
         slides.append(

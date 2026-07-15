@@ -1,1 +1,1 @@
-"""Vendored presentation core logic adapted for PPT-AGENT."""
+"""Deterministic PPTX export runtime retained by the local workflow skill."""
