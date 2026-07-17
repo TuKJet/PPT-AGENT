@@ -51,10 +51,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-review --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer img
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 # IMG only: export now stops at a required post-export user choice
@@ -105,7 +103,7 @@ Required order:
 8. Only after user approval, create `slide-plans.json`.
 9. Run `preview --artifact slide_plans`.
 10. Return `slide-plans-preview.md` to the user and stop.
-11. Only after user approval, ask for renderer choice and review preference.
+11. Only after user approval, ask for renderer choice, recommend `img` by default, and request a review preference only when the user chooses `html` or `svg`.
 
 Concrete prohibitions:
 
@@ -182,10 +180,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-review --run-dir output/...
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer img
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode off
@@ -194,7 +190,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-im
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-Use `svg` instead of `html` in `choose-renderer` when the user wants the SVG branch.
+The default recommendation at renderer-choice time is `img`. Use `html` when the user prioritizes stable deterministic layout or an editable-PPTX attempt, and use `svg` when the user explicitly wants the direct SVG branch. For `html` or `svg`, run `choose-review` before export.
 
 The `img` branch is a Codex-side full-page image generation route. Use approved `slide-plans.json` as the source of truth, generate one image prompt per slide in chat, call Codex's `imagegen` tool for each full 16:9 slide image, save the resulting images under `output/.../img/`, then package those images into a PPTX with the helper.
 
@@ -352,10 +348,12 @@ After `plans`, return the `slide-plans-preview.md` path to the user and ask them
 
 After slide plans are approved, ask:
 
-- `html`: recommended for stable layout, image PPTX, and editable PPTX export.
+- `img` (recommended): full-page image generation through Codex imagegen; best for visually polished slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
+- `html`: stable deterministic layout, image PPTX, and an editable PPTX export attempt; offer it when those properties matter, but do not recommend it by default.
 - `svg`: lighter source files and faster visual drafts.
-- `img`: full-page image generation through Codex imagegen; best for visually polished management-facing slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
 - For `html` and `svg`, also ask whether to enable the render review subflow. Default recommendation: `off`.
+
+Present `img` first and identify it as the default recommendation. Do not recommend `html` merely because the user asked for a deliverable deck; reserve it for an explicit need for deterministic layout or an editable-PPTX attempt.
 
 When asking, explicitly mention that this branch uses Codex-authored renderer files and deterministic export, not a repository AI review/fix loop. Review is an explicit Codex-side subflow, not an automatic repo-side loop.
 
@@ -449,6 +447,8 @@ Relevant files:
 Use `workflow-state.json` for approval state. Keep `outline.json` and `contents.json` as plain data files because the skill helper and previews read them directly.
 
 ## Renderer Choice
+
+Default recommendation: IMG. Keep HTML and SVG available as deliberate alternatives when their specific tradeoffs better match the user's request.
 
 HTML branch:
 

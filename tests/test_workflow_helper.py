@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
 import base64
+import importlib.util
+import io
 import json
 import os
 import shutil
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -84,6 +86,16 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         self.workflow.cmd_choose_review(Namespace(run_dir=str(self.run_dir), mode="off"))
 
         self.workflow.ensure_render_ready(self.run_dir, "html")
+
+    def test_slide_plan_approval_recommends_img_renderer(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.workflow.cmd_approve(
+                Namespace(run_dir=str(self.run_dir), artifact="slide_plans")
+            )
+
+        self.assertIn("next=choose-renderer", output.getvalue())
+        self.assertIn("recommended_renderer=img", output.getvalue())
 
 
 if __name__ == "__main__":

@@ -1008,6 +1008,7 @@ def cmd_approve(args: argparse.Namespace) -> None:
     print(f"approved={args.artifact}", flush=True)
     if args.artifact == "slide_plans" and not state.get("renderer"):
         print("next=choose-renderer", flush=True)
+        print("recommended_renderer=img", flush=True)
 
 
 def cmd_choose_renderer(args: argparse.Namespace) -> None:

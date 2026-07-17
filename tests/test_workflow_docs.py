@@ -39,6 +39,21 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("subagent", skill_text)
         self.assertIn("Render Job Contract", contracts_text)
 
+    def test_img_is_the_default_renderer_recommendation(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        skill_root = root / ".codex" / "skills" / "ppt-deck-workflow"
+
+        skill_text = (skill_root / "SKILL.md").read_text(encoding="utf-8")
+        workflow_text = (skill_root / "references" / "workflow.md").read_text(
+            encoding="utf-8"
+        )
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("Default recommendation: IMG", skill_text)
+        self.assertIn("Recommend IMG by default", workflow_text)
+        self.assertIn("`IMG`（默认推荐）", readme)
+        self.assertNotIn("Recommend HTML by default", workflow_text)
+
     def test_img_svg_post_export_gate_is_documented_as_mandatory(self) -> None:
         root = Path(__file__).resolve().parents[1]
         skill_path = root / ".codex" / "skills" / "ppt-deck-workflow" / "SKILL.md"

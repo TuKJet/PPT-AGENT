@@ -31,10 +31,10 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 9. Generate `slide-plans.json`, then run helper `preview --artifact slide_plans`.
 10. Ask for approval or changes.
 11. Approve `slide_plans`.
-12. Ask for renderer choice.
+12. Ask for renderer choice, present `img` first, and recommend it by default.
 13. Run helper `choose-renderer`.
 14. If renderer is `html` or `svg`, ask whether to enable render review. Default recommendation: `off`.
-15. Run helper `choose-review`.
+15. For `html` or `svg`, run helper `choose-review`; skip this step for `img`.
 16. For long or dense `html`/`svg` decks, optionally materialize renderer job files with `prepare-render-jobs`, then let subagents create the per-page renderer source files.
 17. Codex creates the renderer source files using `prompt-contracts.md`.
 18. If render review is `on`, run the Codex-side screenshot review and repair subflow, then helper `complete-review`.
@@ -46,9 +46,9 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 
 ## Renderer Guidance
 
-Recommend HTML by default when the user wants a deliverable deck, editable PPTX attempt, or the most stable layout path.
+Recommend IMG by default for new deck rendering. Present it first as the polished full-page visual route; after the original IMG PPTX is exported, preserve the mandatory separate question about optional IMG-to-SVG conversion.
 
-Recommend SVG when the user wants lightweight source pages, quick visual drafts, or pure SVG artifacts. Recommend IMG for polished full-page visuals when editability is not required.
+Offer HTML when the user explicitly prioritizes deterministic layout or an editable-PPTX attempt, but do not recommend HTML merely because the user wants a deliverable deck. Offer SVG when the user wants lightweight source pages, quick visual drafts, or direct SVG artifacts.
 
 ## Resume Guidance
 

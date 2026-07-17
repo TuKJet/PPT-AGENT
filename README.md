@@ -25,14 +25,14 @@ This branch is skill-first. Codex generates deck content inside the Codex conver
 
 ```text
 大纲预览 → 用户批准 → 内容预览 → 用户批准 → 页面规划预览 → 用户批准
-         → 选择 HTML / SVG / IMG → 渲染并导出 PPTX
+         → 选择 IMG（推荐）/ HTML / SVG → 渲染并导出 PPTX
 ```
 
 在每个预览阶段回复 `批准` 即可继续，也可以直接提出修改，例如“合并第 3、4 页并压缩到 5 页”。渲染方式的常见选择：
 
-- `HTML`：稳定排版、截图版 PPTX，并尝试导出可编辑 PPTX。
+- `IMG`（默认推荐）：生成视觉完成度更高的整页图片；原始 IMG PPTX 导出后，Skill 会再单独询问是否生成 SVG 版本。
+- `HTML`：需要稳定的确定性排版或尝试导出可编辑 PPTX 时选择，但不再作为默认推荐。
 - `SVG`：适合文字、卡片、箭头和简单图形组成的矢量页面。
-- `IMG`：适合更强调视觉表现的完整页面图片；原始 IMG PPTX 导出后，Skill 会再询问是否生成 SVG 版本。
 
 所有项目文件默认写入当前工作区的 `output/<project>/`。在本仓库内使用时会加载项目本地 Skill；在其他工作目录中新建 Codex 任务时，会使用安装到 `$CODEX_HOME/skills/ppt-deck-workflow` 的全局 Skill。
 
@@ -346,9 +346,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer html
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer html
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer img
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
