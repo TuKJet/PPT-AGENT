@@ -71,6 +71,7 @@ class WorkflowDocsTests(unittest.TestCase):
     def test_global_skill_installation_is_documented(self) -> None:
         root = Path(__file__).resolve().parents[1]
         readme = (root / "README.md").read_text(encoding="utf-8")
+        agents = (root / "AGENTS.md").read_text(encoding="utf-8")
         agent_init = (root / "AGENT_INIT.md").read_text(encoding="utf-8")
         skill = (
             root
@@ -92,6 +93,10 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("使用 $ppt-deck-workflow", readme)
         self.assertIn("大纲预览 → 用户批准", readme)
         self.assertIn("$CODEX_HOME/skills/ppt-deck-workflow", readme)
+        self.assertIn("## PowerPoint Skill Routing / PowerPoint Skill 路由", readme)
+        self.assertIn("$CODEX_HOME/AGENTS.override.md", readme)
+        self.assertIn("request the user's permission", agents)
+        self.assertIn("must not silently edit global Agent instructions", agents)
         self.assertIn("Global Verification Checklist", agent_init)
         self.assertIn("PPT_AGENT_WORKSPACE", agent_init)
         self.assertIn("update_global_skill.py", agent_init)

@@ -10,4 +10,6 @@ For optional post-export IMG-to-SVG conversion, preserve the existing user choic
 
 When asked to install this capability globally, use `scripts/install_global_skill.py` from the skill folder. The installed skill must carry its own `runtime/` and use the caller's current workspace for `output/`; do not create a symlink back to this repository.
 
+After a global installation verifies successfully, follow the mandatory PowerPoint Skill routing check in `README.md`. Inspect the active global Codex instructions (`$CODEX_HOME/AGENTS.override.md` when it exists and is non-empty, otherwise `$CODEX_HOME/AGENTS.md`). If an equivalent routing rule is missing, explain the conflict between the generic `Presentations` Skill and `ppt-deck-workflow`, then request the user's permission before changing global instructions. Preserve all existing content and never overwrite the whole file. The installer itself must not silently edit global Agent instructions.
+
 When asked to check, upgrade, inspect, or roll back an installed global copy, use `scripts/update_global_skill.py`. The recorded default source is `https://github.com/TuKJet/PPT-AGENT.git`, branch `codex/all-logic-in-skills`. Use its staged update path; do not replace the installation with `--force`, merge into the live Skill, or delete its `.venv` or shared Playwright browser cache.
