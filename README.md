@@ -4,6 +4,49 @@ Codex-facing PPT generation workflow with explicit outline, content, slide-plan 
 
 This branch is skill-first. Codex generates deck content inside the Codex conversation; repository code only handles deterministic artifact bookkeeping, render cleanup, screenshots, and PPTX export.
 
+## Quick Use / 快速使用
+
+安装完成后，在需要制作 PPT 的工作目录中新建一个 Codex 任务。最稳定的触发方式是在提示词开头显式写出 Skill 名称：
+
+```text
+使用 $ppt-deck-workflow 帮我制作一个中文 PPT。
+
+主题：公司内部 AI 工具使用指南
+受众：普通同事
+页数：6 页
+风格：简洁、专业、图文结合
+
+请按 Skill 的审批流程执行，先只生成大纲。
+```
+
+也可以直接说“帮我做一个 PPT”让 Codex 自动匹配；需要确保触发时，优先使用 `$ppt-deck-workflow` 显式点名。
+
+正常流程是：
+
+```text
+大纲预览 → 用户批准 → 内容预览 → 用户批准 → 页面规划预览 → 用户批准
+         → 选择 HTML / SVG / IMG → 渲染并导出 PPTX
+```
+
+在每个预览阶段回复 `批准` 即可继续，也可以直接提出修改，例如“合并第 3、4 页并压缩到 5 页”。渲染方式的常见选择：
+
+- `HTML`：稳定排版、截图版 PPTX，并尝试导出可编辑 PPTX。
+- `SVG`：适合文字、卡片、箭头和简单图形组成的矢量页面。
+- `IMG`：适合更强调视觉表现的完整页面图片；原始 IMG PPTX 导出后，Skill 会再询问是否生成 SVG 版本。
+
+所有项目文件默认写入当前工作区的 `output/<project>/`。在本仓库内使用时会加载项目本地 Skill；在其他工作目录中新建 Codex 任务时，会使用安装到 `$CODEX_HOME/skills/ppt-deck-workflow` 的全局 Skill。
+
+全局 Skill 维护也可以直接通过自然语言触发：
+
+```text
+使用 $ppt-deck-workflow 查看当前全局 PPT Skill 状态。
+使用 $ppt-deck-workflow 检查 GitHub 是否有更新，只检查，不升级。
+使用 $ppt-deck-workflow 升级到记录的 GitHub 分支最新版本。
+使用 $ppt-deck-workflow 回滚到最近一个备份版本。
+```
+
+`status` 不联网，`check` 只读检查远端；只有明确提出“升级”或“回滚”时才会修改全局 Skill。首次安装请继续阅读 [Install For An Agent](#install-for-an-agent)，更新与回滚细节见 [Upgrade The Global Skill](#upgrade-the-global-skill)。
+
 ## Repository Surface
 
 The executable surface is intentionally small:
