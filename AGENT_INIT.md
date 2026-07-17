@@ -106,7 +106,9 @@ Fallback target when `CODEX_HOME` is unset:
 
 The installed skill includes its own deterministic runtime under `runtime/`; it does not import files from the original checkout. The runtime includes HTML screenshot export, image/SVG PPTX export, editable DOM export, Pillow crop embedding, and the bundled JavaScript PPTX exporter.
 
-The installer records its GitHub repository, branch, commit, dirty-source status, and managed file hashes in `.install-state.json`. By default it records `https://github.com/TuKJet/PPT-AGENT.git` and branch `codex/all-logic-in-skills` when Git discovery is unavailable. Playwright installs only the Chromium headless shell into the shared OS browser cache.
+The installer records its GitHub repository, branch, commit, dirty-source status, managed file hashes, selected Playwright requirement, cache-reuse decision, and browser revision in `.install-state.json`. By default it records `https://github.com/TuKJet/PPT-AGENT.git` and branch `codex/all-logic-in-skills` when Git discovery is unavailable.
+
+Before syncing dependencies, the installer inspects the shared Playwright cache's `.links` records. If a linked Playwright package maps a complete cached Chromium headless-shell revision to a version that satisfies the Skill minimum, the installed runtime materializes the highest such version and reuses that browser. If no reliable compatible pair exists, it keeps the open minimum requirement and lets Playwright install the required headless shell into the shared OS cache. It never guesses a Playwright package version from a raw revision directory alone.
 
 After installation, restart or refresh the Agent/skill catalog if the host does not discover new skills dynamically.
 

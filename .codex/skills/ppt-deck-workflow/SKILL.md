@@ -26,6 +26,7 @@ Use `scripts/update_global_skill.py` only when `runtime/` and `.install-state.js
 - For an update check, run `check`; do not modify the installation.
 - Run `upgrade` or `rollback` only after the user explicitly requests that mutation. Let Codex request network and `$CODEX_HOME` write approval when required.
 - Do not use `install_global_skill.py --force` as the normal update path. The updater stages the branch, validates it, preserves `runtime/.venv`, `runtime/.uv-cache`, local `uv.lock`, and the shared Playwright cache, then rolls back on failure.
+- Before resolving Playwright, let the installer inspect the shared cache links. When a complete cached Chromium headless-shell revision maps to a Playwright version at or above the Skill minimum, materialize that exact version in the installed runtime so `playwright install --only-shell chromium` reuses the existing browser. Fall back to the open minimum requirement only when no reliable compatible mapping exists.
 - Stop after a successful upgrade or rollback and tell the user the new Skill instructions apply on the next turn.
 
 Read `references/global-skill-maintenance.md` before installing, checking, upgrading, or rolling back the global Skill.

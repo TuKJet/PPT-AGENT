@@ -86,6 +86,8 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("update_global_skill.py", readme)
         self.assertIn("codex/all-logic-in-skills", readme)
         self.assertIn("--only-shell", readme)
+        self.assertIn(".links", readme)
+        self.assertIn("cache-compatible Playwright version", readme)
         self.assertIn("$CODEX_HOME/skills/ppt-deck-workflow", readme)
         self.assertIn("Global Verification Checklist", agent_init)
         self.assertIn("PPT_AGENT_WORKSPACE", agent_init)

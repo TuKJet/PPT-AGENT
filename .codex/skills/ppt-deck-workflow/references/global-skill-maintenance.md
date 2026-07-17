@@ -56,8 +56,9 @@ Use the equivalent slash-separated paths on macOS/Linux.
 - Refuse an upgrade when managed files differ from their recorded hashes unless the user explicitly approves `--allow-local-changes`.
 - Keep backups under `$CODEX_HOME/skill-state/ppt-deck-workflow/backups`, outside `$CODEX_HOME/skills`, so backup copies are not discovered as duplicate Skills.
 - Preserve `runtime/.venv`, `runtime/.uv-cache`, local `runtime/uv.lock`, `.install-state.json`, and unmanaged local files.
-- Use `uv sync` after managed files are updated. Keep the open Playwright dependency range; do not hard-pin Playwright.
-- Install only `playwright install --only-shell chromium` into the shared OS cache when browser setup is enabled.
+- Keep the repository requirement as an open minimum. Before `uv sync`, inspect the shared cache's `.links` records and each linked Playwright `browsers.json`. If a complete cached `chromium_headless_shell-<revision>` maps to a Playwright version that satisfies the minimum, materialize that exact version in the installed runtime and record the selection in `.install-state.json`.
+- Prefer the highest compatible cached Playwright version when several complete revisions are available. Do not infer a package version from a revision number alone; fall back to the open minimum when the mapping is missing, stale, incomplete, or below the minimum.
+- Install only `playwright install --only-shell chromium` into the shared OS cache when browser setup is enabled. With a cache-compatible runtime selection, this command verifies and reuses the existing revision instead of downloading another one.
 - Let Playwright select the exact browser revision. Use `PLAYWRIGHT_CHROMIUM_EXECUTABLE` only as an explicit user override.
 - Restore the backup automatically if candidate application, dependency sync, browser setup, or workflow verification fails.
 - Do not run `git reset --hard`, delete the shared Playwright cache, or overwrite a different repository/ref silently.

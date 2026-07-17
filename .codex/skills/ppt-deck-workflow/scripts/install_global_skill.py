@@ -12,6 +12,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from playwright_cache import (  # noqa: E402
+    MIN_PLAYWRIGHT_VERSION,
+    CachedPlaywright,
+    compatible_cached_playwright,
+    shared_playwright_cache,
+)
+
+
 SKILL_NAME = "ppt-deck-workflow"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 try:
@@ -48,7 +60,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pillow>=10.0.0",
     "python-pptx>=1.0.0",
-    "playwright>=1.40.0",
+    "{playwright_requirement}",
     "pywin32>=306; sys_platform == 'win32'",
 ]
 
@@ -63,19 +75,6 @@ def codex_home() -> Path:
 
 def default_target() -> Path:
     return codex_home() / "skills" / SKILL_NAME
-
-
-def shared_playwright_cache() -> Path:
-    explicit = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    if os.name == "nt":
-        local_app_data = os.getenv("LOCALAPPDATA")
-        if local_app_data:
-            return (Path(local_app_data) / "ms-playwright").resolve()
-    if sys.platform == "darwin":
-        return (Path.home() / "Library" / "Caches" / "ms-playwright").resolve()
-    return (Path.home() / ".cache" / "ms-playwright").resolve()
 
 
 def runtime_environment(runtime: Path) -> dict[str, str]:
@@ -143,7 +142,7 @@ def ignore_generated(_: str, names: list[str]) -> set[str]:
     return ignored
 
 
-def copy_global_skill(staging: Path) -> None:
+def copy_global_skill(staging: Path, *, playwright_requirement: str) -> None:
     runtime_source = source_runtime_root()
     staging.mkdir(parents=True, exist_ok=False)
 
@@ -180,7 +179,10 @@ def copy_global_skill(staging: Path) -> None:
             ignore=ignore_generated,
         )
 
-    (runtime_target / "pyproject.toml").write_text(RUNTIME_PYPROJECT, encoding="utf-8")
+    (runtime_target / "pyproject.toml").write_text(
+        RUNTIME_PYPROJECT.format(playwright_requirement=playwright_requirement),
+        encoding="utf-8",
+    )
 
 
 def file_sha256(path: Path) -> str:
@@ -207,7 +209,12 @@ def managed_file_hashes(skill_root: Path) -> dict[str, str]:
     return hashes
 
 
-def write_install_state(skill_root: Path, source: dict[str, object]) -> dict[str, object]:
+def write_install_state(
+    skill_root: Path,
+    source: dict[str, object],
+    *,
+    runtime_info: dict[str, object],
+) -> dict[str, object]:
     hashes = managed_file_hashes(skill_root)
     state: dict[str, object] = {
         "schema_version": 1,
@@ -219,6 +226,7 @@ def write_install_state(skill_root: Path, source: dict[str, object]) -> dict[str
             "commit": source.get("commit"),
             "dirty": bool(source.get("dirty", False)),
         },
+        "runtime": runtime_info,
         "managed_files": sorted(hashes),
         "managed_hashes": hashes,
     }
@@ -244,13 +252,40 @@ def install_skill(
             f"skill already exists: {target}. Re-run with --force to replace it."
         )
 
+    cached_playwright: CachedPlaywright | None = compatible_cached_playwright(
+        minimum_version=MIN_PLAYWRIGHT_VERSION
+    )
+    if cached_playwright:
+        playwright_requirement = f"playwright=={cached_playwright.version}"
+        runtime_info: dict[str, object] = {
+            "playwright_requirement": playwright_requirement,
+            "minimum_playwright_version": MIN_PLAYWRIGHT_VERSION,
+            "reused_browser_cache": True,
+            "browser_revision": cached_playwright.revision,
+        }
+    else:
+        playwright_requirement = f"playwright>={MIN_PLAYWRIGHT_VERSION}"
+        runtime_info = {
+            "playwright_requirement": playwright_requirement,
+            "minimum_playwright_version": MIN_PLAYWRIGHT_VERSION,
+            "reused_browser_cache": False,
+            "browser_revision": None,
+        }
+
     staging = Path(
         tempfile.mkdtemp(prefix=f".{SKILL_NAME}-", dir=str(target.parent))
     )
     shutil.rmtree(staging)
     try:
-        copy_global_skill(staging)
-        write_install_state(staging, source or detected_source_info())
+        copy_global_skill(
+            staging,
+            playwright_requirement=playwright_requirement,
+        )
+        write_install_state(
+            staging,
+            source or detected_source_info(),
+            runtime_info=runtime_info,
+        )
         if target.exists():
             shutil.rmtree(target)
         staging.replace(target)
@@ -349,11 +384,27 @@ def main() -> None:
         "dirty": args.source_dirty or bool(detected["dirty"]),
     }
     target = install_skill(Path(args.target), force=args.force, source=source)
+    install_state = json.loads(
+        (target / INSTALL_STATE_FILE).read_text(encoding="utf-8")
+    )
+    runtime_info = install_state.get("runtime")
+    assert isinstance(runtime_info, dict)
     print(f"installed_skill={target}", flush=True)
     print(f"runtime={target / 'runtime'}", flush=True)
     print(f"source_repo={source['repository']}", flush=True)
     print(f"source_ref={source['ref']}", flush=True)
     print(f"source_commit={source['commit'] or 'unknown'}", flush=True)
+    print(
+        f"playwright_requirement={runtime_info.get('playwright_requirement')}",
+        flush=True,
+    )
+    print(
+        "reused_browser_cache="
+        + ("yes" if runtime_info.get("reused_browser_cache") else "no"),
+        flush=True,
+    )
+    if runtime_info.get("browser_revision"):
+        print(f"browser_revision={runtime_info['browser_revision']}", flush=True)
     if args.bootstrap:
         bootstrap_runtime(target, install_browser=args.install_browser)
         verify_install(target)

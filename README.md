@@ -105,12 +105,13 @@ The installer:
    - `html_pipeline/`
    - `vendor_presentation_core/`
 3. Creates `runtime/pyproject.toml`.
-4. Runs `uv sync --project <installed-skill>/runtime` with `--bootstrap`.
-5. Records the GitHub repository, branch, commit, and managed file hashes in `.install-state.json`.
-6. Installs only the Playwright Chromium headless shell with `--install-browser` and uses the shared OS browser cache.
-7. Runs the installed `workflow.py --help` as a final verification.
+4. Inspects the shared Playwright cache and its `.links` metadata before dependency resolution. If a complete cached Chromium headless-shell revision maps to a Playwright version satisfying the Skill minimum, the installed runtime selects that exact version instead of downloading a newer browser revision.
+5. Runs `uv sync --project <installed-skill>/runtime` with `--bootstrap`.
+6. Records the GitHub repository, branch, commit, managed file hashes, selected Playwright requirement, cache-reuse decision, and browser revision in `.install-state.json`.
+7. Installs only the Playwright Chromium headless shell with `--install-browser` and uses the shared OS browser cache. When the compatible revision already exists, Playwright reuses it without a browser download.
+8. Runs the installed `workflow.py --help` as a final verification.
 
-The global skill is therefore independent of the original repository directory. Its Python environment remains under `runtime/.venv`; Playwright browser binaries are shared through the OS cache instead of being duplicated per repository or Skill.
+The global skill is therefore independent of the original repository directory. Its Python environment remains under `runtime/.venv`; Playwright browser binaries are shared through the OS cache instead of being duplicated per repository or Skill. The source requirement remains an open minimum, while each installed runtime may materialize an exact cache-compatible Playwright version discovered on that machine. A raw browser revision is never guessed: reuse requires both a complete cache marker and a linked Playwright package whose `browsers.json` names that revision.
 
 Installed layout:
 

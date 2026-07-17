@@ -55,6 +55,7 @@ class GlobalSkillInstallTests(unittest.TestCase):
             )
             self.assertTrue((installed / "scripts" / "workflow.py").is_file())
             self.assertTrue((installed / "scripts" / "embed_img_crops.py").is_file())
+            self.assertTrue((installed / "scripts" / "playwright_cache.py").is_file())
             self.assertTrue((installed / "scripts" / "update_global_skill.py").is_file())
             self.assertTrue((installed / "runtime" / "pyproject.toml").is_file())
             self.assertTrue((installed / "runtime" / "filename_utils.py").is_file())
@@ -139,6 +140,60 @@ class GlobalSkillInstallTests(unittest.TestCase):
             self.assertTrue(commands[0][1])
             assert commands[0][1] is not None
             self.assertIn("PLAYWRIGHT_BROWSERS_PATH", commands[0][1])
+
+    def test_install_prefers_a_compatible_cached_playwright_version(self) -> None:
+        installer = load_installer_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "skills" / "ppt-deck-workflow"
+            cached = installer.CachedPlaywright(
+                version="1.60.0",
+                revision="1223",
+                package_root=root / "package",
+                browser_root=root / "chromium_headless_shell-1223",
+            )
+
+            with mock.patch.object(
+                installer,
+                "compatible_cached_playwright",
+                return_value=cached,
+            ):
+                installer.install_skill(target)
+
+            pyproject = (target / "runtime" / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+            state = json.loads(
+                (target / ".install-state.json").read_text(encoding="utf-8")
+            )
+            self.assertIn('"playwright==1.60.0"', pyproject)
+            self.assertEqual(
+                state["runtime"]["playwright_requirement"],
+                "playwright==1.60.0",
+            )
+            self.assertTrue(state["runtime"]["reused_browser_cache"])
+            self.assertEqual(state["runtime"]["browser_revision"], "1223")
+
+    def test_install_keeps_open_minimum_without_a_reliable_cached_pair(self) -> None:
+        installer = load_installer_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "skills" / "ppt-deck-workflow"
+            with mock.patch.object(
+                installer,
+                "compatible_cached_playwright",
+                return_value=None,
+            ):
+                installer.install_skill(target)
+
+            pyproject = (target / "runtime" / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+            state = json.loads(
+                (target / ".install-state.json").read_text(encoding="utf-8")
+            )
+            self.assertIn('"playwright>=1.40.0"', pyproject)
+            self.assertFalse(state["runtime"]["reused_browser_cache"])
+            self.assertIsNone(state["runtime"]["browser_revision"])
 
 
 if __name__ == "__main__":
