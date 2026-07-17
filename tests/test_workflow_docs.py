@@ -54,7 +54,7 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("`IMG`（默认推荐）", readme)
         self.assertNotIn("Recommend HTML by default", workflow_text)
 
-    def test_img_svg_post_export_gate_is_documented_as_mandatory(self) -> None:
+    def test_img_svg_is_documented_as_optional_post_export_opt_in(self) -> None:
         root = Path(__file__).resolve().parents[1]
         skill_path = root / ".codex" / "skills" / "ppt-deck-workflow" / "SKILL.md"
         references = skill_path.parent / "references"
@@ -63,9 +63,16 @@ class WorkflowDocsTests(unittest.TestCase):
         workflow_text = (references / "workflow.md").read_text(encoding="utf-8")
         contract_text = (references / "prompt-contracts.md").read_text(encoding="utf-8")
 
-        self.assertIn("IMG-to-SVG Post-Export Gate", skill_text)
-        self.assertIn("must not be asked earlier", skill_text)
-        self.assertIn("next=ask-user-img-svg", workflow_text)
+        self.assertIn("Optional IMG-to-SVG Post-Export Opt-In", skill_text)
+        self.assertIn("Never present a second response option", skill_text)
+        self.assertIn("无需额外回复", skill_text)
+        self.assertIn("是否需要继续转 SVG", skill_text)
+        self.assertIn("额外 Token/费用", skill_text)
+        self.assertIn("Convert to Shape", skill_text)
+        self.assertIn("Shape Format", skill_text)
+        self.assertIn("Do not ask the user to spend a reply", workflow_text)
+        self.assertIn("PowerPoint can convert much of the page into editable shapes", workflow_text)
+        self.assertNotIn("next=ask-user-img-svg", workflow_text)
         self.assertIn("source_image_path` directly", contract_text)
         self.assertIn("must not rasterize", skill_text)
 
@@ -78,7 +85,7 @@ class WorkflowDocsTests(unittest.TestCase):
         workflow_text = (references / "workflow.md").read_text(encoding="utf-8")
         contract_text = (references / "prompt-contracts.md").read_text(encoding="utf-8")
 
-        self.assertIn("next=ask-user-img-svg", workflow_text)
+        self.assertIn("optional post-export derivative", workflow_text)
         self.assertIn("Pillow", contract_text)
         self.assertIn("data:image/png;base64", contract_text)
         self.assertIn("Do not create layered SVG variants", contract_text)

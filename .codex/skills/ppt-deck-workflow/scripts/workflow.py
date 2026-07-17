@@ -59,7 +59,7 @@ def default_img_svg_conversion() -> dict[str, Any]:
 
 def default_state() -> dict[str, Any]:
     return {
-        "version": 5,
+        "version": 6,
         "status": "new",
         "approvals": {},
         "artifacts": {},
@@ -184,10 +184,22 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
                 **default_img_svg_conversion(),
                 **(dict(conversion) if isinstance(conversion, dict) else {}),
             }
+            # Version 5 required a no-op user response before an IMG run could
+            # complete. Version 6 treats the exported IMG PPTX as the completed
+            # deliverable and leaves SVG conversion as a later opt-in action.
+            if normalized["svg_conversion"].get("status") == "pending_choice":
+                normalized["svg_conversion"]["status"] = "available"
+                normalized["svg_conversion"]["requires_explicit_opt_in"] = True
+                normalized["svg_conversion"]["additional_model_usage_required"] = True
+            if normalized.get("status") == "img_svg_choice_pending":
+                normalized["status"] = "completed"
         normalized_renderers[renderer] = normalized
 
     merged["artifacts"] = artifacts
     merged["renderers"] = normalized_renderers
+    if merged.get("status") == "img_svg_choice_pending":
+        merged["status"] = "completed"
+    merged["version"] = 6
     return merged
 
 
@@ -218,7 +230,7 @@ def load_state(run_dir: Path) -> dict[str, Any]:
 
 def save_state(run_dir: Path, state: dict[str, Any]) -> Path:
     normalized = _normalize_state(state)
-    normalized["version"] = 5
+    normalized["version"] = 6
     normalized["execution"] = "codex-skill"
     normalized["updated_at"] = utc_now()
     return write_json(run_dir / STATE_FILE, normalized)
@@ -517,7 +529,7 @@ def require_complete_img_sources(run_dir: Path) -> list[Path]:
     return images
 
 
-def mark_img_exported_pending_svg_choice(run_dir: Path, pptx_path: Path, images: list[Path]) -> None:
+def mark_img_exported_complete(run_dir: Path, pptx_path: Path, images: list[Path]) -> None:
     state = load_state(run_dir)
     state["renderer"] = "img"
     entry = renderer_state(state, "img")
@@ -527,15 +539,18 @@ def mark_img_exported_pending_svg_choice(run_dir: Path, pptx_path: Path, images:
     }
     entry["svg_conversion"] = {
         "mode": None,
-        "status": "pending_choice",
+        "status": "available",
         "source_pptx_path": str(pptx_path),
         "source_images": [str(path) for path in images],
-        "requested_after_img_export": True,
+        "available_after_img_export": True,
+        "requires_explicit_opt_in": True,
+        "additional_model_usage_required": True,
         "updated_at": utc_now(),
     }
-    entry["status"] = "img_svg_choice_pending"
+    entry["status"] = "completed"
+    entry["completed_at"] = utc_now()
     state["render_review"] = dict(entry.get("review") or {})
-    state["status"] = "img_svg_choice_pending"
+    state["status"] = "completed"
     save_state(run_dir, state)
 
 
@@ -886,7 +901,7 @@ def export_img(run_dir: Path) -> Path:
         }
         for i, image in enumerate(images, start=1)
     }, renderer="img")
-    mark_img_exported_pending_svg_choice(run_dir, pptx_path, images)
+    mark_img_exported_complete(run_dir, pptx_path, images)
     return pptx_path
 
 
@@ -1087,16 +1102,16 @@ def cmd_choose_img_svg(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     state = load_state(run_dir)
     if state.get("renderer") != "img":
-        raise RuntimeError("IMG-to-SVG choice is only available for the img renderer")
+        raise RuntimeError("IMG-to-SVG conversion is only available for the img renderer")
     entry = renderer_state(state, "img")
     conversion = dict(entry.get("svg_conversion") or {})
-    if conversion.get("status") != "pending_choice":
+    if conversion.get("status") not in {"available", "skipped"}:
         raise RuntimeError(
-            "IMG-to-SVG choice is only allowed after the IMG PPT has been exported and shown to the user"
+            "IMG-to-SVG conversion is only available after the IMG PPTX has been exported"
         )
     source_pptx = Path(str(conversion.get("source_pptx_path") or ""))
     if not source_pptx.is_file():
-        raise RuntimeError("The exported IMG PPTX is missing; re-export it before asking for IMG-to-SVG choice")
+        raise RuntimeError("The exported IMG PPTX is missing; re-export it before starting IMG-to-SVG conversion")
 
     if args.mode == "on":
         conversion.update({
@@ -1137,6 +1152,8 @@ def cmd_export_img_svg(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     out = export_img_svg(run_dir)
     print(f"completed={out}", flush=True)
+    print("post_export_guidance=office-convert-svg-to-shape", flush=True)
+    print("office_editability=vector-shapes-not-semantic-text-or-charts", flush=True)
 
 
 def cmd_prepare_render_jobs(args: argparse.Namespace) -> None:
@@ -1164,7 +1181,14 @@ def cmd_export(args: argparse.Namespace) -> None:
         raise ValueError("renderer must be html, svg, or img")
     if renderer == "img":
         print(f"img_pptx={out}", flush=True)
-        print("next=ask-user-img-svg", flush=True)
+        print(f"completed={out}", flush=True)
+        print("workflow_complete=yes", flush=True)
+        print("user_reply_required=no", flush=True)
+        print("offer_img_svg=yes", flush=True)
+        print("img_svg_conversion=available_on_explicit_request", flush=True)
+        print("img_svg_editability=powerpoint-convert-to-shape", flush=True)
+        print("img_svg_additional_model_usage=yes", flush=True)
+        print("optional_next=choose-img-svg --mode on", flush=True)
     else:
         print(f"completed={out}", flush=True)
 
@@ -1179,7 +1203,6 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"review_mode={review.get('mode')}", flush=True)
     print(f"review_status={review.get('status')}", flush=True)
     next_steps = {
-        "img_svg_choice_pending": "ask-user-img-svg",
         "img_svg_generation_pending": "complete-img-svg",
         "img_svg_export_ready": "export-img-svg",
     }

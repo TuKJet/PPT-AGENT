@@ -225,11 +225,10 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-rende
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
-For the IMG renderer, the normal export is not the end of the workflow. It creates the original IMG PPTX, then the agent must show it to the user and ask the post-export IMG-to-SVG question. Record the answer only after that handoff:
+For the IMG renderer, normal export creates the original IMG PPTX and completes the requested workflow. Hand it off, then ask once whether the user wants the optional IMG-to-SVG derivative. Explain that conversion preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, and disclose the additional per-page model calls/Token budget. The user only replies to opt in; no reply is required to keep the completed IMG result:
 
 ```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode off
-# or
+# run only after the user explicitly asks to continue
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
@@ -242,6 +241,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --ma
 ```
 
 The helper crops directly from the source IMG with Pillow and embeds Base64 PNG data without temporary PNG files. Do not create layered or versioned SVG intermediates.
+
+After exporting the SVG PPTX, tell the user to select the SVG object in desktop PowerPoint, choose **Convert to Shape**, edit the pieces from **Shape Format**, and use **Shape Format → Group → Ungroup** if they remain grouped. Clarify that vector regions become editable Office shapes, but semantic text boxes, native charts, and SmartArt are not guaranteed; text may be vector outlines and embedded raster crops remain images.
 
 ## Rerun Hygiene
 

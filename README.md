@@ -359,19 +359,18 @@ For `html` and `svg`, renderer choice is followed by an explicit render-review p
 - `off`: default and recommended unless the user wants an extra review/repair pass
 - `on`: Codex runs a screenshot review subflow before export, then records completion with `complete-review`
 
-For `img`, the first `export` creates the original full-image PPTX and deliberately stops at `img_svg_choice_pending`. Only then must Codex show that PPTX to the user and ask whether to run the IMG-to-SVG post-process. The helper rejects an early choice.
+For `img`, the first `export` creates the original full-image PPTX and completes the requested workflow. Codex should hand off that PPTX, then ask once whether the user wants the optional IMG-to-SVG derivative. Explain that conversion preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, and disclose that it uses additional per-page model calls/Token budget. The user only replies to opt in; no reply is required to keep the completed IMG result.
 
 ```bash
-# after the IMG PPTX exists and the user answers in chat
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode off
-
-# or, to create one direct-image model job per page
+# only after the IMG PPTX exists and the user explicitly asks to continue
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
 With `on`, every `render-jobs/img-svg/slide-xx.json` contains a `source_image_path` that must be passed directly to a vision-capable model. Create one final 1280x720 SVG per page under `img-svg/`: rebuild text and simple geometry as vectors, crop incompatible logo/icon regions directly from the source IMG with Pillow, and embed those crops as Base64 PNG `<image>` nodes. Do not create `v1`, `v2`, overlay, image-elements, or clean SVG variants. The final `<topic>-img-svg.pptx` embeds native SVG media rather than rasterizing the reconstructed page.
+
+After the SVG PPTX is exported, Codex should give these desktop PowerPoint steps: select the slide's SVG object, choose **Convert to Shape**, edit the resulting pieces from **Shape Format**, and use **Shape Format → Group → Ungroup** if the pieces remain grouped. State the boundary clearly: vector regions become editable Office shapes, but semantic text boxes, native charts, and SmartArt are not guaranteed; text may be vector outlines and embedded raster crops remain images.
 
 The deterministic crop helper is:
 

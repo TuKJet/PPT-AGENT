@@ -339,22 +339,34 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         return self.run_dir / self.workflow.renderer_pptx_name(self.run_dir, "img")
 
     def test_img_svg_choice_is_rejected_before_img_export(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "only allowed after"):
+        with self.assertRaisesRegex(RuntimeError, "only available after"):
             self.workflow.cmd_choose_img_svg(
                 Namespace(run_dir=str(self.run_dir), mode="on")
             )
 
-    def test_img_export_stops_at_required_svg_choice(self) -> None:
-        pptx_path = self.export_img()
+    def test_img_export_completes_and_leaves_svg_as_optional_opt_in(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            pptx_path = self.export_img()
 
         state = self.workflow.load_state(self.run_dir)
         conversion = state["renderers"]["img"]["svg_conversion"]
         self.assertTrue(pptx_path.exists())
-        self.assertEqual(state["status"], "img_svg_choice_pending")
-        self.assertEqual(conversion["status"], "pending_choice")
-        self.assertTrue(conversion["requested_after_img_export"])
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(state["renderers"]["img"]["status"], "completed")
+        self.assertEqual(conversion["status"], "available")
+        self.assertTrue(conversion["requires_explicit_opt_in"])
+        self.assertTrue(conversion["additional_model_usage_required"])
+        self.assertIn("completed=", output.getvalue())
+        self.assertIn("workflow_complete=yes", output.getvalue())
+        self.assertIn("user_reply_required=no", output.getvalue())
+        self.assertIn("offer_img_svg=yes", output.getvalue())
+        self.assertIn("img_svg_conversion=available_on_explicit_request", output.getvalue())
+        self.assertIn("img_svg_editability=powerpoint-convert-to-shape", output.getvalue())
+        self.assertIn("img_svg_additional_model_usage=yes", output.getvalue())
+        self.assertNotIn("next=ask-user-img-svg", output.getvalue())
 
-    def test_img_svg_off_completes_with_original_img_ppt(self) -> None:
+    def test_legacy_img_svg_off_remains_a_noop_compatibility_path(self) -> None:
         pptx_path = self.export_img()
         self.workflow.cmd_choose_img_svg(
             Namespace(run_dir=str(self.run_dir), mode="off")
@@ -367,6 +379,26 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             Path(state["renderers"]["img"]["artifacts"]["pptx"]["path"]).resolve(),
             pptx_path.resolve(),
         )
+
+    def test_legacy_pending_choice_state_normalizes_to_completed_available(self) -> None:
+        self.export_img()
+        raw_state = json.loads(
+            (self.run_dir / "workflow-state.json").read_text(encoding="utf-8")
+        )
+        raw_state["version"] = 5
+        raw_state["status"] = "img_svg_choice_pending"
+        raw_state["renderers"]["img"]["status"] = "img_svg_choice_pending"
+        raw_state["renderers"]["img"]["svg_conversion"]["status"] = "pending_choice"
+        self.workflow.write_json(self.run_dir / "workflow-state.json", raw_state)
+
+        state = self.workflow.load_state(self.run_dir)
+        conversion = state["renderers"]["img"]["svg_conversion"]
+        self.assertEqual(state["version"], 6)
+        self.assertEqual(state["status"], "completed")
+        self.assertEqual(state["renderers"]["img"]["status"], "completed")
+        self.assertEqual(conversion["status"], "available")
+        self.assertTrue(conversion["requires_explicit_opt_in"])
+        self.assertTrue(conversion["additional_model_usage_required"])
 
     def test_img_svg_on_creates_direct_image_model_jobs_and_validates_outputs(self) -> None:
         self.export_img()
@@ -407,12 +439,22 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         self.assertEqual(state["status"], "img_svg_export_ready")
         self.assertEqual(state["renderers"]["img"]["svg_conversion"]["status"], "completed")
 
-        self.workflow.cmd_export_img_svg(Namespace(run_dir=str(self.run_dir)))
+        export_output = io.StringIO()
+        with redirect_stdout(export_output):
+            self.workflow.cmd_export_img_svg(Namespace(run_dir=str(self.run_dir)))
         state = self.workflow.load_state(self.run_dir)
         vector_pptx = self.run_dir / self.workflow.renderer_pptx_name(self.run_dir, "img-svg")
         self.assertTrue(vector_pptx.exists())
         self.assertEqual(state["status"], "completed")
         self.assertEqual(state["renderers"]["img"]["svg_conversion"]["status"], "exported")
+        self.assertIn(
+            "post_export_guidance=office-convert-svg-to-shape",
+            export_output.getvalue(),
+        )
+        self.assertIn(
+            "office_editability=vector-shapes-not-semantic-text-or-charts",
+            export_output.getvalue(),
+        )
         self.assertEqual(
             Path(state["renderers"]["img"]["artifacts"]["svg_pptx"]["path"]).resolve(),
             vector_pptx.resolve(),

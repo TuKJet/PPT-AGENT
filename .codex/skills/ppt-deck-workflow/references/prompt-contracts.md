@@ -274,7 +274,7 @@ When generating SVG slides:
 
 ## IMG-to-SVG Model Conversion Contract
 
-Use this only after the IMG renderer has produced and exported the complete IMG PPT, the workflow has stopped, and the user has explicitly chosen `choose-img-svg --mode on` in chat.
+Use this only after the IMG renderer has produced and exported the completed IMG PPTX and the user has explicitly opted into the additional model usage by requesting `choose-img-svg --mode on` in chat.
 
 For every `render-jobs/img-svg/slide-xx.json`:
 

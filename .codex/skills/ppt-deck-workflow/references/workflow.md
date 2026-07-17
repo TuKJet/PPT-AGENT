@@ -13,7 +13,7 @@ common:
 renderer branches:
   html -> review_choice(optional) -> Codex-authored HTML files -> render_review(optional) -> image PPTX -> editable PPTX attempt
   svg  -> review_choice(optional) -> Codex-authored SVG files  -> render_review(optional) -> PPTX
-  img  -> Codex imagegen full-slide images -> IMG PPTX -> required user SVG choice -> optional direct hybrid IMG-to-SVG -> native-SVG PPTX
+  img  -> Codex imagegen full-slide images -> completed IMG PPTX -> optional explicit IMG-to-SVG opt-in -> native-SVG PPTX
 ```
 
 The common phase must stay renderer-neutral. Do not ask the user to choose `html`, `svg`, or `img` until `slide-plans.json` exists and is approved.
@@ -39,14 +39,14 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 17. Codex creates the renderer source files using `prompt-contracts.md`.
 18. If render review is `on`, run the Codex-side screenshot review and repair subflow, then helper `complete-review`.
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
-20. For `img`, `export` creates the original IMG PPTX and moves the workflow to `img_svg_choice_pending`. Show the IMG PPTX to the user, explicitly ask whether to run IMG-to-SVG conversion, and stop. Do not ask this question before the IMG PPTX exists.
-21. Record the user's answer with `choose-img-svg --mode off|on`. `off` completes the IMG branch. `on` writes one direct-image model job per page under `render-jobs/img-svg/`.
-22. When `on`, pass each job's `source_image_path` directly to the model, write one final SVG to its exact `target_path`, use Pillow source crops for incompatible logo/icon regions, run `complete-img-svg`, then `export-img-svg` to create a PPTX with native SVG media. Do not create intermediate SVG variants.
-23. Report final artifacts.
+20. For `img`, `export` creates the original IMG PPTX and completes the requested workflow. Show the IMG PPTX to the user; no decline response is required.
+21. Ask once whether the user wants the optional IMG-to-SVG derivative. Explain that SVG reconstruction preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, disclose the additional model calls/Token usage, and require no decline reply. Do not offer a “keep IMG” response option.
+22. After an explicit opt-in, run `choose-img-svg --mode on`, pass each job's `source_image_path` directly to the model, write one final SVG to its exact `target_path`, use Pillow source crops for incompatible logo/icon regions, run `complete-img-svg`, then `export-img-svg` to create a PPTX with native SVG media. Do not create intermediate SVG variants.
+23. Report the IMG artifact as complete whether or not the optional derivative is requested.
 
 ## Renderer Guidance
 
-Recommend IMG by default for new deck rendering. Present it first as the polished full-page visual route; after the original IMG PPTX is exported, preserve the mandatory separate question about optional IMG-to-SVG conversion.
+Recommend IMG by default for new deck rendering. Present it first as the polished full-page visual route. The original IMG PPTX is the completed deliverable; IMG-to-SVG is a later explicit opt-in with additional model usage, not a required completion question.
 
 Offer HTML when the user explicitly prioritizes deterministic layout or an editable-PPTX attempt, but do not recommend HTML merely because the user wants a deliverable deck. Offer SVG when the user wants lightweight source pages, quick visual drafts, or direct SVG artifacts.
 
@@ -67,18 +67,20 @@ Then continue from the first unapproved artifact:
 - `html` or `svg` chosen but review choice pending: confirm `off` or `on`
 - render review enabled but incomplete: finish the Codex review subflow, then run helper `complete-review`
 - `img` chosen but the original IMG PPTX does not exist: create IMG files, then run helper `export`
-- status `img_svg_choice_pending`: show the exported IMG PPTX, ask the user for the SVG conversion choice, and stop
 - status `img_svg_generation_pending`: pass every job image directly to the model and create the exact SVG outputs
 - status `img_svg_export_ready`: run helper `export-img-svg`
 - renderer chosen and otherwise ready: create renderer files, then run helper `export`
 
-## Mandatory IMG Post-Export Choice
+## Optional IMG Post-Export SVG Opt-In
 
-The IMG-to-SVG question is a post-export approval gate, not a renderer-selection option.
+IMG-to-SVG is an optional post-export derivative, not an approval or completion gate. Exporting the IMG PPTX completes the workflow. Do not ask the user to spend a reply declining extra work.
+
+After handing off the IMG PPTX, ask one concise question such as: “是否需要继续转 SVG？转换会尽量保留文字和简单几何的矢量结构，之后可在 PowerPoint 中转换为可编辑形状；该步骤会按页重新调用模型并产生额外 Token/费用。需要时回复‘继续转 SVG’，不需要则无需回复。”
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
-# helper prints next=ask-user-img-svg; show the IMG PPTX and stop for the user's answer
+# helper prints completed plus optional conversion availability and cost warning
+# run the next command only after the user explicitly asks to continue
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
 # pass each render-jobs/img-svg/slide-xx.json source_image_path directly to the model
 # write one final img-svg/*.svg per page; use embed_img_crops.py for source-cropped image elements
@@ -86,7 +88,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-im
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-Using `--mode off` is valid, but it still must be the user's explicit answer after reviewing the exported IMG result. The helper rejects an IMG-to-SVG choice made before the IMG PPTX export.
+The legacy `--mode off` command remains accepted for compatibility, but it must not be presented as a required user response. The helper rejects IMG-to-SVG conversion before the IMG PPTX export.
 
 When the answer is `on`, keep the conversion path minimal:
 
@@ -97,6 +99,8 @@ When the answer is `on`, keep the conversion path minimal:
 5. Render the final SVG pages with Playwright, then export the native-SVG PPTX.
 
 Do not generate temporary icon HTML, temporary icon PNG files, old-vector SVG layers, overlay SVG layers, or `v1`/`v2`/`clean` SVG directories.
+
+After `export-img-svg`, tell the user how to edit the result in desktop PowerPoint: select the SVG object, choose **Convert to Shape**, edit the converted parts from **Shape Format**, and use **Shape Format → Group → Ungroup** when a group remains. Clarify that vector regions become Office shapes, but the result is not guaranteed to contain semantic text boxes, native charts, or SmartArt; text may be vector outlines and embedded raster crops remain images.
 
 ## Multi-Renderer Compare Guidance
 
