@@ -13,7 +13,7 @@ common:
 renderer branches:
   html -> review_choice(optional) -> Codex-authored HTML files -> render_review(optional) -> image PPTX -> editable PPTX attempt
   svg  -> review_choice(optional) -> Codex-authored SVG files  -> render_review(optional) -> PPTX
-  img  -> Codex imagegen full-slide images -> IMG PPTX -> required user SVG choice -> optional vision-model IMG-to-SVG -> native-SVG PPTX
+  img  -> Codex imagegen full-slide images -> IMG PPTX -> required user SVG choice -> optional direct hybrid IMG-to-SVG -> native-SVG PPTX
 ```
 
 The common phase must stay renderer-neutral. Do not ask the user to choose `html`, `svg`, or `img` until `slide-plans.json` exists and is approved.
@@ -41,7 +41,7 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
 20. For `img`, `export` creates the original IMG PPTX and moves the workflow to `img_svg_choice_pending`. Show the IMG PPTX to the user, explicitly ask whether to run IMG-to-SVG conversion, and stop. Do not ask this question before the IMG PPTX exists.
 21. Record the user's answer with `choose-img-svg --mode off|on`. `off` completes the IMG branch. `on` writes one direct-image model job per page under `render-jobs/img-svg/`.
-22. When `on`, pass each job's `source_image_path` directly to the model, write the returned pure-vector SVG to its exact `target_path`, run `complete-img-svg`, then `export-img-svg` to create a PPTX with native SVG media.
+22. When `on`, pass each job's `source_image_path` directly to the model, write one final SVG to its exact `target_path`, use Pillow source crops for incompatible logo/icon regions, run `complete-img-svg`, then `export-img-svg` to create a PPTX with native SVG media. Do not create intermediate SVG variants.
 23. Report final artifacts.
 
 ## Renderer Guidance
@@ -81,11 +81,22 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --ru
 # helper prints next=ask-user-img-svg; show the IMG PPTX and stop for the user's answer
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
 # pass each render-jobs/img-svg/slide-xx.json source_image_path directly to the model
+# write one final img-svg/*.svg per page; use embed_img_crops.py for source-cropped image elements
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
 Using `--mode off` is valid, but it still must be the user's explicit answer after reviewing the exported IMG result. The helper rejects an IMG-to-SVG choice made before the IMG PPTX export.
+
+When the answer is `on`, keep the conversion path minimal:
+
+1. Reconstruct text and simple geometry as vectors.
+2. Identify only the incompatible or fidelity-sensitive source regions.
+3. Put `<image data-crop-id="...">` placeholders directly in the final SVG.
+4. Use the bundled Pillow helper to embed those source crops as Base64 PNG data in place.
+5. Render the final SVG pages with Playwright, then export the native-SVG PPTX.
+
+Do not generate temporary icon HTML, temporary icon PNG files, old-vector SVG layers, overlay SVG layers, or `v1`/`v2`/`clean` SVG directories.
 
 ## Multi-Renderer Compare Guidance
 

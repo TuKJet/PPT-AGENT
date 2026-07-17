@@ -279,27 +279,60 @@ Use this only after the IMG renderer has produced and exported the complete IMG 
 For every `render-jobs/img-svg/slide-xx.json`:
 
 - Pass that job's `source_image_path` directly to a vision-capable model. The source IMG is the primary and mandatory visual source of truth; do not recreate the page from `slide-plans.json` alone.
-- Ask the model to faithfully reconstruct the visible page as one complete, native 1280x720 SVG with `viewBox="0 0 1280 720"`.
+- Faithfully reconstruct the visible page as one complete, final 1280x720 SVG with `viewBox="0 0 1280 720"`.
 - Preserve the page's visible wording, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order as closely as the image allows.
-- Produce real vector content using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
-- Do not place the original IMG inside an `<image>` element. Do not use base64/data-URI images, external image URLs, linked files, `<foreignObject>`, scripts, animation, or external stylesheets/fonts.
+- Rebuild text, cards, dividers, arrows, simple diagrams, and other stable geometry using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
+- Preserve logos, icons, badges, small illustrations, and other incompatible or fidelity-sensitive regions by cropping them directly from the source IMG with Pillow and embedding them as Base64 PNG `<image>` elements.
+- Do not redraw icons through HTML, Lucide, or another icon library unless a source crop is unusable.
+- Do not place the complete source slide inside one full-page `<image>` element. The final exporter must not rasterize the whole reconstructed page.
+- Do not create layered SVG variants such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`. Each IMG page maps directly to one final `img-svg/*.svg`.
+- Do not use external image URLs, linked files, `<foreignObject>`, scripts, animation, or external stylesheets/fonts.
 - Prefer PowerPoint-compatible SVG primitives and attributes. Avoid filters or experimental SVG features when a simpler vector construction can reproduce the same visual result.
 - Keep text as `<text>`/`<tspan>` whenever legibility and fidelity permit, so PowerPoint can retain useful vector/text structure after import.
-- Write only the SVG document to the job's exact `target_path`; do not write Markdown fences or explanatory prose into the file.
+- Write the SVG structure to the job's exact `target_path`. For every source crop, place an `<image data-crop-id="...">` element at its final target geometry and write the matching crop manifest to `crop_manifest_path`.
+- Run `scripts/embed_img_crops.py --manifest <crop_manifest_path>` to replace crop placeholders with `data:image/png;base64,...` directly in the final SVG. The helper must not create temporary PNG files.
+
+Crop manifest shape:
+
+```json
+{
+  "source_image_path": "output/.../img/slide-01.png",
+  "svg_path": "output/.../img-svg/slide-01.svg",
+  "canvas": {"width": 1280, "height": 720},
+  "crops": [
+    {
+      "id": "apple-logo",
+      "source_box": [552, 535, 64, 68],
+      "preserve_aspect_ratio": "none"
+    }
+  ]
+}
+```
+
+`source_box` uses `[x, y, width, height]` in the normalized 1280x720 slide coordinate system. The Pillow helper maps those coordinates to the actual source IMG dimensions before cropping. Use `preserveAspectRatio="none"` for exact source-region patches and `xMidYMid meet` only for an isolated icon that should preserve its own aspect ratio.
 
 Use this model prompt shape:
 
 ```text
-Reconstruct the attached presentation-slide image as one native, PowerPoint-compatible SVG.
+Reconstruct the attached presentation-slide image as one final, PowerPoint-compatible hybrid SVG.
 
 Canvas: 1280x720, viewBox="0 0 1280 720".
 Faithfulness: preserve all visible text, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order from the attached image.
-Vector requirement: use SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths. Do not embed or reference the attached raster image.
-Compatibility: no <image>, data URI, external URL/file, <foreignObject>, script, animation, or external stylesheet/font. Prefer simple PowerPoint-compatible SVG primitives.
-Output: the complete SVG document only, with no Markdown fence or explanation.
+Vector requirement: rebuild text, cards, lines, arrows, and simple diagrams as SVG vector elements.
+Raster crop rule: for logos, icons, badges, and incompatible complex regions, mark exact source-image crop boxes and place matching <image data-crop-id="..."> elements. Use Pillow to embed those crops as Base64 PNG data.
+Compatibility: no full-slide raster wrapper, external URL/file, <foreignObject>, script, animation, or external stylesheet/font. Prefer simple PowerPoint-compatible SVG primitives.
+Output: one final SVG plus its small crop manifest; do not create intermediate SVG variants.
 ```
 
-Before marking conversion complete, the helper validates the exact one-to-one page set, the 1280x720 viewBox, XML validity, and the absence of raster/external wrappers. The final exporter must embed native `.svg` media in the PPTX rather than rasterizing the generated SVG pages.
+Before marking conversion complete:
+
+- Render every final SVG with Playwright and inspect all pages.
+- Confirm all embedded images are valid Base64 PNG/JPEG data URIs.
+- Confirm there are no external hrefs, `<foreignObject>`, or scripts.
+- Confirm no `<image>` covers the full 1280x720 slide and embedded raster regions do not dominate the page.
+- Confirm the exact one-to-one page set and `viewBox="0 0 1280 720"`.
+- Export native `.svg` media in the PPTX rather than rasterizing the generated SVG pages.
+- When Microsoft PowerPoint is installed, open the final PPTX and export every page to PNG for the final Office rendering check.
 
 ## Technical Layout Checks
 

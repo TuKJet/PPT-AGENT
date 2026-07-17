@@ -1,11 +1,34 @@
 ---
 name: ppt-deck-workflow
-description: Use this local workflow when Codex needs to create a PPT deck in this repository without calling the repo's AI client, model gateway, or runner. The skill guides Codex through outline, content, slide-plan approval checkpoints, renderer choice, Codex-authored HTML/SVG/IMG slide creation, and deterministic artifact/export helper scripts.
+description: Use this workflow when Codex needs to create a PPT deck with staged outline, content, and slide-plan approvals; HTML, SVG, or IMG rendering; optional Pillow-assisted IMG-to-SVG conversion; deterministic PPTX export; or installation, update checks, GitHub branch upgrades, status checks, and rollback of the globally installed PPT Skill. Supports both this repository and a self-contained global skill installation without a repository AI client, model gateway, or runner.
 ---
 
 # PPT Deck Workflow
 
-Use this skill for PPT generation tasks in this project. The user should only need to ask for a PPT; do not expose internal renderer functions as separate skills.
+Use this skill for PPT generation tasks in either repository-local or globally installed mode. The user should only need to ask for a PPT; do not expose internal renderer functions as separate skills.
+
+## Local And Global Runtime Modes
+
+Determine the runtime mode from the skill folder:
+
+- Repository-local mode: the skill has no `runtime/` directory. Run commands from the repository root with `uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py ...`.
+- Globally installed mode: the skill contains `runtime/`. Run its scripts with `uv run --project <skill-root>/runtime python -u <skill-root>/scripts/workflow.py ...`.
+
+In global mode, the current working directory is the default PPT workspace and generated runs go under that workspace's `output/`. Set `PPT_AGENT_WORKSPACE` to an absolute directory when the deck should be written somewhere else. `OUTPUT_DIR` may still override the output root.
+
+Do not assume the original `PPT-AGENT` repository exists when `runtime/` is present. The global skill bundles `filename_utils.py`, `playwright_runtime.py`, `pptx_builder.py`, `html_pipeline/`, and `vendor_presentation_core/`.
+
+## Global Skill Maintenance
+
+Use `scripts/update_global_skill.py` only when `runtime/` and `.install-state.json` are present. The installed state records the GitHub repository, branch, commit, and managed file hashes; the default source is `TuKJet/PPT-AGENT` branch `codex/all-logic-in-skills`.
+
+- For a status-only request, run `status`; do not use the network.
+- For an update check, run `check`; do not modify the installation.
+- Run `upgrade` or `rollback` only after the user explicitly requests that mutation. Let Codex request network and `$CODEX_HOME` write approval when required.
+- Do not use `install_global_skill.py --force` as the normal update path. The updater stages the branch, validates it, preserves `runtime/.venv`, `runtime/.uv-cache`, local `uv.lock`, and the shared Playwright cache, then rolls back on failure.
+- Stop after a successful upgrade or rollback and tell the user the new Skill instructions apply on the next turn.
+
+Read `references/global-skill-maintenance.md` before installing, checking, upgrading, or rolling back the global Skill.
 
 ## Codex-Only Branch Override
 
@@ -146,9 +169,9 @@ Required behavior:
 
 ## Commands
 
-Run commands from the project root.
+Run commands from the active PPT workspace. In repository-local mode this is the project root; in global mode it is the directory where the user wants the new `output/` folder.
 
-Use the project Python environment managed by uv: `uv run python`.
+Use the correct uv launch prefix for the detected runtime mode. The examples below show repository-local mode; in global mode replace the prefix as described in `Local And Global Runtime Modes`.
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "..." --research "..."
@@ -278,7 +301,7 @@ Text constraints:
 
 ## IMG-to-SVG Post-Export Gate
 
-This gate is mandatory for every `img` renderer run.
+This gate is mandatory for every `img` renderer run. Keep the user interaction unchanged: export and hand off the IMG PPTX first, then ask whether to convert it to SVG.
 
 1. Generate every full-slide IMG page under `img/`.
 2. Run normal `export`. It creates `<topic>-img.pptx`, records `img_svg_choice_pending`, and prints `next=ask-user-img-svg`.
@@ -296,15 +319,25 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-
 ```
 
 5. Read `render-jobs/img-svg/manifest.json`. For every page job, pass `source_image_path` directly to a vision-capable model and follow `references/prompt-contracts.md#img-to-svg-model-conversion-contract`. The IMG itself is mandatory model input; do not regenerate the SVG from slide plans alone.
-6. Write the returned SVG-only output to the exact `target_path` under `img-svg/`.
-7. Validate and export:
+6. Create exactly one final SVG per page at the exact `target_path` under `img-svg/`. Do not create layered variants or sibling directories such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`.
+7. Rebuild text, cards, dividers, arrows, and simple diagrams as SVG vectors.
+8. For logos, icons, badges, and other incompatible or high-fidelity regions, crop directly from the original IMG with Pillow and embed each crop as a Base64 PNG `<image>` node. Do not redraw known icons through HTML or an icon library by default.
+9. Use the bundled deterministic helper. It maps 1280x720 crop coordinates to the original image dimensions and writes Base64 data directly into the final SVG without creating temporary PNG files:
+
+```bash
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --manifest output/.../render-jobs/img-svg/slide-01-crops.json
+```
+
+10. Validate and export:
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-The validator requires one exact SVG per IMG, valid XML, `viewBox="0 0 1280 720"`, and no `<image>`, raster data URI, external URL/file, `<foreignObject>`, or script. The final exporter embeds native `.svg` media plus its PowerPoint preview; it must not rasterize the SVG back into the deck.
+The validator requires one exact SVG per IMG, valid XML, `viewBox="0 0 1280 720"`, vector page structure, safe embedded Base64 PNG/JPEG crops, and no external URL/file, `<foreignObject>`, or script. The final exporter embeds native `.svg` media plus its PowerPoint preview; it must not rasterize the SVG back into the deck.
+
+Use Playwright for final SVG rendering and visual QA, not for routine icon crop generation. When Microsoft PowerPoint is installed, open the final PPTX and export all slides to PNG for the final Office rendering check.
 
 Do not run `clean-render` between the original IMG PPTX export and this post-export choice/conversion; the original IMG PPTX is an input artifact and must remain available beside the SVG derivative. If a fresh IMG render is required, restart that render intentionally and let the new IMG export reopen the mandatory choice gate.
 
@@ -441,8 +474,8 @@ IMG branch:
 - Does not split the slide into background, foreground, text overlay, layers, or selective per-page HTML/SVG rendering.
 - First exports an original PPTX that uses one full-slide image per page.
 - After that original export, requires an explicit user choice about the optional IMG-to-SVG model conversion; this question cannot be moved earlier or skipped.
-- When the user chooses `on`, passes every page IMG directly to the model, writes pure-vector pages under `img-svg/`, and creates `<topic>-img-svg.pptx` with native SVG media that PowerPoint can import and convert using its SVG tooling.
-- The SVG derivative is vector-based but is not guaranteed to become semantically separated PowerPoint text boxes or chart objects; PowerPoint receives one native SVG object per slide.
+- When the user chooses `on`, passes every page IMG directly to the model, writes one final hybrid vector-plus-embedded-crop page under `img-svg/`, and creates `<topic>-img-svg.pptx` with native SVG media that PowerPoint can import and convert using its SVG tooling.
+- The SVG derivative keeps text and simple geometry vector while preserving incompatible icons/logos as embedded raster image elements. It is not guaranteed to become semantically separated PowerPoint text boxes or chart objects; PowerPoint receives one native SVG object per slide.
 - Do not discourage the user from using `img` because a slide contains Chinese copy, numbers, labels, equations, or tables.
 - Prompt each slide as a finished presentation page: composition, hierarchy, management-facing visual tone, core message, visual constraints, and any required exact Chinese text or structured information.
 
@@ -453,3 +486,4 @@ Read these only when needed:
 - `references/workflow.md` for the full phase model.
 - `references/artifact-contract.md` for artifact and approval contracts.
 - `references/prompt-contracts.md` before generating or reviewing any deck content or renderer file.
+- `references/global-skill-maintenance.md` before global installation, update checks, upgrades, or rollback.

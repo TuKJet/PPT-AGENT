@@ -18,6 +18,9 @@ class NativeSvgPptxTests(unittest.TestCase):
                 "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
                 "<rect width='1280' height='720' fill='#123456'/>"
                 "<text x='80' y='120' fill='#ffffff'>Native SVG</text>"
+                "<image x='80' y='160' width='32' height='32' "
+                "href='data:image/png;base64,"
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
                 "</svg>",
                 encoding="utf-8",
             )

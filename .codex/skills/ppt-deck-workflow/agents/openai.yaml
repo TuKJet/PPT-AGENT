@@ -1,0 +1,4 @@
+interface:
+  display_name: "PPT Deck Workflow"
+  short_description: "Approval-gated PPT creation, export, and Skill updates"
+  default_prompt: "Use $ppt-deck-workflow to create a staged presentation or safely maintain its global GitHub-backed installation."

@@ -1,47 +1,38 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-LOCAL_PLAYWRIGHT_CACHE = PROJECT_ROOT / ".ms-playwright"
-GLOBAL_PLAYWRIGHT_CACHE = Path.home() / "Library" / "Caches" / "ms-playwright"
-WINDOWS_PLAYWRIGHT_CACHE = Path(os.getenv("LOCALAPPDATA", "")) / "ms-playwright"
-
-
 def playwright_cache() -> Path:
-    if LOCAL_PLAYWRIGHT_CACHE.exists():
-        return LOCAL_PLAYWRIGHT_CACHE
-    return GLOBAL_PLAYWRIGHT_CACHE
+    explicit = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    if os.name == "nt":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            return (Path(local_app_data) / "ms-playwright").resolve()
+    if sys.platform == "darwin":
+        return (Path.home() / "Library" / "Caches" / "ms-playwright").resolve()
+    return (Path.home() / ".cache" / "ms-playwright").resolve()
 
 
 def configure_global_playwright() -> None:
-    """Prefer the project-local Playwright browser cache for every render."""
-    cache = playwright_cache()
-    if cache.exists():
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(cache))
+    """Use one OS-level browser cache across repositories and global skills."""
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(playwright_cache()))
 
 
 def global_chromium_executable() -> str | None:
     explicit = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-    if explicit and Path(explicit).exists():
-        return explicit
-
-    cache = playwright_cache()
-    candidates = [
-        cache / "chromium-1223" / "chrome-mac-arm64" / "Google Chrome for Testing.app" / "Contents" / "MacOS" / "Google Chrome for Testing",
-        cache / "chromium_headless_shell-1223" / "chrome-headless-shell-mac-arm64" / "chrome-headless-shell",
-    ]
-    candidates.extend(sorted(cache.glob("chromium-*/chrome-mac-*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing")))
-    candidates.extend(sorted(cache.glob("chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell")))
-    if WINDOWS_PLAYWRIGHT_CACHE.exists():
-        candidates.extend(sorted(WINDOWS_PLAYWRIGHT_CACHE.glob("chromium_headless_shell-*/chrome-headless-shell-win*/chrome-headless-shell.exe"), reverse=True))
-        candidates.extend(sorted(WINDOWS_PLAYWRIGHT_CACHE.glob("chromium-*/chrome-win*/chrome.exe"), reverse=True))
-
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
+    if explicit:
+        executable = Path(explicit).expanduser().resolve()
+        if not executable.is_file():
+            raise RuntimeError(
+                "PLAYWRIGHT_CHROMIUM_EXECUTABLE does not point to a file: "
+                f"{executable}"
+            )
+        return str(executable)
     return None
 
 
@@ -62,4 +53,6 @@ def launch_global_chromium(playwright: Any, **kwargs: Any):
     executable_path = global_chromium_executable()
     if executable_path:
         kwargs.setdefault("executable_path", executable_path)
+    # Without an explicit override, let Playwright select the exact browser
+    # revision required by the installed Python package from the shared cache.
     return playwright.chromium.launch(**kwargs)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import io
 import json
 import os
 import shutil
@@ -10,9 +13,22 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+from PIL import Image
+
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+BUNDLED_RUNTIME_ROOT = SKILL_ROOT / "runtime"
+GLOBAL_SKILL_MODE = (BUNDLED_RUNTIME_ROOT / "filename_utils.py").is_file()
+try:
+    LOCAL_REPO_ROOT = Path(__file__).resolve().parents[4]
+except IndexError:
+    LOCAL_REPO_ROOT = SKILL_ROOT
+RUNTIME_ROOT = BUNDLED_RUNTIME_ROOT if GLOBAL_SKILL_MODE else LOCAL_REPO_ROOT
+WORKSPACE_ROOT = Path(
+    os.getenv("PPT_AGENT_WORKSPACE", str(Path.cwd() if GLOBAL_SKILL_MODE else LOCAL_REPO_ROOT))
+).resolve()
+
+if str(RUNTIME_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_ROOT))
 
 from filename_utils import safe_filename_part, slide_filename
 
@@ -84,7 +100,7 @@ def output_root() -> Path:
 def resolved_output_root() -> Path:
     root = output_root()
     if not root.is_absolute():
-        root = REPO_ROOT / root
+        root = WORKSPACE_ROOT / root
     return root.resolve()
 
 
@@ -107,7 +123,7 @@ def normalize_run_dir(raw: str | None, *, topic: str | None = None) -> Path:
     if run_dir.is_absolute():
         resolved = run_dir.resolve()
     else:
-        repo_relative = (REPO_ROOT / run_dir).resolve()
+        repo_relative = (WORKSPACE_ROOT / run_dir).resolve()
         resolved = repo_relative if is_within(repo_relative, base) else (base / run_dir).resolve()
 
     if not is_within(resolved, base):
@@ -546,10 +562,16 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
         "source_renderer": "img",
         "slide_count": len(images),
         "model_input_rule": (
-            "Pass each source_image_path directly to a vision-capable model and recreate that page as native SVG."
+            "Pass each source_image_path directly to a vision-capable model and recreate that page "
+            "as one final PowerPoint-compatible SVG."
         ),
         "output_rule": (
-            "Write one 1280x720 pure-vector SVG per source image; do not embed or reference raster images."
+            "Write one final 1280x720 hybrid SVG per source image. Rebuild text, cards, lines, and "
+            "simple diagrams as vectors. For logos, icons, and incompatible complex regions, place "
+            "<image data-crop-id='...'> placeholders and use the Pillow crop helper to embed Base64 PNG data."
+        ),
+        "crop_helper_path": str(
+            Path(__file__).resolve().parent / "embed_img_crops.py"
         ),
     })
 
@@ -558,6 +580,7 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
         plan = jobs[index - 1] if index - 1 < len(jobs) else {}
         target_path = target_dir / f"{image_path.stem}.svg"
         job_path = jobs_dir / f"slide-{index:02d}.json"
+        crop_manifest_path = jobs_dir / f"slide-{index:02d}-crops.json"
         payload = {
             "version": 1,
             "renderer": "img-svg",
@@ -567,11 +590,15 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
             "page_role": plan.get("page_role", "content"),
             "source_image_path": str(image_path),
             "target_path": str(target_path),
+            "crop_manifest_path": str(crop_manifest_path),
             "shared_context_path": str(shared_context_path),
             "prompt_contract_path": str(
                 Path(__file__).resolve().parents[1] / "references" / "prompt-contracts.md"
             ),
             "prompt_contract_section": "IMG-to-SVG Model Conversion Contract",
+            "crop_helper_path": str(
+                Path(__file__).resolve().parent / "embed_img_crops.py"
+            ),
         }
         write_json(job_path, payload)
         manifest_slides.append({
@@ -580,6 +607,7 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
             "source_image_path": str(image_path),
             "job_path": str(job_path),
             "target_path": str(target_path),
+            "crop_manifest_path": str(crop_manifest_path),
         })
 
     manifest_path = jobs_dir / "manifest.json"
@@ -628,18 +656,72 @@ def validate_ppt_compatible_svg(path: Path) -> None:
     if normalized_view_box != [0.0, 0.0, 1280.0, 720.0]:
         raise ValueError(f"SVG viewBox must be exactly '0 0 1280 720': {path}")
 
-    forbidden = {"image", "foreignobject", "script"}
+    forbidden = {"foreignobject", "script"}
+    raster_area = 0.0
+    vector_element_count = 0
     for element in root.iter():
         local_name = element.tag.rsplit("}", 1)[-1].lower()
         if local_name in forbidden:
             raise ValueError(f"SVG contains forbidden <{local_name}> element: {path}")
+        if local_name in {
+            "text", "tspan", "path", "rect", "circle", "ellipse", "line",
+            "polyline", "polygon",
+        }:
+            vector_element_count += 1
+        if local_name == "image":
+            href = ""
+            for attribute, value in element.attrib.items():
+                if attribute.rsplit("}", 1)[-1].lower() == "href":
+                    href = value or ""
+                    break
+            allowed_prefixes = (
+                "data:image/png;base64,",
+                "data:image/jpeg;base64,",
+                "data:image/jpg;base64,",
+            )
+            if not href.startswith(allowed_prefixes):
+                raise ValueError(
+                    f"SVG <image> must use an embedded Base64 PNG/JPEG data URI: {path}"
+                )
+            try:
+                encoded = href.split(",", 1)[1]
+                raster_bytes = base64.b64decode(encoded, validate=True)
+                with Image.open(io.BytesIO(raster_bytes)) as raster:
+                    raster.verify()
+            except (IndexError, binascii.Error, OSError, ValueError) as exc:
+                raise ValueError(f"SVG contains invalid embedded raster data: {path}") from exc
+
+            try:
+                x = float(element.attrib.get("x", "0"))
+                y = float(element.attrib.get("y", "0"))
+                width = float(element.attrib.get("width", "0"))
+                height = float(element.attrib.get("height", "0"))
+            except ValueError as exc:
+                raise ValueError(f"SVG <image> geometry must be numeric: {path}") from exc
+            if width <= 0 or height <= 0:
+                raise ValueError(f"SVG <image> width and height must be positive: {path}")
+            if x <= 1 and y <= 1 and width >= 1278 and height >= 718:
+                raise ValueError(
+                    f"SVG must not wrap the complete source slide in one full-page <image>: {path}"
+                )
+            raster_area += width * height
         for attribute, value in element.attrib.items():
-            if attribute.rsplit("}", 1)[-1].lower() == "href" and value and not value.startswith("#"):
+            if (
+                attribute.rsplit("}", 1)[-1].lower() == "href"
+                and value
+                and not value.startswith(("#", "data:image/png;base64,", "data:image/jpeg;base64,", "data:image/jpg;base64,"))
+            ):
                 raise ValueError(f"SVG contains an external href: {path}")
 
     source = path.read_text(encoding="utf-8").lower()
-    if any(marker in source for marker in ("data:image", "url(http://", "url(https://", "@import")):
-        raise ValueError(f"SVG contains embedded or external image data: {path}")
+    if any(marker in source for marker in ("url(http://", "url(https://", "@import")):
+        raise ValueError(f"SVG contains external image or stylesheet data: {path}")
+    if vector_element_count == 0:
+        raise ValueError(f"SVG must contain vector text or shape elements: {path}")
+    if raster_area > 1280 * 720 * 0.70:
+        raise ValueError(
+            f"SVG embedded raster regions cover too much of the slide; reconstruct more as vectors: {path}"
+        )
 
 
 def complete_img_svg_generation(run_dir: Path) -> list[Path]:
@@ -834,7 +916,7 @@ def export_img_svg(run_dir: Path) -> Path:
         f"{int(item.get('index', i)):02d}": {
             "title": item.get("title", f"Slide {i}"),
             "page_role": "vectorized_image",
-            "validation_status": "codex_img_to_native_svg",
+            "validation_status": "codex_img_to_hybrid_svg",
             "export_ready": True,
             "source_image_path": item.get("source_image_path"),
             "svg_path": item.get("target_path"),
@@ -845,7 +927,7 @@ def export_img_svg(run_dir: Path) -> Path:
     chain_manifest = write_json(run_dir / "img-svg-chain.json", {
         "version": 1,
         "source_renderer": "img",
-        "conversion": "vision_model_img_to_native_svg",
+        "conversion": "vision_model_img_to_hybrid_svg",
         "source_pptx_path": conversion.get("source_pptx_path"),
         "svg_dir": str(svg_dir),
         "svg_pptx_path": str(pptx_path),

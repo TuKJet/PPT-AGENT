@@ -373,6 +373,15 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             Path(page["target_path"]).parent.resolve(),
             (self.run_dir / "img-svg").resolve(),
         )
+        self.assertEqual(
+            Path(page["crop_manifest_path"]).name,
+            "slide-01-crops.json",
+        )
+        job = json.loads(Path(page["job_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(
+            Path(job["crop_helper_path"]).name,
+            "embed_img_crops.py",
+        )
 
         Path(page["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
@@ -397,7 +406,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             vector_pptx.resolve(),
         )
 
-    def test_img_svg_rejects_raster_wrapped_as_svg(self) -> None:
+    def test_img_svg_accepts_embedded_crop_images(self) -> None:
         self.export_img()
         self.workflow.cmd_choose_img_svg(
             Namespace(run_dir=str(self.run_dir), mode="on")
@@ -407,9 +416,35 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         )
         Path(manifest["slides"][0]["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<image href='data:image/png;base64,abc'/></svg>",
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            "<image x='100' y='100' width='64' height='64' "
+            "href='data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+        state = self.workflow.load_state(self.run_dir)
+        self.assertEqual(state["status"], "img_svg_export_ready")
+
+    def test_img_svg_rejects_a_full_slide_raster_wrapper(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(
+            Namespace(run_dir=str(self.run_dir), mode="on")
+        )
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        Path(manifest["slides"][0]["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            "<image x='0' y='0' width='1280' height='720' "
+            "href='data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "</svg>",
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(ValueError, "forbidden <image>"):
+        with self.assertRaisesRegex(ValueError, "full-page <image>"):
             self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
