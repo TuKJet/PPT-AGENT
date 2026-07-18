@@ -338,15 +338,65 @@ def write_contents_preview(contents: dict[str, Any], path: Path) -> Path:
     return path
 
 
+def validate_slide_plans(data: dict[str, Any]) -> None:
+    try:
+        version = int(data.get("version", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("slide-plans.json version must be an integer") from exc
+    if version < 2:
+        return
+
+    deck_strategy = data.get("deck_strategy")
+    if not isinstance(deck_strategy, dict) or not deck_strategy:
+        raise ValueError("slide-plans.json version 2 requires a non-empty deck_strategy")
+
+    design_system = data.get("design_system")
+    if not isinstance(design_system, dict) or not design_system:
+        raise ValueError("slide-plans.json version 2 requires a non-empty design_system")
+    palette = design_system.get("palette")
+    if not isinstance(palette, dict):
+        raise ValueError("slide-plans.json design_system requires a palette object")
+    required_tokens = {
+        "background",
+        "surface",
+        "primary",
+        "accent",
+        "text_primary",
+        "text_muted",
+    }
+    missing = sorted(token for token in required_tokens if not palette.get(token))
+    if missing:
+        raise ValueError(
+            "slide-plans.json design_system.palette is missing required tokens: "
+            + ", ".join(missing)
+        )
+
+
+def _append_plan_preview_section(lines: list[str], title: str, value: Any) -> None:
+    if value in (None, "", {}, []):
+        return
+    lines.extend([f"## {title}", "", "```json"])
+    lines.append(json.dumps(value, ensure_ascii=False, indent=2))
+    lines.extend(["```", ""])
+
+
 def write_plans_preview(data: dict[str, Any], path: Path) -> Path:
+    validate_slide_plans(data)
     lines = ["# Slide Plans Preview", ""]
+    _append_plan_preview_section(lines, "Deck Strategy", data.get("deck_strategy"))
+    _append_plan_preview_section(lines, "Design System", data.get("design_system"))
     for job in data.get("slides", []):
+        plan = job.get("plan", "")
+        if isinstance(plan, (dict, list)):
+            plan_text = json.dumps(plan, ensure_ascii=False, indent=2)
+        else:
+            plan_text = str(plan).strip()
         lines.extend([
             f"## {int(job['index']):02d}. {job['title']}",
             "",
             f"- role: {job.get('page_role', 'content')}",
             "",
-            str(job.get("plan", "")).strip(),
+            plan_text,
             "",
         ])
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
@@ -369,8 +419,14 @@ def preview_artifact(run_dir: Path, artifact: str) -> Path:
 
 
 def slide_jobs(run_dir: Path) -> list[dict[str, Any]]:
-    data = read_json(run_dir / "slide-plans.json", default={"slides": []})
+    data = slide_plan_document(run_dir)
     return list(data.get("slides") or [])
+
+
+def slide_plan_document(run_dir: Path) -> dict[str, Any]:
+    data = read_json(run_dir / "slide-plans.json", default={"slides": []})
+    validate_slide_plans(data)
+    return data
 
 
 def renderer_pptx_name(run_dir: Path, renderer: str) -> str:
@@ -431,7 +487,8 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         raise ValueError("renderer must be html, svg, or img")
 
     state = load_state(run_dir)
-    slides = slide_jobs(run_dir)
+    plan_document = slide_plan_document(run_dir)
+    slides = list(plan_document.get("slides") or [])
     jobs_dir = render_jobs_root(run_dir, renderer)
     jobs_dir.mkdir(parents=True, exist_ok=True)
     target_dir = run_dir / renderer
@@ -439,9 +496,11 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
 
     shared_context_path = jobs_dir / "shared-context.json"
     shared_context = {
-        "version": 1,
+        "version": 2 if int(plan_document.get("version", 1)) >= 2 else 1,
         "topic": infer_topic(run_dir),
         "audience": state.get("audience"),
+        "deck_strategy": plan_document.get("deck_strategy") or {},
+        "design_system": plan_document.get("design_system") or {},
         "renderer": renderer,
         "slide_count": len(slides),
         "slides": [
@@ -464,9 +523,11 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         job_path = jobs_dir / f"slide-{slide_index:02d}.json"
         target_path = render_target_path(run_dir, renderer, slide_index, title)
         payload = {
-            "version": 1,
+            "version": shared_context["version"],
             "topic": shared_context["topic"],
             "audience": shared_context["audience"],
+            "deck_strategy": shared_context["deck_strategy"],
+            "design_system": shared_context["design_system"],
             "renderer": renderer,
             "index": slide_index,
             "title": title,
@@ -487,7 +548,7 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
 
     manifest_path = jobs_dir / "manifest.json"
     write_json(manifest_path, {
-        "version": 1,
+        "version": shared_context["version"],
         "renderer": renderer,
         "topic": shared_context["topic"],
         "audience": shared_context["audience"],

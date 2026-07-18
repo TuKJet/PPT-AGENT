@@ -77,6 +77,8 @@ Audience control begins at the outline stage, not only at slide planning or rend
 
 Treat audience understanding as an internal operating lens for the entire workflow. Infer what that audience wants to understand, decide, compare, or de-risk, then let that inference shape structure, wording, evidence depth, pacing, and visual emphasis across outline, contents, slide plans, and rendering. Keep that reasoning mostly implicit in visible slide copy unless the user explicitly asks for an overt rhetorical style.
 
+Audience adaptation is not visual austerity. For management, executive, leadership, or board audiences, make the information more selective and decision-led, but do not automatically turn the deck into black-white-gray text, ban illustrations, suppress brand colors, or remove all visual decoration. Use brand-led color, diagrams, data visuals, editorial imagery, icons, and selective ornament when they clarify the message or improve confidence; remove noise and competing focal points instead.
+
 ## Core Rule
 
 Run the deck as one Codex workflow:
@@ -160,10 +162,16 @@ Audience-driven deck style is upstream of that control surface: the outline shou
 
 Required behavior:
 
+- Generate `slide-plans.json` version 2 with a top-level `deck_strategy`, a top-level `design_system`, and page-local `slides`.
+- In `deck_strategy`, record the primary audience, decision context, first questions they need answered, evidence order, and presentation posture so content and visual planning share one audience interpretation.
+- In `design_system`, define one deck-level palette using named tokens, typography hierarchy, component/spacing rules, chart treatment, imagery/illustration policy, and brand/reference-image design genes.
+- Require every page plan and renderer prompt to reference the shared palette tokens. Do not let pages invent new primary, accent, background, surface, or text colors; permit page-specific colors only for semantic meaning, user-provided assets, or an explicitly justified narrative exception.
+- Treat `render-jobs/<renderer>/shared-context.json` as the immutable carrier of `deck_strategy` and `design_system` for page-local rendering.
 - Put style requirements into `slide-plans.json` before asking for slide-plan approval.
 - If the style guidance arrives after `slide-plans.json` exists, edit `slide-plans.json` directly and regenerate downstream render outputs only after the updated plan is approved.
 - If the user gives style guidance at or before the slide-plan stage, encode that guidance directly into `slide-plans.json` and the Codex-authored renderer files.
 - Express audience fit mostly through ordering, emphasis, density, and tone rather than explicit on-slide statements about what the audience cares about.
+- Interpret words such as `restrained`, `concise`, `executive`, and `boardroom-safe` as information-discipline constraints, not as instructions to prohibit brand color, illustrations, imagery, depth, or polished visual accents.
 - Do not wait until HTML/SVG files are generated and then write a rebuild, migration, or batch patch script just to change colors or visual style.
 - Use post-render edits only for small defects or implementation bugs, not for primary art direction.
 

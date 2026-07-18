@@ -36,7 +36,7 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 14. If renderer is `html` or `svg`, ask whether to enable render review. Default recommendation: `off`.
 15. For `html` or `svg`, run helper `choose-review`; skip this step for `img`.
 16. For long or dense `html`/`svg` decks, optionally materialize renderer job files with `prepare-render-jobs`, then let subagents create the per-page renderer source files.
-17. Codex creates the renderer source files using `prompt-contracts.md`.
+17. Codex creates the renderer source files using `prompt-contracts.md`, the approved `deck_strategy`, and the single deck-level `design_system`; page renderers inherit its palette tokens instead of selecting colors independently.
 18. If render review is `on`, run the Codex-side screenshot review and repair subflow, then helper `complete-review`.
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
 20. For `img`, `export` creates the original IMG PPTX and completes the requested workflow. Show the IMG PPTX to the user; no decline response is required.
@@ -123,6 +123,6 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-ren
 ```
 
 2. Read `render-jobs/<renderer>/shared-context.json` once in the main agent.
-3. Dispatch one subagent per `render-jobs/<renderer>/slide-xx.json`.
+3. Verify the shared context contains the approved `deck_strategy` and `design_system`, then dispatch one subagent per `render-jobs/<renderer>/slide-xx.json`.
 4. Each subagent writes only its own renderer source file into the same run directory.
 5. The main agent reviews the set, runs any screenshot-review loop, and sends only failed pages back for repair.

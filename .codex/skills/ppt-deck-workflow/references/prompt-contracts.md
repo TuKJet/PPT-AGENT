@@ -44,6 +44,8 @@ Before drafting visible copy, infer the audience's real decision lens:
 
 Use that inferred lens to shape the whole deck, but keep it implicit in visible copy. The deck should feel naturally tuned to the audience rather than explicitly stating what the audience cares about.
 
+Audience adaptation changes information priority, evidence depth, decision framing, pacing, and visual emphasis. It is not an austerity preset. For leadership audiences, restraint applies to information noise, weak decoration, and competing focal points—not to color, imagery, or visual craft. Do not infer a monochrome or text-only deck from words such as `leadership`, `management`, `executive`, `boardroom`, `restrained`, or `concise`. Keep brand colors, purposeful illustrations, icons, diagrams, data visuals, editorial imagery, and polished visual accents available when they improve comprehension, confidence, recognition, or narrative momentum.
+
 The outline must already reflect audience level:
 
 - what questions they care about first
@@ -70,7 +72,7 @@ When the user gives audience labels such as `technical`, `management`, `investor
 - Use fewer deep-dive pages and more synthesis pages.
 - Use high-level, decision-oriented language that sounds like an executive takeaway, not like a narration of management interests.
 - Do not write visible copy that literally says what management wants or cares about unless the user explicitly asks for that voice.
-- Style direction: calm, credible, boardroom-safe, concise, clear hierarchy, restrained visuals.
+- Style direction: calm, credible, boardroom-safe, concise, and clearly hierarchical. Use brand color, diagrams, editorial illustration, restrained photography, or premium accents when they serve the message; reduce clutter and ornamental competition rather than visual expression itself.
 
 `investor`
 
@@ -86,7 +88,7 @@ When the user gives audience labels such as `technical`, `management`, `investor
 - Put conclusions, key numbers, risk posture, and decision requests earlier.
 - Keep the total number of concepts per page low and make page titles conclusion-led.
 - Avoid explicit audience callouts in visible copy unless requested; the deck should feel written for executives, not labeled as such on the page.
-- Style direction: highly distilled, authoritative, decisive, uncluttered.
+- Style direction: highly distilled, authoritative, decisive, and polished. Strong brand-led contrast, a memorable key visual, or selective illustration is welcome when it makes the decision clearer; never default to black-white-gray text-only pages merely because the audience is senior.
 
 `government` or `public-sector`
 
@@ -133,6 +135,30 @@ Research may come from Codex-native research capability, not repository AI provi
 
 ## Slide Plan Contract
 
+Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Define the shared system before writing page plans so every page inherits the same visual language.
+
+`deck_strategy` must record the stable audience interpretation used across the deck:
+
+- primary audience and any secondary audience constraint
+- the decision or response the deck should enable
+- the first questions this audience is likely to ask
+- evidence order and detail-depth principles
+- presentation posture and desired confidence level
+
+`design_system` must define:
+
+- theme name and audience-fit rationale
+- `palette` tokens at minimum for `background`, `surface`, `primary`, `accent`, `text_primary`, and `text_muted`, plus semantic data/status colors when needed
+- typography hierarchy
+- card, line, radius, spacing, and footer behavior
+- chart and diagram treatment
+- imagery and illustration policy
+- any brand or reference-image design genes
+
+Choose the palette once for the whole deck. Page plans must reference the shared palette tokens and must not invent a new page palette, swap the primary/accent relationship, or introduce unrelated hex colors. Allow a page-specific color only for semantic encoding, a user-supplied asset, or an explicitly justified narrative moment; record that exception in the page plan and keep the rest of the system unchanged.
+
+Do not express "restrained" as a ban on visual assets. The `design_system` should say what visual devices are useful for this audience and topic, not merely prohibit illustrations, brand colors, decorative motifs, photography, or depth.
+
 For each slide plan, specify:
 
 - Core message.
@@ -171,7 +197,8 @@ Subagent contract:
 
 - Read exactly one slide job plus the referenced shared context.
 - Treat the job file as page-local source of truth for index, title, page role, material, plan, target path, and renderer.
-- Use the shared context only to maintain cross-page consistency in tone, density, naming, and visual rhythm.
+- Treat the shared `deck_strategy` and `design_system` as immutable deck-level source of truth. Use their palette tokens, typography, illustration policy, component language, tone, density, naming, and visual rhythm on every page.
+- Do not reinterpret the audience or choose a fresh color scheme from the page-local content. Page variation should come from layout and emphasis while the design system stays stable.
 - Write exactly one renderer source file to the job's `target_path`.
 - Do not mutate outline, contents, slide plans, or workflow approval state from a page subagent.
 - If repair feedback arrives, reuse the same job file and apply only the requested page-local fix.
@@ -250,9 +277,10 @@ When generating HTML slides:
 - If content does not fit, reduce modules, bullets, steps, labels, or wording before shrinking text.
 - Keep labels and chips short, usually 4-8 Chinese characters or 1-3 English words.
 - For technical audiences, prefer diagram clarity, stronger information scaffolding, and lower decorative weight.
-- For management, enterprise, government, or ToB audiences, use restrained light or sober professional themes.
-- For investor or executive audiences, increase polish and contrast while keeping the page sparse, premium, and decision-led.
+- For management, enterprise, government, or ToB audiences, use credible professional themes with disciplined hierarchy; retain appropriate brand colors and purposeful visuals.
+- For investor or executive audiences, increase polish and contrast while keeping the page sparse, premium, and decision-led; do not collapse the page into monochrome text unless the user explicitly asks for that style.
 - For students or younger audiences, a darker or more energetic theme is acceptable, but still professional.
+- Resolve all recurring colors from `design_system.palette`; do not choose colors independently per slide.
 - Output only HTML, no Markdown fences or explanatory text in the generated slide file.
 
 ## SVG Generation Contract
@@ -270,6 +298,7 @@ When generating SVG slides:
 - Tags, pills, and footer notes must be extra concise.
 - Use professional color hierarchy for title, body, labels, numbers, and notes.
 - Keep visual language aligned with the audience profile chosen during outline generation rather than re-deciding audience from scratch at render time.
+- Resolve all recurring colors from `design_system.palette`; do not choose colors independently per slide.
 - Output only SVG code, no Markdown fences or explanatory text in the generated slide file.
 
 ## IMG-to-SVG Model Conversion Contract

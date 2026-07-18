@@ -222,7 +222,24 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
             research="",
         )
         slide_plans = {
-            "version": 1,
+            "version": 2,
+            "deck_strategy": {
+                "primary_audience": "management",
+                "decision_context": "Approve the recommended delivery path",
+                "first_questions": ["Why now?", "What changes?", "What decision is needed?"],
+            },
+            "design_system": {
+                "theme_name": "Confident Blue",
+                "palette": {
+                    "background": "#F5F8FC",
+                    "surface": "#FFFFFF",
+                    "primary": "#1358A8",
+                    "accent": "#F2A900",
+                    "text_primary": "#132238",
+                    "text_muted": "#5F6F82",
+                },
+                "illustration_policy": "Use purposeful editorial illustrations when they improve comprehension.",
+            },
             "slides": [
                 {
                     "index": 1,
@@ -271,12 +288,34 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.assertEqual(manifest["slide_count"], 2)
         self.assertEqual(shared["topic"], "Subagent Topic")
         self.assertEqual(len(shared["slides"]), 2)
+        self.assertEqual(shared["deck_strategy"], slide_job["deck_strategy"])
+        self.assertEqual(shared["design_system"], slide_job["design_system"])
+        self.assertEqual(shared["design_system"]["palette"]["primary"], "#1358A8")
         self.assertEqual(slide_job["renderer"], "html")
         self.assertEqual(
             Path(slide_job["target_path"]).resolve(),
             self.workflow.render_target_path(self.run_dir, "html", 1, "Opening").resolve(),
         )
         self.assertEqual(Path(slide_job["shared_context_path"]).resolve(), (jobs_root / "shared-context.json").resolve())
+
+    def test_slide_plan_preview_exposes_deck_strategy_and_design_system(self) -> None:
+        preview = (self.run_dir / "slide-plans-preview.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Deck Strategy", preview)
+        self.assertIn("## Design System", preview)
+        self.assertIn("Confident Blue", preview)
+        self.assertIn("#1358A8", preview)
+
+    def test_version_two_slide_plans_require_complete_palette_tokens(self) -> None:
+        invalid = {
+            "version": 2,
+            "deck_strategy": {"primary_audience": "management"},
+            "design_system": {"palette": {"primary": "#1358A8"}},
+            "slides": [],
+        }
+
+        with self.assertRaisesRegex(ValueError, "missing required tokens"):
+            self.workflow.validate_slide_plans(invalid)
 
 
 class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
