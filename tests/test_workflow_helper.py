@@ -22,6 +22,66 @@ def load_workflow_module():
     return module
 
 
+def valid_slide_plans(*slides: tuple[str, str, str]) -> dict:
+    slide_items = slides or (("Opening", "Alpha", "cover"),)
+    return {
+        "version": 2,
+        "deck_strategy": {
+            "primary_audience": "management",
+            "decision_context": "Approve the recommended delivery path",
+            "first_questions": ["Why now?", "What changes?", "What decision is needed?"],
+            "evidence_order": ["Conclusion", "Evidence", "Risk", "Decision"],
+            "presentation_posture": "Decision-led, confident, and evidence-bounded",
+        },
+        "design_system": {
+            "theme_name": "Confident Blue",
+            "audience_fit": "Polished management communication with disciplined density",
+            "palette": {
+                "background": "#F5F8FC",
+                "surface": "#FFFFFF",
+                "primary": "#1358A8",
+                "accent": "#F2A900",
+                "text_primary": "#132238",
+                "text_muted": "#5F6F82",
+            },
+            "typography": {"title": "32pt semibold", "body": "18pt regular"},
+            "component_rules": {"cards": "12px radius", "spacing": "8px rhythm"},
+            "chart_treatment": {"style": "Direct labels with restrained grid lines"},
+            "illustration_policy": "Use purposeful editorial illustrations when they improve comprehension.",
+            "design_genes": ["Blue brand-led contrast", "Thin amber emphasis"],
+        },
+        "slides": [
+            {
+                "index": index,
+                "title": title,
+                "material": material,
+                "page_role": page_role,
+                "plan": {
+                    "core_message": f"Core message for {title}",
+                    "layout_structure": "Title band above a two-region main composition and quiet footer",
+                    "visual_hierarchy": ["Title", "Primary evidence", "Supporting detail", "Footer"],
+                    "required_elements": ["title", "main visual", "supporting card", "footer"],
+                    "palette_tokens": ["background", "surface", "primary", "accent", "text_primary"],
+                    "style_controls": {
+                        "density": "medium",
+                        "typography": "clear management hierarchy",
+                        "visual_motif": "thin directional line",
+                    },
+                    "audience_controls": {
+                        "technical_depth": "decision-relevant only",
+                        "decision_orientation": "high",
+                    },
+                    "renderer_neutral_constraints": [
+                        "Keep the title to two lines",
+                        "Do not use renderer-specific implementation terms",
+                    ],
+                },
+            }
+            for index, (title, material, page_role) in enumerate(slide_items, start=1)
+        ],
+    }
+
+
 class WorkflowHelperReviewFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = load_workflow_module()
@@ -37,18 +97,7 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
             pages="3",
             research="",
         )
-        slide_plans = {
-            "version": 1,
-            "slides": [
-                {
-                    "index": 1,
-                    "title": "Intro",
-                    "material": "A",
-                    "plan": "B",
-                    "page_role": "cover",
-                }
-            ],
-        }
+        slide_plans = valid_slide_plans(("Intro", "A", "cover"))
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
         self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
         state = self.workflow.load_state(self.run_dir)
@@ -221,42 +270,10 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
             pages="2",
             research="",
         )
-        slide_plans = {
-            "version": 2,
-            "deck_strategy": {
-                "primary_audience": "management",
-                "decision_context": "Approve the recommended delivery path",
-                "first_questions": ["Why now?", "What changes?", "What decision is needed?"],
-            },
-            "design_system": {
-                "theme_name": "Confident Blue",
-                "palette": {
-                    "background": "#F5F8FC",
-                    "surface": "#FFFFFF",
-                    "primary": "#1358A8",
-                    "accent": "#F2A900",
-                    "text_primary": "#132238",
-                    "text_muted": "#5F6F82",
-                },
-                "illustration_policy": "Use purposeful editorial illustrations when they improve comprehension.",
-            },
-            "slides": [
-                {
-                    "index": 1,
-                    "title": "Opening",
-                    "material": "Alpha",
-                    "plan": "Use a focused cover layout",
-                    "page_role": "cover",
-                },
-                {
-                    "index": 2,
-                    "title": "Roadmap",
-                    "material": "Beta",
-                    "plan": "Use a two-column summary layout",
-                    "page_role": "summary",
-                },
-            ],
-        }
+        slide_plans = valid_slide_plans(
+            ("Opening", "Alpha", "cover"),
+            ("Roadmap", "Beta", "summary"),
+        )
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
         self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
         state = self.workflow.load_state(self.run_dir)
@@ -305,16 +322,54 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.assertIn("## Design System", preview)
         self.assertIn("Confident Blue", preview)
         self.assertIn("#1358A8", preview)
+        self.assertIn("### Core Message", preview)
+        self.assertIn("### Layout Structure", preview)
+        self.assertIn("### Palette Tokens", preview)
+        self.assertIn("### Audience Controls", preview)
 
     def test_version_two_slide_plans_require_complete_palette_tokens(self) -> None:
-        invalid = {
-            "version": 2,
-            "deck_strategy": {"primary_audience": "management"},
-            "design_system": {"palette": {"primary": "#1358A8"}},
-            "slides": [],
-        }
+        invalid = valid_slide_plans()
+        invalid["design_system"]["palette"] = {"primary": "#1358A8"}
 
         with self.assertRaisesRegex(ValueError, "missing required tokens"):
+            self.workflow.validate_slide_plans(invalid)
+
+    def test_legacy_version_one_slide_plans_are_rejected(self) -> None:
+        invalid = {
+            "version": 1,
+            "slides": [
+                {
+                    "index": 1,
+                    "title": "Opening",
+                    "material": "Alpha",
+                    "plan": "Only a free-form core message",
+                    "page_role": "cover",
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "legacy version 1/free-form plans"):
+            self.workflow.validate_slide_plans(invalid)
+
+    def test_slide_plan_requires_structured_layout_and_style_fields(self) -> None:
+        invalid = valid_slide_plans()
+        invalid["slides"][0]["plan"] = {"core_message": "Only the core message survived"}
+
+        with self.assertRaisesRegex(ValueError, "layout_structure"):
+            self.workflow.validate_slide_plans(invalid)
+
+    def test_version_two_free_form_slide_plan_is_rejected(self) -> None:
+        invalid = valid_slide_plans()
+        invalid["slides"][0]["plan"] = "Core message plus loosely embedded layout prose"
+
+        with self.assertRaisesRegex(ValueError, r"slides\[0\]\.plan must be an object"):
+            self.workflow.validate_slide_plans(invalid)
+
+    def test_slide_plan_rejects_palette_aliases_not_defined_by_design_system(self) -> None:
+        invalid = valid_slide_plans()
+        invalid["slides"][0]["plan"]["palette_tokens"].append("brand_blue")
+
+        with self.assertRaisesRegex(ValueError, "unknown design_system.palette tokens: brand_blue"):
             self.workflow.validate_slide_plans(invalid)
 
 
@@ -333,18 +388,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             pages="1",
             research="",
         )
-        slide_plans = {
-            "version": 1,
-            "slides": [
-                {
-                    "index": 1,
-                    "title": "Opening",
-                    "material": "Alpha",
-                    "plan": "A focused page",
-                    "page_role": "cover",
-                }
-            ],
-        }
+        slide_plans = valid_slide_plans(("Opening", "Alpha", "cover"))
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
         self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
         state = self.workflow.load_state(self.run_dir)

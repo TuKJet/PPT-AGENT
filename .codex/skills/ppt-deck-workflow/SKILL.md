@@ -162,12 +162,14 @@ Audience-driven deck style is upstream of that control surface: the outline shou
 
 Required behavior:
 
-- Generate `slide-plans.json` version 2 with a top-level `deck_strategy`, a top-level `design_system`, and page-local `slides`.
+- Generate `slide-plans.json` version 2 with a top-level `deck_strategy`, a top-level `design_system`, and page-local `slides`. Version 1 and free-form string plans are legacy input and must not be generated or approved.
 - In `deck_strategy`, record the primary audience, decision context, first questions they need answered, evidence order, and presentation posture so content and visual planning share one audience interpretation.
 - In `design_system`, define one deck-level palette using named tokens, typography hierarchy, component/spacing rules, chart treatment, imagery/illustration policy, and brand/reference-image design genes.
+- Make every page's `plan` a structured object with `core_message`, `layout_structure`, `visual_hierarchy`, `required_elements`, `palette_tokens`, `style_controls`, `audience_controls`, and `renderer_neutral_constraints`. Do not collapse these into one prose paragraph even when the model prefers a shorter response.
 - Require every page plan and renderer prompt to reference the shared palette tokens. Do not let pages invent new primary, accent, background, surface, or text colors; permit page-specific colors only for semantic meaning, user-provided assets, or an explicitly justified narrative exception.
 - Treat `render-jobs/<renderer>/shared-context.json` as the immutable carrier of `deck_strategy` and `design_system` for page-local rendering.
 - Put style requirements into `slide-plans.json` before asking for slide-plan approval.
+- Treat helper validation failure as a generation failure: repair or regenerate `slide-plans.json`, rerun `preview --artifact slide_plans`, and do not hand the user a partial Markdown preview. The helper intentionally rejects legacy/free-form plans and names missing field paths.
 - If the style guidance arrives after `slide-plans.json` exists, edit `slide-plans.json` directly and regenerate downstream render outputs only after the updated plan is approved.
 - If the user gives style guidance at or before the slide-plan stage, encode that guidance directly into `slide-plans.json` and the Codex-authored renderer files.
 - Express audience fit mostly through ordering, emphasis, density, and tone rather than explicit on-slide statements about what the audience cares about.

@@ -48,6 +48,42 @@ RENDER_REVIEW_NOT_APPLICABLE = {
     "mode": "off",
     "status": "not_applicable",
 }
+SLIDE_PLAN_VERSION = 2
+REQUIRED_DECK_STRATEGY_FIELDS = (
+    "primary_audience",
+    "decision_context",
+    "first_questions",
+    "evidence_order",
+    "presentation_posture",
+)
+REQUIRED_DESIGN_SYSTEM_FIELDS = (
+    "theme_name",
+    "audience_fit",
+    "palette",
+    "typography",
+    "component_rules",
+    "chart_treatment",
+    "illustration_policy",
+    "design_genes",
+)
+REQUIRED_PALETTE_TOKENS = (
+    "background",
+    "surface",
+    "primary",
+    "accent",
+    "text_primary",
+    "text_muted",
+)
+REQUIRED_SLIDE_PLAN_FIELDS = (
+    "core_message",
+    "layout_structure",
+    "visual_hierarchy",
+    "required_elements",
+    "palette_tokens",
+    "style_controls",
+    "audience_controls",
+    "renderer_neutral_constraints",
+)
 
 
 def default_img_svg_conversion() -> dict[str, Any]:
@@ -338,38 +374,141 @@ def write_contents_preview(contents: dict[str, Any], path: Path) -> Path:
     return path
 
 
+def _is_non_empty(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
+
+
+def _require_non_empty_fields(value: Any, path: str, fields: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be an object")
+    missing = [field for field in fields if not _is_non_empty(value.get(field))]
+    if missing:
+        raise ValueError(f"{path} is missing required fields: {', '.join(missing)}")
+    return value
+
+
+def _require_non_empty_string(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{path} must be a non-empty string")
+    return value
+
+
+def _require_non_empty_string_list(value: Any, path: str) -> list[str]:
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise ValueError(f"{path} must be a non-empty string list")
+    return value
+
+
 def validate_slide_plans(data: dict[str, Any]) -> None:
+    if not isinstance(data, dict):
+        raise ValueError("slide-plans.json must contain a JSON object")
     try:
         version = int(data.get("version", 1))
     except (TypeError, ValueError) as exc:
         raise ValueError("slide-plans.json version must be an integer") from exc
-    if version < 2:
-        return
+    if version != SLIDE_PLAN_VERSION:
+        raise ValueError(
+            "slide-plans.json must use version 2 with structured deck_strategy, "
+            "design_system, and per-slide plan fields; legacy version 1/free-form plans "
+            "must be regenerated before preview or approval"
+        )
 
-    deck_strategy = data.get("deck_strategy")
-    if not isinstance(deck_strategy, dict) or not deck_strategy:
-        raise ValueError("slide-plans.json version 2 requires a non-empty deck_strategy")
+    deck_strategy = _require_non_empty_fields(
+        data.get("deck_strategy"),
+        "slide-plans.json deck_strategy",
+        REQUIRED_DECK_STRATEGY_FIELDS,
+    )
+    for field in ("primary_audience", "decision_context", "presentation_posture"):
+        _require_non_empty_string(deck_strategy[field], f"slide-plans.json deck_strategy.{field}")
+    _require_non_empty_string_list(
+        deck_strategy["first_questions"],
+        "slide-plans.json deck_strategy.first_questions",
+    )
+    _require_non_empty_string_list(
+        deck_strategy["evidence_order"],
+        "slide-plans.json deck_strategy.evidence_order",
+    )
 
-    design_system = data.get("design_system")
-    if not isinstance(design_system, dict) or not design_system:
-        raise ValueError("slide-plans.json version 2 requires a non-empty design_system")
+    design_system = _require_non_empty_fields(
+        data.get("design_system"),
+        "slide-plans.json design_system",
+        REQUIRED_DESIGN_SYSTEM_FIELDS,
+    )
+    for field in ("theme_name", "audience_fit", "illustration_policy"):
+        _require_non_empty_string(design_system[field], f"slide-plans.json design_system.{field}")
+    for field in ("typography", "component_rules", "chart_treatment"):
+        if not isinstance(design_system[field], dict):
+            raise ValueError(f"slide-plans.json design_system.{field} must be an object")
+    _require_non_empty_string_list(
+        design_system["design_genes"],
+        "slide-plans.json design_system.design_genes",
+    )
     palette = design_system.get("palette")
     if not isinstance(palette, dict):
         raise ValueError("slide-plans.json design_system requires a palette object")
-    required_tokens = {
-        "background",
-        "surface",
-        "primary",
-        "accent",
-        "text_primary",
-        "text_muted",
-    }
-    missing = sorted(token for token in required_tokens if not palette.get(token))
+    missing = sorted(token for token in REQUIRED_PALETTE_TOKENS if not _is_non_empty(palette.get(token)))
     if missing:
         raise ValueError(
             "slide-plans.json design_system.palette is missing required tokens: "
             + ", ".join(missing)
         )
+    invalid_palette_values = sorted(
+        token for token, color in palette.items() if not isinstance(color, str) or not color.strip()
+    )
+    if invalid_palette_values:
+        raise ValueError(
+            "slide-plans.json design_system.palette tokens must map to non-empty color strings: "
+            + ", ".join(invalid_palette_values)
+        )
+
+    slides = data.get("slides")
+    if not isinstance(slides, list) or not slides:
+        raise ValueError("slide-plans.json slides must be a non-empty list")
+
+    seen_indexes: set[int] = set()
+    for position, slide in enumerate(slides, start=1):
+        slide_path = f"slide-plans.json slides[{position - 1}]"
+        slide = _require_non_empty_fields(
+            slide,
+            slide_path,
+            ("index", "title", "material", "page_role", "plan"),
+        )
+        try:
+            index = int(slide["index"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{slide_path}.index must be an integer") from exc
+        if index < 1 or index in seen_indexes:
+            raise ValueError(f"{slide_path}.index must be a unique positive integer")
+        seen_indexes.add(index)
+        for field in ("title", "material", "page_role"):
+            _require_non_empty_string(slide[field], f"{slide_path}.{field}")
+
+        plan = _require_non_empty_fields(
+            slide["plan"],
+            f"{slide_path}.plan",
+            REQUIRED_SLIDE_PLAN_FIELDS,
+        )
+        for field in ("core_message", "layout_structure"):
+            _require_non_empty_string(plan[field], f"{slide_path}.plan.{field}")
+        for field in (
+            "visual_hierarchy",
+            "required_elements",
+            "palette_tokens",
+            "renderer_neutral_constraints",
+        ):
+            _require_non_empty_string_list(plan[field], f"{slide_path}.plan.{field}")
+        for field in ("style_controls", "audience_controls"):
+            if not isinstance(plan[field], dict):
+                raise ValueError(f"{slide_path}.plan.{field} must be an object")
+        palette_tokens = plan["palette_tokens"]
+        unknown_tokens = sorted(set(palette_tokens) - set(palette))
+        if unknown_tokens:
+            raise ValueError(
+                f"{slide_path}.plan.palette_tokens references unknown design_system.palette tokens: "
+                + ", ".join(unknown_tokens)
+            )
 
 
 def _append_plan_preview_section(lines: list[str], title: str, value: Any) -> None:
@@ -380,25 +519,39 @@ def _append_plan_preview_section(lines: list[str], title: str, value: Any) -> No
     lines.extend(["```", ""])
 
 
+def _append_slide_plan_details(lines: list[str], plan: dict[str, Any]) -> None:
+    labels = {
+        "core_message": "Core Message",
+        "layout_structure": "Layout Structure",
+        "visual_hierarchy": "Visual Hierarchy",
+        "required_elements": "Required Elements",
+        "palette_tokens": "Palette Tokens",
+        "style_controls": "Style Controls",
+        "audience_controls": "Audience Controls",
+        "renderer_neutral_constraints": "Renderer-neutral Constraints",
+    }
+    for key in REQUIRED_SLIDE_PLAN_FIELDS:
+        value = plan[key]
+        lines.extend([f"### {labels[key]}", ""])
+        if isinstance(value, (dict, list)):
+            lines.extend(["```json", json.dumps(value, ensure_ascii=False, indent=2), "```", ""])
+        else:
+            lines.extend([str(value).strip(), ""])
+
+
 def write_plans_preview(data: dict[str, Any], path: Path) -> Path:
     validate_slide_plans(data)
     lines = ["# Slide Plans Preview", ""]
     _append_plan_preview_section(lines, "Deck Strategy", data.get("deck_strategy"))
     _append_plan_preview_section(lines, "Design System", data.get("design_system"))
     for job in data.get("slides", []):
-        plan = job.get("plan", "")
-        if isinstance(plan, (dict, list)):
-            plan_text = json.dumps(plan, ensure_ascii=False, indent=2)
-        else:
-            plan_text = str(plan).strip()
         lines.extend([
             f"## {int(job['index']):02d}. {job['title']}",
             "",
             f"- role: {job.get('page_role', 'content')}",
             "",
-            plan_text,
-            "",
         ])
+        _append_slide_plan_details(lines, job["plan"])
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
     return path
 
@@ -1076,6 +1229,8 @@ def cmd_approve(args: argparse.Namespace) -> None:
     state = load_state(run_dir)
     if args.artifact not in state.get("artifacts", {}):
         raise ValueError(f"unknown artifact: {args.artifact}")
+    if args.artifact == "slide_plans":
+        slide_plan_document(run_dir)
     state.setdefault("approvals", {})[args.artifact] = True
     state["artifacts"][args.artifact]["status"] = "approved"
     state["artifacts"][args.artifact]["approved_at"] = utc_now()

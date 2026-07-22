@@ -53,6 +53,30 @@ class PromptContractsAudienceTests(unittest.TestCase):
         self.assertIn("palette tokens", text)
         self.assertIn("must not invent a new page palette", text)
 
+    def test_slide_plan_contract_uses_canonical_structured_page_fields(self) -> None:
+        path = (
+            Path(__file__).resolve().parents[1]
+            / ".codex"
+            / "skills"
+            / "ppt-deck-workflow"
+            / "references"
+            / "prompt-contracts.md"
+        )
+        text = path.read_text(encoding="utf-8")
+
+        self.assertIn("free-form string in `plan`", text)
+        for field in (
+            '"core_message"',
+            '"layout_structure"',
+            '"visual_hierarchy"',
+            '"required_elements"',
+            '"palette_tokens"',
+            '"style_controls"',
+            '"audience_controls"',
+            '"renderer_neutral_constraints"',
+        ):
+            self.assertIn(field, text)
+
 
 if __name__ == "__main__":
     unittest.main()

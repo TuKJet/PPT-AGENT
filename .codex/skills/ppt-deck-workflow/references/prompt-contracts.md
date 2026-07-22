@@ -135,7 +135,7 @@ Research may come from Codex-native research capability, not repository AI provi
 
 ## Slide Plan Contract
 
-Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Define the shared system before writing page plans so every page inherits the same visual language.
+Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Define the shared system before writing page plans so every page inherits the same visual language. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
 
 `deck_strategy` must record the stable audience interpretation used across the deck:
 
@@ -172,6 +172,58 @@ For each slide plan, specify:
 - Renderer-neutral constraints; do not include renderer-specific class names, CSS, SVG path instructions, or implementation-only notes.
 
 `slide-plans.json` must remain the control surface for art direction. If style guidance changes, edit the plan before rendering.
+
+Use these exact canonical keys. Do not rename them, place them only inside prose, or substitute model-specific aliases:
+
+```json
+{
+  "version": 2,
+  "deck_strategy": {
+    "primary_audience": "...",
+    "decision_context": "...",
+    "first_questions": ["..."],
+    "evidence_order": ["..."],
+    "presentation_posture": "..."
+  },
+  "design_system": {
+    "theme_name": "...",
+    "audience_fit": "...",
+    "palette": {
+      "background": "#...",
+      "surface": "#...",
+      "primary": "#...",
+      "accent": "#...",
+      "text_primary": "#...",
+      "text_muted": "#..."
+    },
+    "typography": {"...": "..."},
+    "component_rules": {"...": "..."},
+    "chart_treatment": {"...": "..."},
+    "illustration_policy": "...",
+    "design_genes": ["..."]
+  },
+  "slides": [
+    {
+      "index": 1,
+      "title": "...",
+      "material": "...",
+      "page_role": "cover",
+      "plan": {
+        "core_message": "...",
+        "layout_structure": "...",
+        "visual_hierarchy": ["..."],
+        "required_elements": ["..."],
+        "palette_tokens": ["background", "primary", "accent", "text_primary"],
+        "style_controls": {"density": "...", "typography": "...", "visual_motif": "..."},
+        "audience_controls": {"technical_depth": "...", "decision_orientation": "..."},
+        "renderer_neutral_constraints": ["..."]
+      }
+    }
+  ]
+}
+```
+
+Before asking for slide-plan approval, run the helper preview. A validation error means the artifact is incomplete and must be repaired; never bypass the failure by manually converting only the fields that happened to be generated.
 
 The audience decision made in the outline stage must carry forward into `slide-plans.json`; do not silently switch the deck into a different audience style later.
 
