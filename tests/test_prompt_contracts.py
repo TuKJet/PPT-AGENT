@@ -77,6 +77,9 @@ class PromptContractsAudienceTests(unittest.TestCase):
         ):
             self.assertIn(field, text)
 
+        self.assertIn("smaller human-readable approval projection", text)
+        self.assertIn("Never copy JSON objects", text)
+
 
 if __name__ == "__main__":
     unittest.main()

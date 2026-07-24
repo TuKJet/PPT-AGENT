@@ -84,6 +84,60 @@ REQUIRED_SLIDE_PLAN_FIELDS = (
     "audience_controls",
     "renderer_neutral_constraints",
 )
+PREVIEW_LABELS = {
+    "primary_audience": "目标受众",
+    "secondary_audience": "次要受众",
+    "decision_context": "决策目标",
+    "first_questions": "首要问题",
+    "evidence_order": "证据顺序",
+    "presentation_posture": "表达姿态",
+    "theme_name": "主题名称",
+    "audience_fit": "受众适配",
+    "typography": "字体层级",
+    "component_rules": "组件与间距",
+    "chart_treatment": "图表与图解",
+    "illustration_policy": "图像与插画",
+    "design_genes": "设计基因",
+    "title": "标题",
+    "section_heading": "分区标题",
+    "body": "正文",
+    "metric": "核心数字",
+    "cards": "卡片",
+    "spacing": "间距",
+    "lines": "线条",
+    "footer": "页脚",
+    "style": "表现方式",
+    "labels": "标注",
+    "risk_encoding": "风险编码",
+    "density": "信息密度",
+    "visual_motif": "视觉母题",
+    "contrast": "对比策略",
+    "technical_depth": "技术深度",
+    "business_framing": "业务表达",
+    "decision_orientation": "决策导向",
+    "persuasion_intensity": "说服强度",
+    "page_density": "页面密度",
+}
+PALETTE_LABELS = {
+    "background": "页面背景",
+    "surface": "卡片/表面",
+    "primary": "主色",
+    "accent": "强调色",
+    "text_primary": "主要文字",
+    "text_muted": "次要文字",
+    "risk": "风险",
+    "warning": "警示",
+    "success": "成功/正向",
+    "divider": "分隔线",
+}
+PAGE_ROLE_LABELS = {
+    "cover": "封面",
+    "toc": "目录",
+    "content": "内容页",
+    "timeline": "时间线",
+    "summary": "总结页",
+    "ending": "结束页",
+}
 
 
 def default_img_svg_conversion() -> dict[str, Any]:
@@ -511,47 +565,155 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
             )
 
 
-def _append_plan_preview_section(lines: list[str], title: str, value: Any) -> None:
-    if value in (None, "", {}, []):
-        return
-    lines.extend([f"## {title}", "", "```json"])
-    lines.append(json.dumps(value, ensure_ascii=False, indent=2))
-    lines.extend(["```", ""])
+def _preview_label(key: str) -> str:
+    return PREVIEW_LABELS.get(key, key.replace("_", " ").strip().title())
 
 
-def _append_slide_plan_details(lines: list[str], plan: dict[str, Any]) -> None:
-    labels = {
-        "core_message": "Core Message",
-        "layout_structure": "Layout Structure",
-        "visual_hierarchy": "Visual Hierarchy",
-        "required_elements": "Required Elements",
-        "palette_tokens": "Palette Tokens",
-        "style_controls": "Style Controls",
-        "audience_controls": "Audience Controls",
-        "renderer_neutral_constraints": "Renderer-neutral Constraints",
-    }
-    for key in REQUIRED_SLIDE_PLAN_FIELDS:
-        value = plan[key]
-        lines.extend([f"### {labels[key]}", ""])
-        if isinstance(value, (dict, list)):
-            lines.extend(["```json", json.dumps(value, ensure_ascii=False, indent=2), "```", ""])
+def _append_preview_mapping(lines: list[str], value: dict[str, Any], *, indent: int = 0) -> None:
+    prefix = " " * indent
+    for key, item in value.items():
+        label = _preview_label(str(key))
+        if isinstance(item, dict):
+            lines.append(f"{prefix}- **{label}**：")
+            _append_preview_mapping(lines, item, indent=indent + 4)
+        elif isinstance(item, list):
+            lines.append(f"{prefix}- **{label}**：")
+            for child in item:
+                lines.append(f"{prefix}    - {str(child).strip()}")
         else:
-            lines.extend([str(value).strip(), ""])
+            lines.append(f"{prefix}- **{label}**：{str(item).strip()}")
+
+
+def _append_numbered_preview_list(lines: list[str], values: list[Any]) -> None:
+    for index, value in enumerate(values, start=1):
+        lines.append(f"{index}. {str(value).strip()}")
+
+
+def _append_bulleted_preview_list(lines: list[str], values: list[Any]) -> None:
+    for value in values:
+        lines.append(f"- {str(value).strip()}")
+
+
+def _append_deck_strategy_preview(lines: list[str], strategy: dict[str, Any]) -> None:
+    lines.extend([
+        "## 全局叙事策略",
+        "",
+        f"- **目标受众**：{strategy['primary_audience']}",
+        f"- **决策目标**：{strategy['decision_context']}",
+        f"- **表达姿态**：{strategy['presentation_posture']}",
+        "",
+        "### 受众首先会问",
+        "",
+    ])
+    _append_numbered_preview_list(lines, strategy["first_questions"])
+    lines.extend(["", "### 证据展开顺序", ""])
+    _append_numbered_preview_list(lines, strategy["evidence_order"])
+    extras = {
+        key: value
+        for key, value in strategy.items()
+        if key not in REQUIRED_DECK_STRATEGY_FIELDS
+    }
+    if extras:
+        lines.extend(["", "### 其他叙事约束", ""])
+        _append_preview_mapping(lines, extras)
+    lines.append("")
+
+
+def _append_palette_preview(lines: list[str], palette: dict[str, Any]) -> None:
+    lines.extend([
+        "### 配色方案",
+        "",
+        "| 用途 | Token | 色值 |",
+        "| --- | --- | --- |",
+    ])
+    for token, color in palette.items():
+        lines.append(f"| {PALETTE_LABELS.get(token, _preview_label(token))} | `{token}` | `{color}` |")
+    lines.append("")
+
+
+def _append_design_system_preview(lines: list[str], design_system: dict[str, Any]) -> None:
+    lines.extend([
+        "## 全局设计规范",
+        "",
+        f"- **主题名称**：{design_system['theme_name']}",
+        f"- **受众适配**：{design_system['audience_fit']}",
+        f"- **图像与插画**：{design_system['illustration_policy']}",
+        "",
+    ])
+    _append_palette_preview(lines, design_system["palette"])
+    for key, title in (
+        ("typography", "字体层级"),
+        ("component_rules", "组件与间距"),
+        ("chart_treatment", "图表与图解"),
+    ):
+        lines.extend([f"### {title}", ""])
+        _append_preview_mapping(lines, design_system[key])
+        lines.append("")
+    lines.extend(["### 设计基因", ""])
+    lines.append(" · ".join(str(item).strip() for item in design_system["design_genes"]))
+    extras = {
+        key: value
+        for key, value in design_system.items()
+        if key not in REQUIRED_DESIGN_SYSTEM_FIELDS
+    }
+    if extras:
+        lines.extend(["", "### 其他设计约束", ""])
+        _append_preview_mapping(lines, extras)
+    lines.append("")
+
+
+def _append_slide_plan_details(
+    lines: list[str],
+    plan: dict[str, Any],
+    palette: dict[str, Any],
+) -> None:
+    lines.extend([
+        "> **核心信息**",
+        ">",
+        f"> {plan['core_message']}",
+        "",
+        "### 页面布局",
+        "",
+        str(plan["layout_structure"]).strip(),
+        "",
+        "### 视觉层级",
+        "",
+    ])
+    _append_numbered_preview_list(lines, plan["visual_hierarchy"])
+    lines.extend(["", "### 页面元素", ""])
+    _append_bulleted_preview_list(lines, plan["required_elements"])
+    lines.extend(["", "### 本页配色", ""])
+    colors = [
+        f"{PALETTE_LABELS.get(token, _preview_label(token))} `{palette[token]}`"
+        for token in plan["palette_tokens"]
+    ]
+    lines.append(" · ".join(colors))
+    lines.extend(["", "### 样式控制", ""])
+    _append_preview_mapping(lines, plan["style_controls"])
+    lines.extend([
+        "",
+        "_受众控制与渲染通用约束已通过校验，并保留在 `slide-plans.json` 中供渲染阶段使用。_",
+        "",
+    ])
 
 
 def write_plans_preview(data: dict[str, Any], path: Path) -> Path:
     validate_slide_plans(data)
-    lines = ["# Slide Plans Preview", ""]
-    _append_plan_preview_section(lines, "Deck Strategy", data.get("deck_strategy"))
-    _append_plan_preview_section(lines, "Design System", data.get("design_system"))
+    lines = ["# 幻灯片规划预览", ""]
+    _append_deck_strategy_preview(lines, data["deck_strategy"])
+    _append_design_system_preview(lines, data["design_system"])
+    palette = data["design_system"]["palette"]
     for job in data.get("slides", []):
+        role = str(job.get("page_role", "content"))
         lines.extend([
-            f"## {int(job['index']):02d}. {job['title']}",
+            "---",
             "",
-            f"- role: {job.get('page_role', 'content')}",
+            f"## 第 {int(job['index']):02d} 页｜{job['title']}",
+            "",
+            f"- **页面类型**：{PAGE_ROLE_LABELS.get(role, role)}",
             "",
         ])
-        _append_slide_plan_details(lines, job["plan"])
+        _append_slide_plan_details(lines, job["plan"], palette)
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
     return path
 

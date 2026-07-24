@@ -318,14 +318,85 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
     def test_slide_plan_preview_exposes_deck_strategy_and_design_system(self) -> None:
         preview = (self.run_dir / "slide-plans-preview.md").read_text(encoding="utf-8")
 
-        self.assertIn("## Deck Strategy", preview)
-        self.assertIn("## Design System", preview)
+        self.assertIn("# 幻灯片规划预览", preview)
+        self.assertIn("## 全局叙事策略", preview)
+        self.assertIn("## 全局设计规范", preview)
         self.assertIn("Confident Blue", preview)
         self.assertIn("#1358A8", preview)
-        self.assertIn("### Core Message", preview)
-        self.assertIn("### Layout Structure", preview)
-        self.assertIn("### Palette Tokens", preview)
-        self.assertIn("### Audience Controls", preview)
+        self.assertIn("| 主色 | `primary` | `#1358A8` |", preview)
+        self.assertIn("## 第 01 页｜Opening", preview)
+        self.assertIn("> **核心信息**", preview)
+        self.assertIn("### 页面布局", preview)
+        self.assertIn("### 本页配色", preview)
+        self.assertIn("受众控制与渲染通用约束已通过校验", preview)
+        self.assertNotIn("### 受众与表达控制", preview)
+        self.assertNotIn("### 渲染通用约束", preview)
+        self.assertNotIn("```json", preview)
+        self.assertNotIn('"primary_audience"', preview)
+        self.assertNotIn('"layout_structure"', preview)
+
+    def test_fresh_one_page_slide_plan_smoke_flow_is_human_readable(self) -> None:
+        smoke_run = self.output_root / "fresh-one-page-preview-smoke"
+        self.workflow.init_state(
+            smoke_run,
+            topic="客服知识库稳定运营价值",
+            audience="业务负责人",
+            pages="1",
+            research="No external research; preview formatting smoke test",
+        )
+        smoke_plans = valid_slide_plans(("知识库持续更新，把重复答疑转化为稳定服务能力", "Fresh", "content"))
+        smoke_plans["deck_strategy"] = {
+            "primary_audience": "客服与运营负责人",
+            "decision_context": "确认知识库运营岗位的持续投入价值",
+            "first_questions": [
+                "日常维护解决了什么业务问题？",
+                "岗位缺位会怎样影响响应效率？",
+            ],
+            "evidence_order": [
+                "稳定服务价值",
+                "缺位损失链",
+                "管理结论",
+            ],
+            "presentation_posture": "结论先行、业务语言、风险与价值平衡",
+        }
+        smoke_plans["design_system"].update({
+            "theme_name": "稳定服务蓝",
+            "audience_fit": "用企业蓝表达稳定，用橙色提示知识过期风险",
+            "design_genes": ["单一结论焦点", "价值与风险双栏", "低噪声信息卡"],
+        })
+        smoke_plans["slides"][0]["plan"].update({
+            "core_message": "持续维护让知识可复用；岗位缺位会迅速放大重复答疑与口径不一致。",
+            "layout_structure": "顶部结论标题；左侧价值卡；右侧缺位损失链；底部管理结论条。",
+            "visual_hierarchy": [
+                "标题建立岗位判断",
+                "左侧稳定服务价值",
+                "右侧缺位风险",
+                "底部管理结论",
+            ],
+            "required_elements": [
+                "标题与一句副标题",
+                "知识沉淀价值卡",
+                "缺位损失三步链",
+                "管理结论条",
+            ],
+        })
+        self.workflow.write_json(smoke_run / "slide-plans.json", smoke_plans)
+
+        self.workflow.cmd_preview(
+            Namespace(run_dir=str(smoke_run), artifact="slide_plans")
+        )
+
+        preview_path = smoke_run / "slide-plans-preview.md"
+        preview = preview_path.read_text(encoding="utf-8")
+        state = self.workflow.load_state(smoke_run)
+        self.assertEqual(state["artifacts"]["slide_plans"]["status"], "pending_review")
+        self.assertIn("客服与运营负责人", preview)
+        self.assertIn("## 第 01 页｜知识库持续更新", preview)
+        self.assertIn("岗位缺位会迅速放大重复答疑", preview)
+        self.assertIn("| 页面背景 | `background` | `#F5F8FC` |", preview)
+        self.assertIn("页面背景 `#F5F8FC` · 卡片/表面 `#FFFFFF`", preview)
+        self.assertNotIn("```", preview)
+        self.assertNotIn('{"', preview)
 
     def test_version_two_slide_plans_require_complete_palette_tokens(self) -> None:
         invalid = valid_slide_plans()

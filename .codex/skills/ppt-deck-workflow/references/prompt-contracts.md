@@ -225,6 +225,8 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
 
 Before asking for slide-plan approval, run the helper preview. A validation error means the artifact is incomplete and must be repaired; never bypass the failure by manually converting only the fields that happened to be generated.
 
+The helper must translate this strict machine schema into a smaller human-readable approval projection. `slide-plans-preview.md` should show the audience/decision lens, visual system, core message, layout, hierarchy, visible elements, and page style using natural labels, a compact palette table, numbered sequences, and bullets. Keep renderer-internal audience controls and neutral constraints in the validated JSON instead of copying them into the approval body. Never copy JSON objects, quoted field names, braces, or fenced `json` blocks into the preview.
+
 The audience decision made in the outline stage must carry forward into `slide-plans.json`; do not silently switch the deck into a different audience style later.
 
 Express audience fit through composition, emphasis, evidence density, ordering, and tone. Do not turn the slide plan into visible rhetoric about what the audience cares about unless the user explicitly requests that framing.
