@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import io
 import json
 import os
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_RUNTIME_ROOT = SKILL_ROOT / "runtime"
@@ -138,6 +139,54 @@ PAGE_ROLE_LABELS = {
     "summary": "总结页",
     "ending": "结束页",
 }
+
+IMG_SVG_REVIEW_MIN_SIMILARITY = 0.86
+
+IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
+This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
+
+Use the attached slide image as the sole and mandatory visual source of truth. Inspect the attached image directly in this same model turn while producing the SVG. Do not reconstruct the slide from a textual summary, slide plan, design system, previous memory, or a description of the image.
+
+Priority order:
+1. Pixel-level visual resemblance to the attached image at 1280x720.
+2. Preservation of every visible element, including icons and decorations.
+3. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
+4. PowerPoint-compatible SVG rendering.
+5. Editability of text and simple geometry.
+6. SVG simplicity.
+
+Canvas: width 1280, height 720, viewBox="0 0 1280 720".
+
+Strict faithfulness requirements:
+- Preserve all visible Chinese and English text verbatim. Do not rewrite, abbreviate, summarize, correct, or reorganize it.
+- Preserve title position, font scale, line breaks, alignment, card geometry, border radius, spacing, margins, arrows, dividers, footer, shadows, strokes, fills, badges, icon backgrounds, and decorative marks.
+- Sample colors from the attached image. Do not replace them with an approximate design-system palette unless visually indistinguishable.
+- Do not normalize spacing, improve the composition, introduce a new visual style, or remove decorative elements.
+
+Icon and illustration requirements:
+- Every visible icon, logo, badge, illustration, and decorative symbol must remain.
+- Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or other approximate icon.
+- Trace an icon as SVG paths only when the result is visually close to the source.
+- If an icon or decorative region cannot be reproduced accurately as vectors, preserve it with an exact source-image crop.
+- For every crop, place a matching <image data-crop-id="..."> element and provide its exact source box in normalized 1280x720 coordinates in the crop manifest.
+
+Vectorization requirements:
+- Keep text as <text>/<tspan> when this preserves the original appearance.
+- Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
+- Complex visual regions may remain as small embedded Base64 PNG crops.
+- Do not use one full-page raster image or a small number of large raster patches that dominate the page.
+
+Compatibility requirements:
+- No external URLs or linked files, <foreignObject>, script, animation, external stylesheet, or external font.
+- Avoid unsupported filters only when they cause PowerPoint rendering problems; do not simplify visible styling unnecessarily.
+
+Self-check before returning:
+- Compare the SVG against the attached image from left to right and top to bottom.
+- Confirm every visible icon and decorative element is present.
+- Confirm no card, title, label, arrow, or footer has been moved, simplified, or redesigned.
+- Confirm the result looks like the same slide, not a newly designed slide.
+
+Output exactly one final 1280x720 SVG and one crop manifest. Do not output alternative SVG versions or explanatory prose."""
 
 
 def default_img_svg_conversion() -> dict[str, Any]:
@@ -930,11 +979,220 @@ def mark_img_exported_complete(run_dir: Path, pptx_path: Path, images: list[Path
     save_state(run_dir, state)
 
 
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def file_sha256(path: Path) -> str:
+    return sha256_bytes(path.read_bytes())
+
+
+def text_sha256(value: str) -> str:
+    return sha256_bytes(value.encode("utf-8"))
+
+
+def img_svg_conversion_evidence_template(
+    source_image_path: Path,
+    prompt_sha256: str,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "source_image_path": str(source_image_path),
+        "source_image_sha256": file_sha256(source_image_path),
+        "prompt_sha256": prompt_sha256,
+        "input_mode": "image_and_prompt_same_model_turn",
+        "source_image_attached": True,
+        "visual_source_of_truth": "source_image_only",
+        "model_or_agent": "REQUIRED: record the vision-capable model or Codex agent",
+        "generated_at": "REQUIRED: ISO-8601 timestamp",
+    }
+
+
+def img_svg_crop_manifest_template(
+    source_image_path: Path,
+    svg_path: Path,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "source_image_path": str(source_image_path),
+        "svg_path": str(svg_path),
+        "canvas": {"width": 1280, "height": 720},
+        "icon_strategy": "REQUIRED: source_crops | mixed | faithful_vector_trace | no_icons_visible",
+        "crops": [],
+        "no_crops_reason": "REQUIRED when crops is empty",
+    }
+
+
+def render_img_svg_review(
+    source_image_path: Path,
+    svg_path: Path,
+    preview_path: Path,
+) -> dict[str, float]:
+    from pptx_builder import svg_to_png_bytes
+
+    preview_bytes = svg_to_png_bytes(svg_path)
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_bytes(preview_bytes)
+
+    with Image.open(source_image_path) as source, Image.open(io.BytesIO(preview_bytes)) as rendered:
+        source_rgb = source.convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS)
+        rendered_rgb = rendered.convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS)
+
+        pixel_difference = ImageChops.difference(source_rgb, rendered_rgb)
+        pixel_mae = sum(ImageStat.Stat(pixel_difference).mean) / 3.0
+        pixel_similarity = max(0.0, 1.0 - pixel_mae / 255.0)
+
+        source_edges = source_rgb.filter(ImageFilter.FIND_EDGES)
+        rendered_edges = rendered_rgb.filter(ImageFilter.FIND_EDGES)
+        edge_difference = ImageChops.difference(source_edges, rendered_edges)
+        edge_mae = sum(ImageStat.Stat(edge_difference).mean) / 3.0
+        edge_similarity = max(0.0, 1.0 - edge_mae / 255.0)
+
+    combined_similarity = pixel_similarity * 0.65 + edge_similarity * 0.35
+    return {
+        "pixel_similarity": round(pixel_similarity, 6),
+        "edge_similarity": round(edge_similarity, 6),
+        "combined_similarity": round(combined_similarity, 6),
+        "recommended_minimum": IMG_SVG_REVIEW_MIN_SIMILARITY,
+    }
+
+
+def write_img_svg_review_artifact(job: dict[str, Any]) -> dict[str, Any]:
+    source_image_path = Path(job["source_image_path"])
+    svg_path = Path(job["target_path"])
+    preview_path = Path(job["rendered_preview_path"])
+    review_path = Path(job["fidelity_review_path"])
+    source_hash = file_sha256(source_image_path)
+    svg_hash = file_sha256(svg_path)
+    prompt_hash = str(job["compiled_prompt_sha256"])
+    metrics = render_img_svg_review(source_image_path, svg_path, preview_path)
+
+    previous = read_json(review_path, {}) if review_path.exists() else {}
+    unchanged = (
+        previous.get("source_image_sha256") == source_hash
+        and previous.get("svg_sha256") == svg_hash
+        and previous.get("prompt_sha256") == prompt_hash
+    )
+    review = {
+        "version": 1,
+        "slide_index": int(job["index"]),
+        "source_image_path": str(source_image_path),
+        "source_image_sha256": source_hash,
+        "svg_path": str(svg_path),
+        "svg_sha256": svg_hash,
+        "rendered_preview_path": str(preview_path),
+        "prompt_sha256": prompt_hash,
+        "automatic_metrics": metrics,
+        "status": previous.get("status", "pending_visual_review") if unchanged else "pending_visual_review",
+        "source_image_inspected": bool(previous.get("source_image_inspected")) if unchanged else False,
+        "rendered_svg_inspected": bool(previous.get("rendered_svg_inspected")) if unchanged else False,
+        "layout_preserved": bool(previous.get("layout_preserved")) if unchanged else False,
+        "icons_preserved": bool(previous.get("icons_preserved")) if unchanged else False,
+        "no_redesign": bool(previous.get("no_redesign")) if unchanged else False,
+        "reviewer": str(previous.get("reviewer") or "") if unchanged else "",
+        "notes": str(previous.get("notes") or "") if unchanged else "",
+        "low_similarity_override_reason": str(previous.get("low_similarity_override_reason") or "") if unchanged else "",
+        "updated_at": utc_now(),
+    }
+    write_json(review_path, review)
+    return review
+
+
+def validate_img_svg_conversion_evidence(job: dict[str, Any]) -> dict[str, Any]:
+    path = Path(job["conversion_evidence_path"])
+    if not path.is_file():
+        raise ValueError(f"IMG-to-SVG conversion evidence is missing: {path}")
+    evidence = read_json(path)
+    source_path = Path(job["source_image_path"])
+    if Path(str(evidence.get("source_image_path") or "")).resolve() != source_path.resolve():
+        raise ValueError(f"IMG-to-SVG evidence source path mismatch: {path}")
+    if evidence.get("source_image_sha256") != file_sha256(source_path):
+        raise ValueError(f"IMG-to-SVG evidence source hash mismatch: {path}")
+    if evidence.get("prompt_sha256") != job.get("compiled_prompt_sha256"):
+        raise ValueError(f"IMG-to-SVG evidence prompt hash mismatch: {path}")
+    if evidence.get("input_mode") != "image_and_prompt_same_model_turn":
+        raise ValueError(f"IMG-to-SVG evidence must record image_and_prompt_same_model_turn: {path}")
+    if evidence.get("source_image_attached") is not True:
+        raise ValueError(f"IMG-to-SVG evidence must confirm the source image was attached: {path}")
+    if evidence.get("visual_source_of_truth") != "source_image_only":
+        raise ValueError(f"IMG-to-SVG evidence must use source_image_only as visual truth: {path}")
+    if not str(evidence.get("model_or_agent") or "").strip() or str(evidence.get("model_or_agent")).startswith("REQUIRED"):
+        raise ValueError(f"IMG-to-SVG evidence must record the model or agent: {path}")
+    if not str(evidence.get("generated_at") or "").strip() or str(evidence.get("generated_at")).startswith("REQUIRED"):
+        raise ValueError(f"IMG-to-SVG evidence must record generated_at: {path}")
+    return evidence
+
+
+def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any]) -> dict[str, Any]:
+    path = Path(job["crop_manifest_path"])
+    if not path.is_file():
+        raise ValueError(f"IMG-to-SVG crop manifest is missing: {path}")
+    manifest = read_json(path)
+    source_path = Path(job["source_image_path"])
+    svg_path = Path(job["target_path"])
+    if Path(str(manifest.get("source_image_path") or "")).resolve() != source_path.resolve():
+        raise ValueError(f"IMG-to-SVG crop manifest source path mismatch: {path}")
+    if Path(str(manifest.get("svg_path") or "")).resolve() != svg_path.resolve():
+        raise ValueError(f"IMG-to-SVG crop manifest SVG path mismatch: {path}")
+    canvas = manifest.get("canvas") or {}
+    if canvas != {"width": 1280, "height": 720}:
+        raise ValueError(f"IMG-to-SVG crop manifest canvas must be 1280x720: {path}")
+    crops = manifest.get("crops")
+    if not isinstance(crops, list):
+        raise ValueError(f"IMG-to-SVG crop manifest crops must be a list: {path}")
+    icon_strategy = str(manifest.get("icon_strategy") or "")
+    allowed_strategies = {"source_crops", "mixed", "faithful_vector_trace", "no_icons_visible"}
+    if icon_strategy not in allowed_strategies:
+        raise ValueError(f"IMG-to-SVG crop manifest has invalid icon_strategy: {path}")
+    if crops:
+        if icon_strategy not in {"source_crops", "mixed"}:
+            raise ValueError(f"IMG-to-SVG crops require source_crops or mixed icon_strategy: {path}")
+        if svg_stats.get("embedded_image_count", 0) < len(crops):
+            raise ValueError(f"IMG-to-SVG SVG has fewer embedded images than declared crops: {path}")
+    else:
+        reason = str(manifest.get("no_crops_reason") or "").strip()
+        if len(reason) < 20:
+            raise ValueError(f"IMG-to-SVG empty crop manifest needs a specific no_crops_reason: {path}")
+        if icon_strategy not in {"faithful_vector_trace", "no_icons_visible"}:
+            raise ValueError(f"IMG-to-SVG empty crop manifest needs a trace/no-icons strategy: {path}")
+    return manifest
+
+
+def validate_img_svg_fidelity_review(job: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    path = Path(job["fidelity_review_path"])
+    if review.get("status") != "pass":
+        raise RuntimeError(f"IMG-to-SVG visual review is pending: {path}")
+    required_true = (
+        "source_image_inspected",
+        "rendered_svg_inspected",
+        "layout_preserved",
+        "icons_preserved",
+        "no_redesign",
+    )
+    missing = [key for key in required_true if review.get(key) is not True]
+    if missing:
+        raise ValueError(f"IMG-to-SVG visual review is missing confirmations {missing}: {path}")
+    if not str(review.get("reviewer") or "").strip():
+        raise ValueError(f"IMG-to-SVG visual review must record a reviewer: {path}")
+    if len(str(review.get("notes") or "").strip()) < 12:
+        raise ValueError(f"IMG-to-SVG visual review needs concrete notes: {path}")
+    similarity = float((review.get("automatic_metrics") or {}).get("combined_similarity", 0.0))
+    if similarity < IMG_SVG_REVIEW_MIN_SIMILARITY:
+        override = str(review.get("low_similarity_override_reason") or "").strip()
+        if len(override) < 20:
+            raise ValueError(
+                f"IMG-to-SVG similarity {similarity:.3f} is below {IMG_SVG_REVIEW_MIN_SIMILARITY:.2f}; "
+                f"revise the slide or record a concrete low_similarity_override_reason: {path}"
+            )
+    return review
+
+
 def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
     images = require_complete_img_sources(run_dir)
     jobs = slide_jobs(run_dir)
     jobs_dir = render_jobs_root(run_dir, "img-svg")
     target_dir = run_dir / "img-svg"
+    reviews_dir = jobs_dir / "reviews"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -943,23 +1201,42 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
         stale.unlink()
     for stale in jobs_dir.glob("*.json"):
         stale.unlink()
+    if reviews_dir.exists():
+        shutil.rmtree(reviews_dir)
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_sha256 = text_sha256(IMG_SVG_COMPILED_PROMPT)
 
     shared_context_path = jobs_dir / "shared-context.json"
     write_json(shared_context_path, {
-        "version": 1,
+        "version": 2,
         "topic": infer_topic(run_dir),
         "audience": state.get("audience"),
         "renderer": "img-svg",
         "source_renderer": "img",
         "slide_count": len(images),
+        "task_type": "faithful_visual_tracing_not_redesign",
+        "priority_order": [
+            "pixel_level_visual_resemblance",
+            "preserve_every_visible_element_and_icon",
+            "exact_copy_geometry_and_reading_order",
+            "powerpoint_compatibility",
+            "editability",
+            "svg_simplicity",
+        ],
         "model_input_rule": (
-            "Pass each source_image_path directly to a vision-capable model and recreate that page "
-            "as one final PowerPoint-compatible SVG."
+            "Attach each source_image_path and the compiled_prompt in the same vision-model turn. "
+            "The source image is the sole visual truth; this is tracing, not redesign."
         ),
         "output_rule": (
-            "Write one final 1280x720 hybrid SVG per source image. Rebuild text, cards, lines, and "
-            "simple diagrams as vectors. For logos, icons, and incompatible complex regions, place "
-            "<image data-crop-id='...'> placeholders and use the Pillow crop helper to embed Base64 PNG data."
+            "Write one final 1280x720 hybrid SVG and one crop manifest per source image. Rebuild stable "
+            "geometry as vectors; preserve every icon exactly by faithful path tracing or source crop."
+        ),
+        "compiled_prompt": IMG_SVG_COMPILED_PROMPT,
+        "compiled_prompt_sha256": prompt_sha256,
+        "completion_rule": (
+            "complete-img-svg renders each SVG for comparison and requires conversion evidence, a crop "
+            "manifest, and an explicit source-vs-render visual review pass before export."
         ),
         "crop_helper_path": str(
             Path(__file__).resolve().parent / "embed_img_crops.py"
@@ -972,8 +1249,11 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
         target_path = target_dir / f"{image_path.stem}.svg"
         job_path = jobs_dir / f"slide-{index:02d}.json"
         crop_manifest_path = jobs_dir / f"slide-{index:02d}-crops.json"
+        conversion_evidence_path = jobs_dir / f"slide-{index:02d}-conversion-evidence.json"
+        fidelity_review_path = reviews_dir / f"slide-{index:02d}-fidelity-review.json"
+        rendered_preview_path = reviews_dir / f"slide-{index:02d}-rendered.png"
         payload = {
-            "version": 1,
+            "version": 2,
             "renderer": "img-svg",
             "source_renderer": "img",
             "index": int(plan.get("index", index)),
@@ -982,16 +1262,35 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
             "source_image_path": str(image_path),
             "target_path": str(target_path),
             "crop_manifest_path": str(crop_manifest_path),
+            "conversion_evidence_path": str(conversion_evidence_path),
+            "fidelity_review_path": str(fidelity_review_path),
+            "rendered_preview_path": str(rendered_preview_path),
             "shared_context_path": str(shared_context_path),
             "prompt_contract_path": str(
                 Path(__file__).resolve().parents[1] / "references" / "prompt-contracts.md"
             ),
             "prompt_contract_section": "IMG-to-SVG Model Conversion Contract",
+            "compiled_prompt": IMG_SVG_COMPILED_PROMPT,
+            "compiled_prompt_sha256": prompt_sha256,
+            "required_model_input": {
+                "mode": "image_and_prompt_same_model_turn",
+                "image_path": str(image_path),
+                "prompt_field": "compiled_prompt",
+                "visual_source_of_truth": "source_image_only",
+            },
             "crop_helper_path": str(
                 Path(__file__).resolve().parent / "embed_img_crops.py"
             ),
         }
         write_json(job_path, payload)
+        write_json(
+            crop_manifest_path,
+            img_svg_crop_manifest_template(image_path, target_path),
+        )
+        write_json(
+            conversion_evidence_path,
+            img_svg_conversion_evidence_template(image_path, prompt_sha256),
+        )
         manifest_slides.append({
             "index": payload["index"],
             "title": payload["title"],
@@ -999,11 +1298,15 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
             "job_path": str(job_path),
             "target_path": str(target_path),
             "crop_manifest_path": str(crop_manifest_path),
+            "conversion_evidence_path": str(conversion_evidence_path),
+            "fidelity_review_path": str(fidelity_review_path),
+            "rendered_preview_path": str(rendered_preview_path),
+            "compiled_prompt_sha256": prompt_sha256,
         })
 
     manifest_path = jobs_dir / "manifest.json"
     write_json(manifest_path, {
-        "version": 1,
+        "version": 2,
         "renderer": "img-svg",
         "source_renderer": "img",
         "topic": infer_topic(run_dir),
@@ -1029,7 +1332,7 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
     return manifest_path
 
 
-def validate_ppt_compatible_svg(path: Path) -> None:
+def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
     try:
         root = ElementTree.fromstring(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ElementTree.ParseError) as exc:
@@ -1050,6 +1353,7 @@ def validate_ppt_compatible_svg(path: Path) -> None:
     forbidden = {"foreignobject", "script"}
     raster_area = 0.0
     vector_element_count = 0
+    embedded_image_count = 0
     for element in root.iter():
         local_name = element.tag.rsplit("}", 1)[-1].lower()
         if local_name in forbidden:
@@ -1060,6 +1364,7 @@ def validate_ppt_compatible_svg(path: Path) -> None:
         }:
             vector_element_count += 1
         if local_name == "image":
+            embedded_image_count += 1
             href = ""
             for attribute, value in element.attrib.items():
                 if attribute.rsplit("}", 1)[-1].lower() == "href":
@@ -1113,6 +1418,12 @@ def validate_ppt_compatible_svg(path: Path) -> None:
         raise ValueError(
             f"SVG embedded raster regions cover too much of the slide; reconstruct more as vectors: {path}"
         )
+    return {
+        "vector_element_count": vector_element_count,
+        "embedded_image_count": embedded_image_count,
+        "embedded_raster_area": raster_area,
+        "embedded_raster_ratio": round(raster_area / (1280 * 720), 6),
+    }
 
 
 def complete_img_svg_generation(run_dir: Path) -> list[Path]:
@@ -1133,14 +1444,43 @@ def complete_img_svg_generation(run_dir: Path) -> list[Path]:
         raise ValueError(
             f"IMG-to-SVG output mismatch: expected {len(expected_paths)} exact page files, found {len(actual_paths)}"
         )
-    for svg_path in actual_paths:
-        validate_ppt_compatible_svg(svg_path)
+    issues: list[str] = []
+    review_paths: list[str] = []
+    for item in manifest.get("slides", []):
+        job = read_json(Path(item["job_path"]))
+        svg_path = Path(job["target_path"])
+        svg_stats = validate_ppt_compatible_svg(svg_path)
+        try:
+            validate_img_svg_conversion_evidence(job)
+        except (ValueError, FileNotFoundError) as exc:
+            issues.append(str(exc))
+        try:
+            validate_img_svg_crop_manifest(job, svg_stats)
+        except (ValueError, FileNotFoundError) as exc:
+            issues.append(str(exc))
+
+        review = write_img_svg_review_artifact(job)
+        review_paths.append(str(job["fidelity_review_path"]))
+        try:
+            validate_img_svg_fidelity_review(job, review)
+        except (ValueError, RuntimeError) as exc:
+            issues.append(str(exc))
+
+    if issues:
+        detail = "\n- ".join(issues)
+        raise RuntimeError(
+            "IMG-to-SVG fidelity gate is not satisfied. Inspect each source image beside its rendered "
+            "preview, repair the SVG when needed, complete the evidence/crop manifests, mark the fidelity "
+            f"review pass, and rerun complete-img-svg:\n- {detail}"
+        )
 
     entry["svg_conversion"] = {
         **conversion,
         "status": "completed",
         "svg_count": len(actual_paths),
         "svg_paths": [str(path) for path in actual_paths],
+        "fidelity_review_paths": review_paths,
+        "fidelity_gate": "passed",
         "completed_at": utc_now(),
     }
     entry["status"] = "img_svg_export_ready"

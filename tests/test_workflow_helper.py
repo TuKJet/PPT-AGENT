@@ -11,6 +11,7 @@ import unittest
 from argparse import Namespace
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 
 def load_workflow_module():
@@ -492,6 +493,62 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         )
         return self.run_dir / self.workflow.renderer_pptx_name(self.run_dir, "img")
 
+    def prepare_img_svg_evidence(self, page: dict, *, crops: list[dict] | None = None) -> dict:
+        job = json.loads(Path(page["job_path"]).read_text(encoding="utf-8"))
+        evidence = json.loads(Path(page["conversion_evidence_path"]).read_text(encoding="utf-8"))
+        evidence.update({
+            "model_or_agent": "unit-test-vision-agent",
+            "generated_at": "2026-01-01T00:00:00Z",
+        })
+        self.workflow.write_json(Path(page["conversion_evidence_path"]), evidence)
+
+        crop_items = list(crops or [])
+        crop_manifest = {
+            "version": 1,
+            "source_image_path": page["source_image_path"],
+            "svg_path": page["target_path"],
+            "canvas": {"width": 1280, "height": 720},
+            "icon_strategy": "source_crops" if crop_items else "no_icons_visible",
+            "crops": crop_items,
+            "no_crops_reason": "The synthetic unit-test slide contains no visible icons or decorative artwork.",
+        }
+        self.workflow.write_json(Path(page["crop_manifest_path"]), crop_manifest)
+        return job
+
+    def fake_render_review(self, source_path: Path, svg_path: Path, preview_path: Path) -> dict:
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_bytes(Path(source_path).read_bytes())
+        return {
+            "pixel_similarity": 1.0,
+            "edge_similarity": 1.0,
+            "combined_similarity": 1.0,
+            "recommended_minimum": self.workflow.IMG_SVG_REVIEW_MIN_SIMILARITY,
+        }
+
+    def complete_img_svg_after_review(self, page: dict) -> None:
+        with mock.patch.object(
+            self.workflow,
+            "render_img_svg_review",
+            side_effect=self.fake_render_review,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "visual review is pending"):
+                self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+            review_path = Path(page["fidelity_review_path"])
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            review.update({
+                "status": "pass",
+                "source_image_inspected": True,
+                "rendered_svg_inspected": True,
+                "layout_preserved": True,
+                "icons_preserved": True,
+                "no_redesign": True,
+                "reviewer": "unit-test-reviewer",
+                "notes": "Source and rendered preview match for the synthetic test slide.",
+            })
+            self.workflow.write_json(review_path, review)
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
     def test_img_svg_choice_is_rejected_before_img_export(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "only available after"):
             self.workflow.cmd_choose_img_svg(
@@ -580,6 +637,14 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             Path(job["crop_helper_path"]).name,
             "embed_img_crops.py",
         )
+        self.assertIn("faithful visual tracing", job["compiled_prompt"])
+        self.assertIn("NOT a slide redesign", job["compiled_prompt"])
+        self.assertEqual(
+            job["required_model_input"]["mode"],
+            "image_and_prompt_same_model_turn",
+        )
+        self.assertTrue(Path(page["conversion_evidence_path"]).exists())
+        self.assertTrue(Path(page["crop_manifest_path"]).exists())
 
         Path(page["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
@@ -587,7 +652,8 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "<text x='80' y='120'>Opening</text></svg>",
             encoding="utf-8",
         )
-        self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+        self.prepare_img_svg_evidence(page)
+        self.complete_img_svg_after_review(page)
 
         state = self.workflow.load_state(self.run_dir)
         self.assertEqual(state["status"], "img_svg_export_ready")
@@ -631,7 +697,16 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "</svg>",
             encoding="utf-8",
         )
-        self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+        page = manifest["slides"][0]
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[{
+                "id": "icon",
+                "source_box": [100, 100, 64, 64],
+                "preserve_aspect_ratio": "none",
+            }],
+        )
+        self.complete_img_svg_after_review(page)
 
         state = self.workflow.load_state(self.run_dir)
         self.assertEqual(state["status"], "img_svg_export_ready")

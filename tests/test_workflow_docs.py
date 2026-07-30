@@ -73,7 +73,10 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("Do not ask the user to spend a reply", workflow_text)
         self.assertIn("PowerPoint can convert much of the page into editable shapes", workflow_text)
         self.assertNotIn("next=ask-user-img-svg", workflow_text)
-        self.assertIn("source_image_path` directly", contract_text)
+        self.assertIn("source_image_path` and exact `compiled_prompt` together", contract_text)
+        self.assertIn("same vision-model turn", contract_text)
+        self.assertIn("faithful visual tracing, not slide redesign", contract_text)
+        self.assertIn("pending fidelity-review JSON", contract_text)
         self.assertIn("must not rasterize", skill_text)
 
     def test_pillow_crop_contract_preserves_the_post_export_choice(self) -> None:
@@ -89,6 +92,9 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("Pillow", contract_text)
         self.assertIn("data:image/png;base64", contract_text)
         self.assertIn("Do not create layered SVG variants", contract_text)
+        self.assertIn("Never replace an original icon", contract_text)
+        self.assertIn("conversion_evidence_path", contract_text)
+        self.assertIn("crop_manifest_path` for every page", contract_text)
 
     def test_global_skill_installation_is_documented(self) -> None:
         root = Path(__file__).resolve().parents[1]

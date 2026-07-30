@@ -80,6 +80,25 @@ class PromptContractsAudienceTests(unittest.TestCase):
         self.assertIn("smaller human-readable approval projection", text)
         self.assertIn("Never copy JSON objects", text)
 
+    def test_img_svg_prompt_prioritizes_faithful_tracing_and_icons(self) -> None:
+        path = (
+            Path(__file__).resolve().parents[1]
+            / ".codex"
+            / "skills"
+            / "ppt-deck-workflow"
+            / "references"
+            / "prompt-contracts.md"
+        )
+        text = path.read_text(encoding="utf-8")
+
+        self.assertIn("This is NOT a slide redesign", text)
+        self.assertIn("sole and mandatory visual source of truth", text)
+        self.assertIn("Pixel-level visual resemblance", text)
+        self.assertIn("Every visible icon", text)
+        self.assertIn("Never replace an original icon", text)
+        self.assertIn("image_and_prompt_same_model_turn", text)
+        self.assertIn("combined similarity", text)
+
 
 if __name__ == "__main__":
     unittest.main()

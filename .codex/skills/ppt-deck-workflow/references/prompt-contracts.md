@@ -359,14 +359,15 @@ When generating SVG slides:
 
 Use this only after the IMG renderer has produced and exported the completed IMG PPTX and the user has explicitly opted into the additional model usage by requesting `choose-img-svg --mode on` in chat.
 
-For every `render-jobs/img-svg/slide-xx.json`:
+For every version-2 `render-jobs/img-svg/slide-xx.json`:
 
-- Pass that job's `source_image_path` directly to a vision-capable model. The source IMG is the primary and mandatory visual source of truth; do not recreate the page from `slide-plans.json` alone.
+- Pass that job's actual `source_image_path` and exact `compiled_prompt` together in the same vision-model turn. The source IMG is the sole and mandatory visual source of truth. Do not recreate the page from `slide-plans.json`, a textual summary, memory, or a previous image inspection.
+- Treat the task as faithful visual tracing, not slide redesign, restyling, simplification, cleanup, or content rewriting. Visual resemblance and preservation of every visible element take priority over SVG simplicity.
 - Faithfully reconstruct the visible page as one complete, final 1280x720 SVG with `viewBox="0 0 1280 720"`.
-- Preserve the page's visible wording, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order as closely as the image allows.
+- Preserve exact wording, numbers, line breaks, hierarchy, sampled colors, relative geometry, spacing, shadows, strokes, diagrams, icons, decorations, and reading order as closely as the image allows.
 - Rebuild text, cards, dividers, arrows, simple diagrams, and other stable geometry using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
 - Preserve logos, icons, badges, small illustrations, and other incompatible or fidelity-sensitive regions by cropping them directly from the source IMG with Pillow and embedding them as Base64 PNG `<image>` elements.
-- Do not redraw icons through HTML, Lucide, or another icon library unless a source crop is unusable.
+- Do not replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database mark, Lucide symbol, or approximate library icon. Trace it faithfully or use a source crop.
 - Do not place the complete source slide inside one full-page `<image>` element. The final exporter must not rasterize the whole reconstructed page.
 - Do not create layered SVG variants such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`. Each IMG page maps directly to one final `img-svg/*.svg`.
 - Do not use external image URLs, linked files, `<foreignObject>`, scripts, animation, or external stylesheets/fonts.
@@ -374,6 +375,8 @@ For every `render-jobs/img-svg/slide-xx.json`:
 - Keep text as `<text>`/`<tspan>` whenever legibility and fidelity permit, so PowerPoint can retain useful vector/text structure after import.
 - Write the SVG structure to the job's exact `target_path`. For every source crop, place an `<image data-crop-id="...">` element at its final target geometry and write the matching crop manifest to `crop_manifest_path`.
 - Run `scripts/embed_img_crops.py --manifest <crop_manifest_path>` to replace crop placeholders with `data:image/png;base64,...` directly in the final SVG. The helper must not create temporary PNG files.
+- Complete `conversion_evidence_path` with the source-image hash, compiled-prompt hash, model/agent identifier, timestamp, and exact `input_mode: image_and_prompt_same_model_turn` confirmation.
+- Complete `crop_manifest_path` for every page, including pages with no crops. An empty crop list requires a concrete reason and `faithful_vector_trace` or `no_icons_visible` as the icon strategy.
 
 Crop manifest shape:
 
@@ -397,23 +400,46 @@ Crop manifest shape:
 Use this model prompt shape:
 
 ```text
-Reconstruct the attached presentation-slide image as one final, PowerPoint-compatible hybrid SVG.
+Task type: faithful visual tracing of an existing presentation slide.
+This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
 
-Canvas: 1280x720, viewBox="0 0 1280 720".
-Faithfulness: preserve all visible text, numbers, hierarchy, colors, relative geometry, diagrams, icons, and reading order from the attached image.
-Vector requirement: rebuild text, cards, lines, arrows, and simple diagrams as SVG vector elements.
-Raster crop rule: for logos, icons, badges, and incompatible complex regions, mark exact source-image crop boxes and place matching <image data-crop-id="..."> elements. Use Pillow to embed those crops as Base64 PNG data.
-Compatibility: no full-slide raster wrapper, external URL/file, <foreignObject>, script, animation, or external stylesheet/font. Prefer simple PowerPoint-compatible SVG primitives.
-Output: one final SVG plus its small crop manifest; do not create intermediate SVG variants.
+Use the attached slide image as the sole and mandatory visual source of truth. Inspect the attached image directly in this same model turn while producing the SVG. Do not reconstruct the slide from a textual summary, slide plan, design system, previous memory, or a description of the image.
+
+Priority order:
+1. Pixel-level visual resemblance to the attached image at 1280x720.
+2. Preservation of every visible element, including icons and decorations.
+3. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
+4. PowerPoint-compatible SVG rendering.
+5. Editability of text and simple geometry.
+6. SVG simplicity.
+
+Canvas: width 1280, height 720, viewBox="0 0 1280 720".
+
+Preserve all visible text verbatim. Preserve the original title position, font scale, line breaks, card geometry, border radius, spacing, margins, arrows, dividers, footer, shadows, strokes, fills, badges, icon backgrounds, and decorative marks. Sample colors from the attached image. Do not normalize spacing, improve the composition, introduce a new visual style, or remove decorative elements.
+
+Every visible icon, logo, badge, illustration, and decorative symbol must remain. Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or approximate icon. Trace an icon as SVG paths only when the result is visually close. Otherwise preserve it with an exact source-image crop and a matching <image data-crop-id="..."> element.
+
+Keep text as <text>/<tspan> when visually faithful. Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vectors. Complex regions may remain as small embedded Base64 PNG crops. Do not use one full-page raster image or raster patches that dominate the page.
+
+No external URLs/files, <foreignObject>, script, animation, external stylesheet, or external font. Do not simplify visible styling merely to make the SVG shorter.
+
+Before returning, compare the SVG against the attached image from left to right and top to bottom. Confirm every icon and decorative element is present and no card, title, label, arrow, footer, or line break has been redesigned.
+
+Output exactly one final 1280x720 SVG and one crop manifest. Do not output alternative SVG versions or explanatory prose.
 ```
 
 Before marking conversion complete:
 
-- Render every final SVG with Playwright and inspect all pages.
+- Run `complete-img-svg` once to render every final SVG with Playwright and create the per-slide rendered PNG, automatic pixel/edge similarity metrics, and pending fidelity-review JSON.
+- Inspect each source IMG and rendered SVG PNG together in the same active turn. Review the entire page left-to-right and top-to-bottom, including icon presence, decoration, palette, typography, line breaks, geometry, spacing, and shadows.
+- Revise pages with visible drift. Mark `status: pass` only after confirming `source_image_inspected`, `rendered_svg_inspected`, `layout_preserved`, `icons_preserved`, and `no_redesign`.
+- A combined similarity below the recommended threshold requires revision or a concrete, page-specific override reason. A generic statement is not acceptable when visible redesign remains.
 - Confirm all embedded images are valid Base64 PNG/JPEG data URIs.
 - Confirm there are no external hrefs, `<foreignObject>`, or scripts.
 - Confirm no `<image>` covers the full 1280x720 slide and embedded raster regions do not dominate the page.
 - Confirm the exact one-to-one page set and `viewBox="0 0 1280 720"`.
+- Confirm every page has completed same-turn conversion evidence and a crop manifest, including an explicit no-crop reason when applicable.
+- Rerun `complete-img-svg`; it must not mark the conversion complete while any evidence, manifest, or fidelity review remains incomplete.
 - Export native `.svg` media in the PPTX rather than rasterizing the generated SVG pages.
 - When Microsoft PowerPoint is installed, open the final PPTX and export every page to PNG for the final Office rendering check.
 

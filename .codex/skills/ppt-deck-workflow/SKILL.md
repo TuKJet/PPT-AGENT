@@ -331,24 +331,27 @@ Do not repeat a long explanation about SVG object semantics unless the user asks
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
 ```
 
-6. Read `render-jobs/img-svg/manifest.json`. For every page job, pass `source_image_path` directly to a vision-capable model and follow `references/prompt-contracts.md#img-to-svg-model-conversion-contract`. The IMG itself is mandatory model input; do not regenerate the SVG from slide plans alone.
+6. Read `render-jobs/img-svg/manifest.json`. Every version-2 page job contains a fully compiled `compiled_prompt`, its hash, the mandatory `source_image_path`, a conversion-evidence path, a crop-manifest path, and fidelity-review paths. Pass the actual source IMG and that exact `compiled_prompt` together in the same vision-model turn. The IMG is the sole visual source of truth; this is faithful tracing, not redesign. Do not generate from slide plans, a text summary, memory, or an earlier image inspection.
 7. Create exactly one final SVG per page at the exact `target_path` under `img-svg/`. Do not create layered variants or sibling directories such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`.
-8. Rebuild text, cards, dividers, arrows, and simple diagrams as SVG vectors.
-9. For logos, icons, badges, and other incompatible or high-fidelity regions, crop directly from the original IMG with Pillow and embed each crop as a Base64 PNG `<image>` node. Do not redraw known icons through HTML or an icon library by default.
-10. Use the bundled deterministic helper. It maps 1280x720 crop coordinates to the original image dimensions and writes Base64 data directly into the final SVG without creating temporary PNG files:
+8. Preserve the original wording, line breaks, card geometry, spacing, palette, shadows, dividers, arrows, decorations, and reading order. Never optimize, simplify, normalize, or restyle the page. Rebuild text and stable geometry as SVG vectors only when doing so remains visually faithful.
+9. Every visible logo, icon, badge, illustration, and decorative symbol must remain. Faithfully trace it as paths or crop it directly from the original IMG with Pillow and embed the crop as a Base64 PNG `<image>` node. Never replace a source icon with a generic plus, checkmark, circle, user silhouette, arrow, or approximate library icon.
+10. Complete the generated `slide-xx-conversion-evidence.json` to record that the image and compiled prompt were used in the same model turn. Complete every `slide-xx-crops.json`, even when it has no crops; an empty manifest requires a specific reason and an explicit `faithful_vector_trace` or `no_icons_visible` strategy.
+11. Use the bundled deterministic helper for declared source crops. It maps 1280x720 crop coordinates to the original image dimensions and writes Base64 data directly into the final SVG without creating temporary PNG files:
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --manifest output/.../render-jobs/img-svg/slide-01-crops.json
 ```
 
-11. Validate and export:
+12. Run `complete-img-svg` once. It validates technical SVG compatibility, renders every SVG to `render-jobs/img-svg/reviews/slide-xx-rendered.png`, records pixel/edge similarity, and creates `slide-xx-fidelity-review.json`. The first run is expected to stop while visual review is pending.
+13. Use `view_image` on the source IMG and rendered PNG for every page in the same active turn. Compare them left-to-right and top-to-bottom. Revise any changed composition, missing icon, simplified decoration, color drift, line-break change, or geometry mismatch. Only after the page is faithful, mark its fidelity review `status` as `pass`, confirm all required booleans, identify the reviewer, and add concrete notes. A similarity score below the recommended minimum requires either revision or a specific override reason; do not use a generic override to accept visible redesign.
+14. Rerun `complete-img-svg`, then export:
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-The validator requires one exact SVG per IMG, valid XML, `viewBox="0 0 1280 720"`, vector page structure, safe embedded Base64 PNG/JPEG crops, and no external URL/file, `<foreignObject>`, or script. The final exporter embeds native `.svg` media plus its PowerPoint preview; it must not rasterize the SVG back into the deck.
+The fidelity gate requires one exact SVG per IMG, valid XML, `viewBox="0 0 1280 720"`, vector page structure, safe embedded Base64 PNG/JPEG crops, no external URL/file, `<foreignObject>`, or script, same-turn image-input evidence, a completed crop manifest, rendered comparison evidence, and an explicit source-vs-render review pass. The final exporter embeds native `.svg` media plus its PowerPoint preview; it must not rasterize the SVG back into the deck.
 
 After the SVG PPTX is exported, give the user these concise Microsoft Office desktop steps:
 

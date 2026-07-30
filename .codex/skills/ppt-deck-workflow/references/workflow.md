@@ -41,7 +41,7 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
 20. For `img`, `export` creates the original IMG PPTX and completes the requested workflow. Show the IMG PPTX to the user; no decline response is required.
 21. Ask once whether the user wants the optional IMG-to-SVG derivative. Explain that SVG reconstruction preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, disclose the additional model calls/Token usage, and require no decline reply. Do not offer a “keep IMG” response option.
-22. After an explicit opt-in, run `choose-img-svg --mode on`, pass each job's `source_image_path` directly to the model, write one final SVG to its exact `target_path`, use Pillow source crops for incompatible logo/icon regions, run `complete-img-svg`, then `export-img-svg` to create a PPTX with native SVG media. Do not create intermediate SVG variants.
+22. After an explicit opt-in, run `choose-img-svg --mode on`. Pass each job's actual source image and exact compiled high-fidelity tracing prompt together in the same model turn. Complete the conversion-evidence and crop-strategy manifests, write one final SVG to the exact target, and use Pillow source crops for icons or artwork that cannot be traced faithfully. Run `complete-img-svg` once to generate rendered comparisons and pending review files; inspect every source/render pair, revise drift, mark faithful pages passed, rerun `complete-img-svg`, then `export-img-svg`. Do not create intermediate SVG variants.
 23. Report the IMG artifact as complete whether or not the optional derivative is requested.
 
 ## Renderer Guidance
@@ -67,7 +67,7 @@ Then continue from the first unapproved artifact:
 - `html` or `svg` chosen but review choice pending: confirm `off` or `on`
 - render review enabled but incomplete: finish the Codex review subflow, then run helper `complete-review`
 - `img` chosen but the original IMG PPTX does not exist: create IMG files, then run helper `export`
-- status `img_svg_generation_pending`: pass every job image directly to the model and create the exact SVG outputs
+- status `img_svg_generation_pending`: use every job's image and compiled prompt in the same model turn, create exact SVG/evidence/crop outputs, then finish the generated fidelity reviews
 - status `img_svg_export_ready`: run helper `export-img-svg`
 - renderer chosen and otherwise ready: create renderer files, then run helper `export`
 
@@ -82,21 +82,25 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --ru
 # helper prints completed plus optional conversion availability and cost warning
 # run the next command only after the user explicitly asks to continue
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
-# pass each render-jobs/img-svg/slide-xx.json source_image_path directly to the model
-# write one final img-svg/*.svg per page; use embed_img_crops.py for source-cropped image elements
+# attach each source_image_path and compiled_prompt in the same model turn
+# write one final SVG plus conversion evidence and a crop-strategy manifest per page
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
+# first run renders review PNGs and stops while visual review is pending
+# inspect each source/render pair, revise drift, mark fidelity reviews pass, then rerun complete-img-svg
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
 The legacy `--mode off` command remains accepted for compatibility, but it must not be presented as a required user response. The helper rejects IMG-to-SVG conversion before the IMG PPTX export.
 
-When the answer is `on`, keep the conversion path minimal:
+When the answer is `on`, keep the conversion path faithful and auditable:
 
-1. Reconstruct text and simple geometry as vectors.
-2. Identify only the incompatible or fidelity-sensitive source regions.
-3. Put `<image data-crop-id="...">` placeholders directly in the final SVG.
-4. Use the bundled Pillow helper to embed those source crops as Base64 PNG data in place.
-5. Render the final SVG pages with Playwright, then export the native-SVG PPTX.
+1. Use the original image and compiled tracing prompt in the same model turn; never reconstruct from summaries or memory.
+2. Preserve wording, geometry, palette, spacing, decorations, and every icon without redesign.
+3. Reconstruct faithful text and stable geometry as vectors; identify incompatible or fidelity-sensitive regions.
+4. Put `<image data-crop-id="...">` placeholders directly in the final SVG and use the bundled Pillow helper to embed those source crops.
+5. Record conversion evidence and one crop-strategy manifest for every page.
+6. Let the first `complete-img-svg` render source-comparison previews and create pending fidelity reviews.
+7. Inspect every pair, revise changed pages, pass the review only when the original design and icons are preserved, then rerun completion and export.
 
 Do not generate temporary icon HTML, temporary icon PNG files, old-vector SVG layers, overlay SVG layers, or `v1`/`v2`/`clean` SVG directories.
 
