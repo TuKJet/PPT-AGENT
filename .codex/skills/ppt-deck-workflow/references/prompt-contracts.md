@@ -367,6 +367,8 @@ For every version-2 `render-jobs/img-svg/slide-xx.json`:
 - Preserve exact wording, numbers, line breaks, hierarchy, sampled colors, relative geometry, spacing, shadows, strokes, diagrams, icons, decorations, and reading order as closely as the image allows.
 - Rebuild text, cards, dividers, arrows, simple diagrams, and other stable geometry using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
 - Preserve logos, icons, badges, small illustrations, and other incompatible or fidelity-sensitive regions by cropping them directly from the source IMG with Pillow and embedding them as Base64 PNG `<image>` elements.
+- Use a crop only for a tight, incompatible artwork region. Never crop a card, panel, title band, chart area, screenshot strip, or any region containing visible Chinese/English text, numbers, labels, captions, or legends. Keep all text as SVG `<text>/<tspan>` and split artwork away from nearby text before cropping.
+- Every crop must declare `content_type` (for example `icon`, `logo`, `illustration`, or `complex_graphic`) and `contains_text: false`. Keep each crop below 12% of the 1280×720 canvas and no wider than 520px or taller than 420px; use the smallest faithful box with a small edge margin.
 - Do not replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database mark, Lucide symbol, or approximate library icon. Trace it faithfully or use a source crop.
 - Do not place the complete source slide inside one full-page `<image>` element. The final exporter must not rasterize the whole reconstructed page.
 - Do not create layered SVG variants such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`. Each IMG page maps directly to one final `img-svg/*.svg`.
@@ -389,6 +391,9 @@ Crop manifest shape:
     {
       "id": "apple-logo",
       "source_box": [552, 535, 64, 68],
+      "content_type": "logo",
+      "contains_text": false,
+      "text_exclusion_boxes": [],
       "preserve_aspect_ratio": "none"
     }
   ]

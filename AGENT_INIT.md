@@ -234,7 +234,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-im
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-When `on`, pass each `render-jobs/img-svg/slide-xx.json` `source_image_path` directly to a vision-capable model and save one final hybrid SVG to its exact `target_path`. Keep text and simple geometry vector. For incompatible icons, logos, badges, or small complex regions, place crop placeholders in that final SVG and run:
+When `on`, pass each `render-jobs/img-svg/slide-xx.json` `source_image_path` directly to a vision-capable model and save one final hybrid SVG to its exact `target_path`. Keep text and simple geometry vector. For incompatible icons, logos, badges, or small complex regions, place tight crop placeholders in that final SVG; never crop visible text, labels, captions, legends, cards, or broad screenshot bands. Crop manifests must declare artwork `content_type` and `contains_text: false`, and deterministic validation rejects broad crops or crops overlapping vector text. Then run:
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --manifest output/.../render-jobs/img-svg/slide-01-crops.json

@@ -109,6 +109,7 @@ The helper validates these canonical field names before it writes `slide-plans-p
 `render-jobs/img-svg/slide-xx-crops.json`
 
 - Required deterministic icon/crop strategy manifest for every page, including pages that use no crops.
+- Crop entries are tight artwork exceptions only: each declares `content_type` and `contains_text: false`; title, label, caption, legend, and other visible text must remain vector SVG. The helper rejects broad crops, crops over vector text, and crops outside the normalized 1280x720 canvas.
 - Uses normalized 1280x720 `[x, y, width, height]` source boxes.
 - Is consumed by `scripts/embed_img_crops.py`, which writes Base64 PNG data directly into the final SVG without creating temporary PNG assets.
 - An empty crop list requires a specific reason and a `faithful_vector_trace` or `no_icons_visible` strategy.

@@ -141,6 +141,21 @@ PAGE_ROLE_LABELS = {
 }
 
 IMG_SVG_REVIEW_MIN_SIMILARITY = 0.86
+# Raster crops are an escape hatch for fidelity-sensitive artwork, not a way
+# to flatten page content. Keep each crop tight enough that text remains a
+# vector element and reject manifests that try to use broad screenshot bands.
+IMG_SVG_MAX_CROP_AREA_RATIO = 0.12
+IMG_SVG_MAX_CROP_WIDTH = 520.0
+IMG_SVG_MAX_CROP_HEIGHT = 420.0
+IMG_SVG_CROP_CONTENT_TYPES = {
+    "icon",
+    "logo",
+    "illustration",
+    "photo",
+    "texture",
+    "complex_graphic",
+    "chart_artwork",
+}
 
 IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
 This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
@@ -167,14 +182,17 @@ Icon and illustration requirements:
 - Every visible icon, logo, badge, illustration, and decorative symbol must remain.
 - Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or other approximate icon.
 - Trace an icon as SVG paths only when the result is visually close to the source.
-- If an icon or decorative region cannot be reproduced accurately as vectors, preserve it with an exact source-image crop.
+- If an icon, illustration, or other complex graphic cannot be reproduced accurately as vectors, preserve only that tight source-image region with an exact crop.
+- A crop is an exception for incompatible artwork, never a screenshot of a card, panel, title band, chart area, or page region.
+- Never include visible Chinese/English text, numbers, labels, captions, legends, or text-bearing backgrounds in a crop. Keep those as SVG <text>/<tspan> and vector geometry. If artwork contains text, split the artwork from the text and crop only the non-text pixels.
+- Before declaring a crop, check its bounds against every nearby text baseline and shrink it until there is clear separation. Use the smallest faithful box (normally an isolated icon or artwork, with a few pixels of edge margin).
 - For every crop, place a matching <image data-crop-id="..."> element and provide its exact source box in normalized 1280x720 coordinates in the crop manifest.
 
 Vectorization requirements:
 - Keep text as <text>/<tspan> when this preserves the original appearance.
 - Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
-- Complex visual regions may remain as small embedded Base64 PNG crops.
-- Do not use one full-page raster image or a small number of large raster patches that dominate the page.
+- Complex visual regions may remain as small embedded Base64 PNG crops only when they are explicitly marked as artwork and contain no text.
+- Do not use one full-page raster image, broad screenshot strips, or large raster patches that dominate the page.
 
 Compatibility requirements:
 - No external URLs or linked files, <foreignObject>, script, animation, external stylesheet, or external font.
@@ -1018,6 +1036,12 @@ def img_svg_crop_manifest_template(
         "svg_path": str(svg_path),
         "canvas": {"width": 1280, "height": 720},
         "icon_strategy": "REQUIRED: source_crops | mixed | faithful_vector_trace | no_icons_visible",
+        "crop_policy": {
+            "max_area_ratio": IMG_SVG_MAX_CROP_AREA_RATIO,
+            "max_width": IMG_SVG_MAX_CROP_WIDTH,
+            "max_height": IMG_SVG_MAX_CROP_HEIGHT,
+            "text_must_remain_vector": True,
+        },
         "crops": [],
         "no_crops_reason": "REQUIRED when crops is empty",
     }
@@ -1123,6 +1147,59 @@ def validate_img_svg_conversion_evidence(job: dict[str, Any]) -> dict[str, Any]:
     return evidence
 
 
+def _rects_intersect(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> bool:
+    fx, fy, fw, fh = first
+    sx, sy, sw, sh = second
+    return min(fx + fw, sx + sw) > max(fx, sx) and min(fy + fh, sy + sh) > max(fy, sy)
+
+
+def _approximate_svg_text_bounds(svg_path: Path) -> list[tuple[float, float, float, float]]:
+    """Approximate visible <text> bounds to catch crops that swallow vector text.
+
+    SVG text has no portable layout API. This conservative estimate is only a
+    safety net; the manifest's explicit contains_text=false declaration and
+    the model prompt remain the primary crop policy.
+    """
+    try:
+        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ElementTree.ParseError):
+        return []
+
+    bounds: list[tuple[float, float, float, float]] = []
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1].lower() != "text":
+            continue
+        if element.attrib.get("transform"):
+            # Transformed text is uncommon in generated slides; skip it rather
+            # than inventing a coordinate transform and risk false positives.
+            continue
+        try:
+            x = float((element.attrib.get("x") or "0").split()[0])
+            y = float((element.attrib.get("y") or "0").split()[0])
+            font_size = float(str(element.attrib.get("font-size") or "16").replace("px", ""))
+        except (TypeError, ValueError):
+            continue
+        font_size = max(6.0, min(font_size, 160.0))
+        lines: list[str] = []
+        if element.text and element.text.strip():
+            lines.append(element.text.strip())
+        for child in element:
+            if child.tag.rsplit("}", 1)[-1].lower() == "tspan":
+                lines.append("".join(child.itertext()).strip())
+        lines = [line for line in lines if line]
+        if not lines:
+            continue
+        max_chars = max(len(line) for line in lines)
+        # CJK glyphs are close to 1em; Latin text is narrower. The slightly
+        # generous estimate is intentional so a crop cannot touch a label.
+        width = max(12.0, max_chars * font_size * 0.95)
+        line_height = font_size * 1.25
+        top = y - font_size
+        height = max(line_height, len(lines) * line_height)
+        bounds.append((x, top, width, height))
+    return bounds
+
+
 def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any]) -> dict[str, Any]:
     path = Path(job["crop_manifest_path"])
     if not path.is_file():
@@ -1149,6 +1226,60 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
             raise ValueError(f"IMG-to-SVG crops require source_crops or mixed icon_strategy: {path}")
         if svg_stats.get("embedded_image_count", 0) < len(crops):
             raise ValueError(f"IMG-to-SVG SVG has fewer embedded images than declared crops: {path}")
+        text_bounds = _approximate_svg_text_bounds(Path(job["target_path"]))
+        total_area = 1280.0 * 720.0
+        for index, item in enumerate(crops):
+            if not isinstance(item, dict):
+                raise ValueError(f"IMG-to-SVG crop entry {index} must be an object: {path}")
+            crop_id = str(item.get("id") or "").strip()
+            if not crop_id:
+                raise ValueError(f"IMG-to-SVG crop entry {index} needs a stable id: {path}")
+            content_type = str(item.get("content_type") or "").strip().lower()
+            if content_type not in IMG_SVG_CROP_CONTENT_TYPES:
+                allowed = ", ".join(sorted(IMG_SVG_CROP_CONTENT_TYPES))
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} must declare content_type ({allowed}): {path}"
+                )
+            if item.get("contains_text") is not False:
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} must declare contains_text=false; keep all text as SVG: {path}"
+                )
+            raw_box = item.get("source_box")
+            if not isinstance(raw_box, list) or len(raw_box) != 4:
+                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must be [x, y, width, height]: {path}")
+            try:
+                x, y, width, height = (float(value) for value in raw_box)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must be numeric: {path}") from exc
+            if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
+                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must stay inside 1280x720: {path}")
+            if width > IMG_SVG_MAX_CROP_WIDTH or height > IMG_SVG_MAX_CROP_HEIGHT:
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} is too broad ({width:g}x{height:g}); crop only the incompatible artwork: {path}"
+                )
+            if width * height > total_area * IMG_SVG_MAX_CROP_AREA_RATIO:
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} covers more than {IMG_SVG_MAX_CROP_AREA_RATIO:.0%} of the slide: {path}"
+                )
+            crop_rect = (x, y, width, height)
+            if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_bounds):
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} overlaps vector text; shrink the crop and keep the text editable: {path}"
+                )
+            exclusion_boxes = item.get("text_exclusion_boxes") or []
+            if not isinstance(exclusion_boxes, list):
+                raise ValueError(f"IMG-to-SVG crop {crop_id} text_exclusion_boxes must be a list: {path}")
+            for exclusion in exclusion_boxes:
+                if not isinstance(exclusion, list) or len(exclusion) != 4:
+                    raise ValueError(f"IMG-to-SVG crop {crop_id} has invalid text_exclusion_boxes: {path}")
+                try:
+                    exclusion_rect = tuple(float(value) for value in exclusion)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"IMG-to-SVG crop {crop_id} text_exclusion_boxes must be numeric: {path}") from exc
+                if _rects_intersect(crop_rect, exclusion_rect):
+                    raise ValueError(
+                        f"IMG-to-SVG crop {crop_id} intersects a declared text exclusion box; keep text outside crops: {path}"
+                    )
     else:
         reason = str(manifest.get("no_crops_reason") or "").strip()
         if len(reason) < 20:

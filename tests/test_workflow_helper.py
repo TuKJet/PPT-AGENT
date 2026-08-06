@@ -703,6 +703,9 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             crops=[{
                 "id": "icon",
                 "source_box": [100, 100, 64, 64],
+                "content_type": "icon",
+                "contains_text": False,
+                "text_exclusion_boxes": [],
                 "preserve_aspect_ratio": "none",
             }],
         )
@@ -710,6 +713,59 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
 
         state = self.workflow.load_state(self.run_dir)
         self.assertEqual(state["status"], "img_svg_export_ready")
+
+    def test_img_svg_rejects_crop_that_overlaps_vector_text(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            "<text x='100' y='150' font-size='28'>可编辑标题</text>"
+            "<image x='80' y='100' width='200' height='100' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[{
+                "id": "wide-artwork",
+                "source_box": [80, 100, 200, 100],
+                "content_type": "illustration",
+                "contains_text": False,
+                "text_exclusion_boxes": [],
+            }],
+        )
+        with self.assertRaisesRegex(RuntimeError, "overlaps vector text"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_crop_without_text_safety_declaration(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            "<image x='100' y='100' width='64' height='64' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[{
+                "id": "icon",
+                "source_box": [100, 100, 64, 64],
+                "content_type": "icon",
+            }],
+        )
+        with self.assertRaisesRegex(RuntimeError, "contains_text=false"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
 
     def test_img_svg_rejects_a_full_slide_raster_wrapper(self) -> None:
         self.export_img()
