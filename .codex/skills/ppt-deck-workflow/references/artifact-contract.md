@@ -109,7 +109,9 @@ The helper validates these canonical field names before it writes `slide-plans-p
 `render-jobs/img-svg/slide-xx-crops.json`
 
 - Required deterministic icon/crop strategy manifest for every page, including pages that use no crops.
-- Crop entries are tight artwork exceptions only: each declares `content_type` and `contains_text: false`; title, label, caption, legend, and other visible text must remain vector SVG. The helper rejects broad crops, crops over vector text, and crops outside the normalized 1280x720 canvas.
+- Version 2 includes a complete visible-text inventory. Every visible word, number, label, caption, and legend records exact text plus a normalized source box and must appear in SVG `<text>/<tspan>`.
+- Crop entries are tight artwork exceptions only: each declares an allowed `content_type`, `contains_text: false`, and a matching SVG `<image data-crop-id="...">`. The helper rejects broad crops, aggregate raster overuse, adjacent/overlapping crop tiles, crops over inventoried or vector text, and crops outside the normalized 1280x720 canvas.
+- Crop safety limits are 8% per crop, 20% aggregate declared crop area, and 25% total embedded-raster area, plus stricter dimensions for icons, logos, badges, and decorative symbols.
 - Uses normalized 1280x720 `[x, y, width, height]` source boxes.
 - Is consumed by `scripts/embed_img_crops.py`, which writes Base64 PNG data directly into the final SVG without creating temporary PNG assets.
 - An empty crop list requires a specific reason and a `faithful_vector_trace` or `no_icons_visible` strategy.
@@ -120,7 +122,7 @@ The helper validates these canonical field names before it writes `slide-plans-p
 
 `render-jobs/img-svg/reviews/slide-xx-fidelity-review.json`
 
-- Stores source/SVG hashes, automatic pixel and edge similarity, reviewer identity, concrete review notes, and explicit confirmations that layout, icons, and original design were preserved.
+- Stores source/SVG hashes, automatic pixel and edge similarity, reviewer identity, concrete review notes, and explicit confirmations that layout, icons, editable visible text, and original design were preserved.
 - Any SVG change resets the review to `pending_visual_review`.
 
 `img-svg/*.svg`
@@ -146,7 +148,7 @@ The helper enforces:
 - no `html` or `svg` export with review enabled until the review subflow is marked complete
 - IMG export completes the requested IMG workflow and leaves IMG-to-SVG in an optional `available` state
 - no IMG-to-SVG opt-in until the original IMG PPTX has been exported
-- no native-SVG PPTX export until every model-generated SVG passes the one-to-one, XML, viewBox, embedded-raster safety, and vector-structure checks
+- no native-SVG PPTX export until every model-generated SVG passes the one-to-one, XML, viewBox, visible-text inventory, embedded-raster safety, crop-tiling, and vector-structure checks
 
 Use:
 

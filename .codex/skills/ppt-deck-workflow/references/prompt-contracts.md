@@ -362,13 +362,15 @@ Use this only after the IMG renderer has produced and exported the completed IMG
 For every version-2 `render-jobs/img-svg/slide-xx.json`:
 
 - Pass that job's actual `source_image_path` and exact `compiled_prompt` together in the same vision-model turn. The source IMG is the sole and mandatory visual source of truth. Do not recreate the page from `slide-plans.json`, a textual summary, memory, or a previous image inspection.
-- Treat the task as faithful visual tracing, not slide redesign, restyling, simplification, cleanup, or content rewriting. Visual resemblance and preservation of every visible element take priority over SVG simplicity.
+- Treat the task as faithful visual tracing, not slide redesign, restyling, simplification, cleanup, or content rewriting. Editable SVG text is the first hard requirement; visual resemblance and preservation of every visible element follow it and take priority over SVG simplicity.
 - Faithfully reconstruct the visible page as one complete, final 1280x720 SVG with `viewBox="0 0 1280 720"`.
 - Preserve exact wording, numbers, line breaks, hierarchy, sampled colors, relative geometry, spacing, shadows, strokes, diagrams, icons, decorations, and reading order as closely as the image allows.
 - Rebuild text, cards, dividers, arrows, simple diagrams, and other stable geometry using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
 - Preserve logos, icons, badges, small illustrations, and other incompatible or fidelity-sensitive regions by cropping them directly from the source IMG with Pillow and embedding them as Base64 PNG `<image>` elements.
 - Use a crop only for a tight, incompatible artwork region. Never crop a card, panel, title band, chart area, screenshot strip, or any region containing visible Chinese/English text, numbers, labels, captions, or legends. Keep all text as SVG `<text>/<tspan>` and split artwork away from nearby text before cropping.
-- Every crop must declare `content_type` (for example `icon`, `logo`, `illustration`, or `complex_graphic`) and `contains_text: false`. Keep each crop below 12% of the 1280×720 canvas and no wider than 520px or taller than 420px; use the smallest faithful box with a small edge margin.
+- Before declaring crops, create a complete `visible_text_inventory`. Record every visible word, number, label, caption, and legend verbatim with its normalized 1280x720 source box. Every inventory item must appear in SVG `<text>/<tspan>`; a high similarity score cannot excuse rasterized text.
+- Every crop must declare an allowed `content_type` (`icon`, `logo`, `badge`, `decorative_symbol`, `illustration`, `photo`, or `texture`) and `contains_text: false`. The helper enforces per-type dimensions, an 8% per-crop area ceiling, a 20% aggregate crop ceiling, and a 25% total embedded-raster ceiling; use the smallest faithful box with a small edge margin.
+- Never split a card, panel, title band, chart area, screenshot strip, or other text-bearing region into adjacent or overlapping crops. The helper rejects aligned crop tiles and any crop that intersects the visible-text inventory.
 - Do not replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database mark, Lucide symbol, or approximate library icon. Trace it faithfully or use a source crop.
 - Do not place the complete source slide inside one full-page `<image>` element. The final exporter must not rasterize the whole reconstructed page.
 - Do not create layered SVG variants such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`. Each IMG page maps directly to one final `img-svg/*.svg`.
@@ -387,6 +389,17 @@ Crop manifest shape:
   "source_image_path": "output/.../img/slide-01.png",
   "svg_path": "output/.../img-svg/slide-01.svg",
   "canvas": {"width": 1280, "height": 720},
+  "visible_text_inventory": {
+    "complete": true,
+    "items": [
+      {
+        "id": "title",
+        "text": "Exact visible title",
+        "source_box": [72, 38, 760, 58]
+      }
+    ],
+    "no_visible_text_reason": ""
+  },
   "crops": [
     {
       "id": "apple-logo",
@@ -411,12 +424,13 @@ This is NOT a slide redesign, restyling, simplification, or content-rewriting ta
 Use the attached slide image as the sole and mandatory visual source of truth. Inspect the attached image directly in this same model turn while producing the SVG. Do not reconstruct the slide from a textual summary, slide plan, design system, previous memory, or a description of the image.
 
 Priority order:
-1. Pixel-level visual resemblance to the attached image at 1280x720.
-2. Preservation of every visible element, including icons and decorations.
-3. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
-4. PowerPoint-compatible SVG rendering.
-5. Editability of text and simple geometry.
-6. SVG simplicity.
+1. Every visible word, number, label, caption, and legend remains editable SVG <text>/<tspan>.
+2. Pixel-level visual resemblance to the attached image at 1280x720.
+3. Preservation of every visible element, including icons and decorations.
+4. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
+5. PowerPoint-compatible SVG rendering.
+6. Editability of simple geometry.
+7. SVG simplicity.
 
 Canvas: width 1280, height 720, viewBox="0 0 1280 720".
 
@@ -424,11 +438,13 @@ Preserve all visible text verbatim. Preserve the original title position, font s
 
 Every visible icon, logo, badge, illustration, and decorative symbol must remain. Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or approximate icon. Trace an icon as SVG paths only when the result is visually close. Otherwise preserve it with an exact source-image crop and a matching <image data-crop-id="..."> element.
 
-Keep text as <text>/<tspan> when visually faithful. Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vectors. Complex regions may remain as small embedded Base64 PNG crops. Do not use one full-page raster image or raster patches that dominate the page.
+Keep every visible text item as <text>/<tspan>. Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vectors. Complex non-text artwork may remain as small embedded Base64 PNG crops. Rasterized visible text is an automatic failure even when pixel similarity is high. Do not use one full-page raster image, broad screenshot patches, or adjacent crop tiles that reconstruct a card or panel.
+
+Before cropping, write a complete visible-text inventory with exact text and source boxes. Confirm every item appears verbatim in SVG text and no crop intersects its box.
 
 No external URLs/files, <foreignObject>, script, animation, external stylesheet, or external font. Do not simplify visible styling merely to make the SVG shorter.
 
-Before returning, compare the SVG against the attached image from left to right and top to bottom. Confirm every icon and decorative element is present and no card, title, label, arrow, footer, or line break has been redesigned.
+Before returning, compare the SVG against the attached image from left to right and top to bottom. Confirm every visible word and number is SVG text, every icon and decorative element is present, and no card, title, label, arrow, footer, or line break has been redesigned.
 
 Output exactly one final 1280x720 SVG and one crop manifest. Do not output alternative SVG versions or explanatory prose.
 ```
@@ -437,11 +453,13 @@ Before marking conversion complete:
 
 - Run `complete-img-svg` once to render every final SVG with Playwright and create the per-slide rendered PNG, automatic pixel/edge similarity metrics, and pending fidelity-review JSON.
 - Inspect each source IMG and rendered SVG PNG together in the same active turn. Review the entire page left-to-right and top-to-bottom, including icon presence, decoration, palette, typography, line breaks, geometry, spacing, and shadows.
-- Revise pages with visible drift. Mark `status: pass` only after confirming `source_image_inspected`, `rendered_svg_inspected`, `layout_preserved`, `icons_preserved`, and `no_redesign`.
+- Revise pages with visible drift or rasterized text. Mark `status: pass` only after confirming `source_image_inspected`, `rendered_svg_inspected`, `layout_preserved`, `icons_preserved`, `all_visible_text_editable`, and `no_redesign`.
 - A combined similarity below the recommended threshold requires revision or a concrete, page-specific override reason. A generic statement is not acceptable when visible redesign remains.
 - Confirm all embedded images are valid Base64 PNG/JPEG data URIs.
 - Confirm there are no external hrefs, `<foreignObject>`, or scripts.
 - Confirm no `<image>` covers the full 1280x720 slide and embedded raster regions do not dominate the page.
+- Confirm every visible-text inventory item exists in SVG `<text>/<tspan>` and no crop intersects its source box.
+- Confirm crops do not form adjacent or overlapping tiles and stay within per-crop, aggregate, and total raster limits.
 - Confirm the exact one-to-one page set and `viewBox="0 0 1280 720"`.
 - Confirm every page has completed same-turn conversion evidence and a crop manifest, including an explicit no-crop reason when applicable.
 - Rerun `complete-img-svg`; it must not mark the conversion complete while any evidence, manifest, or fidelity review remains incomplete.

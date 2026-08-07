@@ -41,7 +41,7 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
 20. For `img`, `export` creates the original IMG PPTX and completes the requested workflow. Show the IMG PPTX to the user; no decline response is required.
 21. Ask once whether the user wants the optional IMG-to-SVG derivative. Explain that SVG reconstruction preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, disclose the additional model calls/Token usage, and require no decline reply. Do not offer a “keep IMG” response option.
-22. After an explicit opt-in, run `choose-img-svg --mode on`. Pass each job's actual source image and exact compiled high-fidelity tracing prompt together in the same model turn. Complete the conversion-evidence and crop-strategy manifests, write one final SVG to the exact target, and use Pillow source crops only for tight incompatible artwork; visible text, labels, captions, legends, cards, and simple geometry stay vector. Every crop declares an artwork `content_type` and `contains_text: false`, and the helper rejects broad crops or crops overlapping vector text. Run `complete-img-svg` once to generate rendered comparisons and pending review files; inspect every source/render pair, revise drift, mark faithful pages passed, rerun `complete-img-svg`, then `export-img-svg`. Do not create intermediate SVG variants.
+22. After an explicit opt-in, run `choose-img-svg --mode on`. Pass each job's actual source image and exact compiled high-fidelity tracing prompt together in the same model turn. Complete the conversion-evidence and version-2 crop-strategy manifests, including a complete visible-text inventory, then write one final SVG to the exact target. Every visible word, number, label, caption, and legend stays in SVG `<text>/<tspan>`; cards and simple geometry stay vector. Use Pillow crops only for tight incompatible non-text artwork with a matching `data-crop-id`. The helper rejects missing SVG text, text-overlapping crops, broad or excessive raster use, and adjacent/overlapping crop tiles. Run `complete-img-svg` once to generate rendered comparisons and pending review files; inspect every source/render pair, revise drift, confirm `all_visible_text_editable`, mark faithful pages passed, rerun `complete-img-svg`, then `export-img-svg`. Do not create intermediate SVG variants.
 23. Report the IMG artifact as complete whether or not the optional derivative is requested.
 
 ## Renderer Guidance
@@ -96,11 +96,11 @@ When the answer is `on`, keep the conversion path faithful and auditable:
 
 1. Use the original image and compiled tracing prompt in the same model turn; never reconstruct from summaries or memory.
 2. Preserve wording, geometry, palette, spacing, decorations, and every icon without redesign.
-3. Reconstruct faithful text and stable geometry as vectors; identify incompatible or fidelity-sensitive regions.
+3. Inventory every visible text item with its source box, then reconstruct it and stable geometry as vectors; identify only non-text incompatible or fidelity-sensitive regions for cropping.
 4. Put `<image data-crop-id="...">` placeholders directly in the final SVG and use the bundled Pillow helper to embed those source crops.
-5. Record conversion evidence and one crop-strategy manifest for every page.
+5. Record conversion evidence and one version-2 crop-strategy manifest with a complete visible-text inventory for every page.
 6. Let the first `complete-img-svg` render source-comparison previews and create pending fidelity reviews.
-7. Inspect every pair, revise changed pages, pass the review only when the original design and icons are preserved, then rerun completion and export.
+7. Inspect every pair, revise changed pages, pass the review only when the original design and icons are preserved and `all_visible_text_editable` is true, then rerun completion and export.
 
 Do not generate temporary icon HTML, temporary icon PNG files, old-vector SVG layers, overlay SVG layers, or `v1`/`v2`/`clean` SVG directories.
 

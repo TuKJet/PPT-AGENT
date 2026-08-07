@@ -98,6 +98,10 @@ class PromptContractsAudienceTests(unittest.TestCase):
         self.assertIn("Never replace an original icon", text)
         self.assertIn("image_and_prompt_same_model_turn", text)
         self.assertIn("combined similarity", text)
+        self.assertIn("complete `visible_text_inventory`", text)
+        self.assertIn("Rasterized visible text is an automatic failure", text)
+        self.assertIn("adjacent or overlapping crops", text)
+        self.assertIn("`all_visible_text_editable`", text)
 
 
 if __name__ == "__main__":

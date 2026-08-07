@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -144,17 +145,27 @@ IMG_SVG_REVIEW_MIN_SIMILARITY = 0.86
 # Raster crops are an escape hatch for fidelity-sensitive artwork, not a way
 # to flatten page content. Keep each crop tight enough that text remains a
 # vector element and reject manifests that try to use broad screenshot bands.
-IMG_SVG_MAX_CROP_AREA_RATIO = 0.12
-IMG_SVG_MAX_CROP_WIDTH = 520.0
-IMG_SVG_MAX_CROP_HEIGHT = 420.0
+IMG_SVG_MAX_CROP_AREA_RATIO = 0.08
+IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO = 0.20
+IMG_SVG_MAX_EMBEDDED_RASTER_RATIO = 0.25
+IMG_SVG_CROP_TILE_GAP = 8.0
 IMG_SVG_CROP_CONTENT_TYPES = {
     "icon",
     "logo",
+    "badge",
+    "decorative_symbol",
     "illustration",
     "photo",
     "texture",
-    "complex_graphic",
-    "chart_artwork",
+}
+IMG_SVG_CROP_TYPE_LIMITS = {
+    "icon": (180.0, 180.0),
+    "logo": (240.0, 180.0),
+    "badge": (180.0, 180.0),
+    "decorative_symbol": (180.0, 180.0),
+    "illustration": (360.0, 260.0),
+    "photo": (520.0, 420.0),
+    "texture": (520.0, 420.0),
 }
 
 IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
@@ -163,12 +174,13 @@ This is NOT a slide redesign, restyling, simplification, or content-rewriting ta
 Use the attached slide image as the sole and mandatory visual source of truth. Inspect the attached image directly in this same model turn while producing the SVG. Do not reconstruct the slide from a textual summary, slide plan, design system, previous memory, or a description of the image.
 
 Priority order:
-1. Pixel-level visual resemblance to the attached image at 1280x720.
-2. Preservation of every visible element, including icons and decorations.
-3. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
-4. PowerPoint-compatible SVG rendering.
-5. Editability of text and simple geometry.
-6. SVG simplicity.
+1. Every visible word, number, label, caption, and legend remains editable SVG <text>/<tspan>.
+2. Pixel-level visual resemblance to the attached image at 1280x720.
+3. Preservation of every visible element, including icons and decorations.
+4. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
+5. PowerPoint-compatible SVG rendering.
+6. Editability of simple geometry.
+7. SVG simplicity.
 
 Canvas: width 1280, height 720, viewBox="0 0 1280 720".
 
@@ -193,6 +205,9 @@ Vectorization requirements:
 - Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
 - Complex visual regions may remain as small embedded Base64 PNG crops only when they are explicitly marked as artwork and contain no text.
 - Do not use one full-page raster image, broad screenshot strips, or large raster patches that dominate the page.
+- Rasterized visible text is an automatic failure even when the rendered SVG has a high pixel-similarity score.
+- Do not split a text-bearing card, panel, band, or chart into adjacent smaller crops to evade crop limits.
+- Build a complete visible-text inventory before cropping. Every inventory item must appear verbatim in SVG <text>/<tspan>, with its source-image box recorded so no crop can overlap it.
 
 Compatibility requirements:
 - No external URLs or linked files, <foreignObject>, script, animation, external stylesheet, or external font.
@@ -201,6 +216,7 @@ Compatibility requirements:
 Self-check before returning:
 - Compare the SVG against the attached image from left to right and top to bottom.
 - Confirm every visible icon and decorative element is present.
+- Confirm every visible word and number is represented by SVG text, not pixels inside an <image>.
 - Confirm no card, title, label, arrow, or footer has been moved, simplified, or redesigned.
 - Confirm the result looks like the same slide, not a newly designed slide.
 
@@ -1031,16 +1047,26 @@ def img_svg_crop_manifest_template(
     svg_path: Path,
 ) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "source_image_path": str(source_image_path),
         "svg_path": str(svg_path),
         "canvas": {"width": 1280, "height": 720},
         "icon_strategy": "REQUIRED: source_crops | mixed | faithful_vector_trace | no_icons_visible",
         "crop_policy": {
             "max_area_ratio": IMG_SVG_MAX_CROP_AREA_RATIO,
-            "max_width": IMG_SVG_MAX_CROP_WIDTH,
-            "max_height": IMG_SVG_MAX_CROP_HEIGHT,
+            "max_total_area_ratio": IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO,
+            "max_embedded_raster_ratio": IMG_SVG_MAX_EMBEDDED_RASTER_RATIO,
+            "type_limits": {
+                key: {"max_width": value[0], "max_height": value[1]}
+                for key, value in IMG_SVG_CROP_TYPE_LIMITS.items()
+            },
             "text_must_remain_vector": True,
+            "adjacent_crop_tiles_forbidden": True,
+        },
+        "visible_text_inventory": {
+            "complete": False,
+            "items": [],
+            "no_visible_text_reason": "REQUIRED only when the source image contains no visible text",
         },
         "crops": [],
         "no_crops_reason": "REQUIRED when crops is empty",
@@ -1112,6 +1138,7 @@ def write_img_svg_review_artifact(job: dict[str, Any]) -> dict[str, Any]:
         "rendered_svg_inspected": bool(previous.get("rendered_svg_inspected")) if unchanged else False,
         "layout_preserved": bool(previous.get("layout_preserved")) if unchanged else False,
         "icons_preserved": bool(previous.get("icons_preserved")) if unchanged else False,
+        "all_visible_text_editable": bool(previous.get("all_visible_text_editable")) if unchanged else False,
         "no_redesign": bool(previous.get("no_redesign")) if unchanged else False,
         "reviewer": str(previous.get("reviewer") or "") if unchanged else "",
         "notes": str(previous.get("notes") or "") if unchanged else "",
@@ -1151,6 +1178,55 @@ def _rects_intersect(first: tuple[float, float, float, float], second: tuple[flo
     fx, fy, fw, fh = first
     sx, sy, sw, sh = second
     return min(fx + fw, sx + sw) > max(fx, sx) and min(fy + fh, sy + sh) > max(fy, sy)
+
+
+def _normalize_img_svg_text(value: str) -> str:
+    return "".join(str(value).split())
+
+
+def _svg_visible_text_items(svg_path: Path) -> list[str]:
+    try:
+        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ElementTree.ParseError):
+        return []
+    fragments: list[str] = []
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1].lower() == "text":
+            normalized = _normalize_img_svg_text("".join(element.itertext()))
+            if normalized:
+                fragments.append(normalized)
+    return fragments
+
+
+def _svg_crop_ids(svg_path: Path) -> list[str]:
+    try:
+        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ElementTree.ParseError):
+        return []
+    return [
+        str(element.attrib.get("data-crop-id") or "").strip()
+        for element in root.iter()
+        if element.tag.rsplit("}", 1)[-1].lower() == "image"
+    ]
+
+
+def _rects_form_crop_tiles(
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> bool:
+    fx, fy, fw, fh = first
+    sx, sy, sw, sh = second
+    horizontal_gap = max(sx - (fx + fw), fx - (sx + sw), 0.0)
+    vertical_gap = max(sy - (fy + fh), fy - (sy + sh), 0.0)
+    vertical_overlap = max(0.0, min(fy + fh, sy + sh) - max(fy, sy))
+    horizontal_overlap = max(0.0, min(fx + fw, sx + sw) - max(fx, sx))
+    vertical_alignment = vertical_overlap / max(1.0, min(fh, sh))
+    horizontal_alignment = horizontal_overlap / max(1.0, min(fw, sw))
+    return (
+        horizontal_gap <= IMG_SVG_CROP_TILE_GAP and vertical_alignment >= 0.65
+    ) or (
+        vertical_gap <= IMG_SVG_CROP_TILE_GAP and horizontal_alignment >= 0.65
+    )
 
 
 def _approximate_svg_text_bounds(svg_path: Path) -> list[tuple[float, float, float, float]]:
@@ -1214,6 +1290,62 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
     canvas = manifest.get("canvas") or {}
     if canvas != {"width": 1280, "height": 720}:
         raise ValueError(f"IMG-to-SVG crop manifest canvas must be 1280x720: {path}")
+    if manifest.get("version") != 2:
+        raise ValueError(f"IMG-to-SVG crop manifest must use version 2 with a text inventory: {path}")
+
+    inventory = manifest.get("visible_text_inventory")
+    if not isinstance(inventory, dict) or inventory.get("complete") is not True:
+        raise ValueError(f"IMG-to-SVG crop manifest needs a complete visible_text_inventory: {path}")
+    inventory_items = inventory.get("items")
+    if not isinstance(inventory_items, list):
+        raise ValueError(f"IMG-to-SVG visible_text_inventory items must be a list: {path}")
+
+    text_boxes: list[tuple[float, float, float, float]] = []
+    text_counts: Counter[str] = Counter()
+    inventory_ids: set[str] = set()
+    for index, item in enumerate(inventory_items):
+        if not isinstance(item, dict):
+            raise ValueError(f"IMG-to-SVG text inventory entry {index} must be an object: {path}")
+        text_id = str(item.get("id") or "").strip()
+        if not text_id or text_id in inventory_ids:
+            raise ValueError(f"IMG-to-SVG text inventory entry {index} needs a unique id: {path}")
+        inventory_ids.add(text_id)
+        normalized_text = _normalize_img_svg_text(str(item.get("text") or ""))
+        if not normalized_text:
+            raise ValueError(f"IMG-to-SVG text inventory {text_id} needs exact visible text: {path}")
+        raw_box = item.get("source_box")
+        if not isinstance(raw_box, list) or len(raw_box) != 4:
+            raise ValueError(
+                f"IMG-to-SVG text inventory {text_id} source_box must be [x, y, width, height]: {path}"
+            )
+        try:
+            x, y, width, height = (float(value) for value in raw_box)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"IMG-to-SVG text inventory {text_id} source_box must be numeric: {path}") from exc
+        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
+            raise ValueError(f"IMG-to-SVG text inventory {text_id} must stay inside 1280x720: {path}")
+        text_boxes.append((x, y, width, height))
+        text_counts[normalized_text] += 1
+
+    if not inventory_items:
+        reason = str(inventory.get("no_visible_text_reason") or "").strip()
+        if len(reason) < 20:
+            raise ValueError(
+                f"IMG-to-SVG empty visible_text_inventory needs a specific no_visible_text_reason: {path}"
+            )
+
+    svg_text_items = _svg_visible_text_items(svg_path)
+    missing_text = [
+        text for text, count in text_counts.items()
+        if sum(fragment.count(text) for fragment in svg_text_items) < count
+    ]
+    if missing_text:
+        preview = ", ".join(missing_text[:5])
+        raise ValueError(
+            f"IMG-to-SVG visible text is missing from SVG <text>/<tspan> ({preview}); "
+            f"rasterized text is not editable: {path}"
+        )
+
     crops = manifest.get("crops")
     if not isinstance(crops, list):
         raise ValueError(f"IMG-to-SVG crop manifest crops must be a list: {path}")
@@ -1224,16 +1356,24 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
     if crops:
         if icon_strategy not in {"source_crops", "mixed"}:
             raise ValueError(f"IMG-to-SVG crops require source_crops or mixed icon_strategy: {path}")
-        if svg_stats.get("embedded_image_count", 0) < len(crops):
-            raise ValueError(f"IMG-to-SVG SVG has fewer embedded images than declared crops: {path}")
+        svg_crop_ids = _svg_crop_ids(svg_path)
+        declared_crop_ids = [str(item.get("id") or "").strip() for item in crops if isinstance(item, dict)]
+        if any(not crop_id for crop_id in svg_crop_ids) or Counter(svg_crop_ids) != Counter(declared_crop_ids):
+            raise ValueError(
+                f"IMG-to-SVG SVG <image data-crop-id> values must exactly match the crop manifest: {path}"
+            )
         text_bounds = _approximate_svg_text_bounds(Path(job["target_path"]))
         total_area = 1280.0 * 720.0
+        crop_rects: list[tuple[str, tuple[float, float, float, float]]] = []
+        crop_area = 0.0
+        seen_crop_ids: set[str] = set()
         for index, item in enumerate(crops):
             if not isinstance(item, dict):
                 raise ValueError(f"IMG-to-SVG crop entry {index} must be an object: {path}")
             crop_id = str(item.get("id") or "").strip()
-            if not crop_id:
-                raise ValueError(f"IMG-to-SVG crop entry {index} needs a stable id: {path}")
+            if not crop_id or crop_id in seen_crop_ids:
+                raise ValueError(f"IMG-to-SVG crop entry {index} needs a unique stable id: {path}")
+            seen_crop_ids.add(crop_id)
             content_type = str(item.get("content_type") or "").strip().lower()
             if content_type not in IMG_SVG_CROP_CONTENT_TYPES:
                 allowed = ", ".join(sorted(IMG_SVG_CROP_CONTENT_TYPES))
@@ -1253,15 +1393,25 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
                 raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must be numeric: {path}") from exc
             if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
                 raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must stay inside 1280x720: {path}")
-            if width > IMG_SVG_MAX_CROP_WIDTH or height > IMG_SVG_MAX_CROP_HEIGHT:
+            max_width, max_height = IMG_SVG_CROP_TYPE_LIMITS[content_type]
+            if width > max_width or height > max_height:
                 raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} is too broad ({width:g}x{height:g}); crop only the incompatible artwork: {path}"
+                    f"IMG-to-SVG crop {crop_id} is too broad for {content_type} "
+                    f"({width:g}x{height:g}, max {max_width:g}x{max_height:g}); "
+                    f"crop only the incompatible artwork: {path}"
                 )
             if width * height > total_area * IMG_SVG_MAX_CROP_AREA_RATIO:
                 raise ValueError(
                     f"IMG-to-SVG crop {crop_id} covers more than {IMG_SVG_MAX_CROP_AREA_RATIO:.0%} of the slide: {path}"
                 )
             crop_rect = (x, y, width, height)
+            crop_area += width * height
+            crop_rects.append((crop_id, crop_rect))
+            if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_boxes):
+                raise ValueError(
+                    f"IMG-to-SVG crop {crop_id} overlaps the visible-text inventory; "
+                    f"keep every word editable: {path}"
+                )
             if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_bounds):
                 raise ValueError(
                     f"IMG-to-SVG crop {crop_id} overlaps vector text; shrink the crop and keep the text editable: {path}"
@@ -1280,7 +1430,24 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
                     raise ValueError(
                         f"IMG-to-SVG crop {crop_id} intersects a declared text exclusion box; keep text outside crops: {path}"
                     )
+        if crop_area > total_area * IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO:
+            raise ValueError(
+                f"IMG-to-SVG crop manifest covers more than {IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO:.0%} "
+                f"of the slide in aggregate; reconstruct cards and text as vectors: {path}"
+            )
+        for first_index, (first_id, first_rect) in enumerate(crop_rects):
+            for second_id, second_rect in crop_rects[first_index + 1:]:
+                if _rects_form_crop_tiles(first_rect, second_rect):
+                    raise ValueError(
+                        f"IMG-to-SVG crops {first_id} and {second_id} form adjacent/overlapping tiles; "
+                        f"do not split a text-bearing region to evade crop limits: {path}"
+                    )
     else:
+        if svg_stats.get("embedded_image_count", 0):
+            raise ValueError(
+                f"IMG-to-SVG SVG contains embedded images but the crop manifest is empty; "
+                f"declare every <image data-crop-id> crop: {path}"
+            )
         reason = str(manifest.get("no_crops_reason") or "").strip()
         if len(reason) < 20:
             raise ValueError(f"IMG-to-SVG empty crop manifest needs a specific no_crops_reason: {path}")
@@ -1298,6 +1465,7 @@ def validate_img_svg_fidelity_review(job: dict[str, Any], review: dict[str, Any]
         "rendered_svg_inspected",
         "layout_preserved",
         "icons_preserved",
+        "all_visible_text_editable",
         "no_redesign",
     )
     missing = [key for key in required_true if review.get(key) is not True]
@@ -1545,9 +1713,10 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
         raise ValueError(f"SVG contains external image or stylesheet data: {path}")
     if vector_element_count == 0:
         raise ValueError(f"SVG must contain vector text or shape elements: {path}")
-    if raster_area > 1280 * 720 * 0.70:
+    if raster_area > 1280 * 720 * IMG_SVG_MAX_EMBEDDED_RASTER_RATIO:
         raise ValueError(
-            f"SVG embedded raster regions cover too much of the slide; reconstruct more as vectors: {path}"
+            f"SVG embedded raster regions cover more than {IMG_SVG_MAX_EMBEDDED_RASTER_RATIO:.0%} "
+            f"of the slide; reconstruct cards and text as vectors: {path}"
         )
     return {
         "vector_element_count": vector_element_count,

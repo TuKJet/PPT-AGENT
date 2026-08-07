@@ -493,7 +493,14 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         )
         return self.run_dir / self.workflow.renderer_pptx_name(self.run_dir, "img")
 
-    def prepare_img_svg_evidence(self, page: dict, *, crops: list[dict] | None = None) -> dict:
+    def prepare_img_svg_evidence(
+        self,
+        page: dict,
+        *,
+        crops: list[dict] | None = None,
+        visible_text_items: list[dict] | None = None,
+        inventory_complete: bool = True,
+    ) -> dict:
         job = json.loads(Path(page["job_path"]).read_text(encoding="utf-8"))
         evidence = json.loads(Path(page["conversion_evidence_path"]).read_text(encoding="utf-8"))
         evidence.update({
@@ -504,11 +511,16 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
 
         crop_items = list(crops or [])
         crop_manifest = {
-            "version": 1,
+            "version": 2,
             "source_image_path": page["source_image_path"],
             "svg_path": page["target_path"],
             "canvas": {"width": 1280, "height": 720},
             "icon_strategy": "source_crops" if crop_items else "no_icons_visible",
+            "visible_text_inventory": {
+                "complete": inventory_complete,
+                "items": list(visible_text_items or []),
+                "no_visible_text_reason": "The synthetic one-pixel source contains no visible text.",
+            },
             "crops": crop_items,
             "no_crops_reason": "The synthetic unit-test slide contains no visible icons or decorative artwork.",
         }
@@ -542,6 +554,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
                 "rendered_svg_inspected": True,
                 "layout_preserved": True,
                 "icons_preserved": True,
+                "all_visible_text_editable": True,
                 "no_redesign": True,
                 "reviewer": "unit-test-reviewer",
                 "notes": "Source and rendered preview match for the synthetic test slide.",
@@ -691,7 +704,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         Path(manifest["slides"][0]["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
             "<rect width='1280' height='720' fill='#ffffff'/>"
-            "<image x='100' y='100' width='64' height='64' "
+            "<image data-crop-id='icon' x='100' y='100' width='64' height='64' "
             "href='data:image/png;base64,"
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
             "</svg>",
@@ -725,7 +738,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
             "<rect width='1280' height='720' fill='#ffffff'/>"
             "<text x='100' y='150' font-size='28'>可编辑标题</text>"
-            "<image x='80' y='100' width='200' height='100' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "<image data-crop-id='wide-artwork' x='80' y='100' width='200' height='100' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
             "</svg>",
             encoding="utf-8",
         )
@@ -752,7 +765,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         Path(page["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
             "<rect width='1280' height='720' fill='#ffffff'/>"
-            "<image x='100' y='100' width='64' height='64' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
+            "<image data-crop-id='icon' x='100' y='100' width='64' height='64' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
             "</svg>",
             encoding="utf-8",
         )
@@ -765,6 +778,126 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             }],
         )
         with self.assertRaisesRegex(RuntimeError, "contains_text=false"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_incomplete_visible_text_inventory(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/><text x='80' y='120'>Opening</text></svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(page, inventory_complete=False)
+        with self.assertRaisesRegex(RuntimeError, "complete visible_text_inventory"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_visible_text_missing_from_svg_text_nodes(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/></svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            visible_text_items=[{
+                "id": "opening-title",
+                "text": "Opening",
+                "source_box": [80, 80, 180, 50],
+            }],
+        )
+        with self.assertRaisesRegex(RuntimeError, "rasterized text is not editable"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_adjacent_crop_tiles(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            f"<image data-crop-id='tile-a' x='100' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
+            f"<image data-crop-id='tile-b' x='200' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[
+                {"id": "tile-a", "source_box": [100, 100, 100, 100], "content_type": "icon", "contains_text": False},
+                {"id": "tile-b", "source_box": [200, 100, 100, 100], "content_type": "icon", "contains_text": False},
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "adjacent/overlapping tiles"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_excessive_aggregate_crop_area(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        boxes = [[0, 0, 250, 250], [500, 0, 250, 250], [1000, 0, 250, 250]]
+        images = "".join(
+            f"<image data-crop-id='art-{index}' x='{box[0]}' y='{box[1]}' width='250' height='250' href='data:image/png;base64,{png}'/>"
+            for index, box in enumerate(boxes, start=1)
+        )
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>" + images + "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[
+                {"id": f"art-{index}", "source_box": box, "content_type": "illustration", "contains_text": False}
+                for index, box in enumerate(boxes, start=1)
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "in aggregate"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_broad_content_type_escape_hatch(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            f"<image data-crop-id='panel' x='100' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_evidence(
+            page,
+            crops=[{
+                "id": "panel",
+                "source_box": [100, 100, 100, 100],
+                "content_type": "complex_graphic",
+                "contains_text": False,
+            }],
+        )
+        with self.assertRaisesRegex(RuntimeError, "must declare content_type"):
             self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
 
     def test_img_svg_rejects_a_full_slide_raster_wrapper(self) -> None:
