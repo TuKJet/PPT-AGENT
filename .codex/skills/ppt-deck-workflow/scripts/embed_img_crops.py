@@ -84,13 +84,19 @@ def embed_crops(manifest_path: Path, output_path: Path | None = None) -> Path:
             if element is None:
                 raise ValueError(f"SVG has no <image data-crop-id='{crop_id}'>")
             element.set("href", crop_data_uri(source, canvas_size, list(item["source_box"])))
+            target_box = list(item.get("target_box") or item["source_box"])
+            if len(target_box) != 4:
+                raise ValueError(f"crop target box must be [x, y, width, height]: {crop_id}")
+            for attribute, value in zip(("x", "y", "width", "height"), target_box):
+                element.set(attribute, str(value))
             element.set("preserveAspectRatio", str(item.get("preserve_aspect_ratio") or "none"))
-            element.attrib.pop("data-crop-id", None)
 
     unresolved = [
         element.attrib.get("data-crop-id")
         for element in root.iter()
-        if element.tag == SVG_IMAGE_TAG and element.attrib.get("data-crop-id")
+        if element.tag == SVG_IMAGE_TAG
+        and element.attrib.get("data-crop-id")
+        and not str(element.attrib.get("href") or "").startswith("data:image/png;base64,")
     ]
     if unresolved:
         raise ValueError(f"unresolved crop placeholders remain: {unresolved}")

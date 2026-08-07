@@ -76,7 +76,7 @@ class EmbedImgCropsTests(unittest.TestCase):
             )
             href = image.attrib["href"]
             self.assertTrue(href.startswith("data:image/png;base64,"))
-            self.assertNotIn("data-crop-id", image.attrib)
+            self.assertEqual(image.attrib.get("data-crop-id"), "logo")
             embedded = Image.open(io.BytesIO(base64.b64decode(href.split(",", 1)[1])))
             self.assertEqual(embedded.size, (40, 40))
             self.assertEqual(embedded.getpixel((10, 10))[:3], (255, 0, 0))

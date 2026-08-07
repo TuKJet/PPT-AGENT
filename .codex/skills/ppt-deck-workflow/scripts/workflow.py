@@ -167,6 +167,7 @@ IMG_SVG_CROP_TYPE_LIMITS = {
     "photo": (520.0, 420.0),
     "texture": (520.0, 420.0),
 }
+IMG_SVG_SOURCE_CROP_DEFAULT_TYPES = {"icon", "logo", "illustration", "photo", "texture"}
 
 IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
 This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
@@ -193,9 +194,10 @@ Strict faithfulness requirements:
 Icon and illustration requirements:
 - Every visible icon, logo, badge, illustration, and decorative symbol must remain.
 - Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or other approximate icon.
-- Trace an icon as SVG paths only when the result is visually close to the source.
-- If an icon, illustration, or other complex graphic cannot be reproduced accurately as vectors, preserve only that tight source-image region with an exact crop.
-- A crop is an exception for incompatible artwork, never a screenshot of a card, panel, title band, chart area, or page region.
+- Inventory every visible icon, logo, badge, illustration, and decorative symbol before choosing how to reproduce it.
+- Preserve icons, logos, illustrations, photos, and textures directly as tight source-image crops. Do not redraw or approximate them as vector artwork.
+- Use vectors for editable text, lines, boxes, dividers, arrows, and other simple geometry. A simple badge or decorative symbol may use faithful_vector_trace only after direct source-vs-render comparison establishes near-pixel fidelity.
+- A crop is the default for source-specific artwork, but it must stay tightly limited to that artwork and never become a screenshot of a card, panel, title band, chart area, or page region.
 - Never include visible Chinese/English text, numbers, labels, captions, legends, or text-bearing backgrounds in a crop. Keep those as SVG <text>/<tspan> and vector geometry. If artwork contains text, split the artwork from the text and crop only the non-text pixels.
 - Before declaring a crop, check its bounds against every nearby text baseline and shrink it until there is clear separation. Use the smallest faithful box (normally an isolated icon or artwork, with a few pixels of edge margin).
 - For every crop, place a matching <image data-crop-id="..."> element and provide its exact source box in normalized 1280x720 coordinates in the crop manifest.
@@ -203,11 +205,12 @@ Icon and illustration requirements:
 Vectorization requirements:
 - Keep text as <text>/<tspan> when this preserves the original appearance.
 - Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
-- Complex visual regions may remain as small embedded Base64 PNG crops only when they are explicitly marked as artwork and contain no text.
+- Source-specific artwork may remain as small embedded Base64 PNG crops when it is explicitly inventoried as artwork and contains no text.
 - Do not use one full-page raster image, broad screenshot strips, or large raster patches that dominate the page.
 - Rasterized visible text is an automatic failure even when the rendered SVG has a high pixel-similarity score.
 - Do not split a text-bearing card, panel, band, or chart into adjacent smaller crops to evade crop limits.
 - Build a complete visible-text inventory before cropping. Every inventory item must appear verbatim in SVG <text>/<tspan>, with its source-image box recorded so no crop can overlap it.
+- Build a complete visual-element inventory. Every visible artwork item must be classified as source_crop or faithful_vector_trace. An empty crop list is valid only when every visible artwork item has a reviewed faithful-vector entry, or the source truly contains no artwork.
 
 Compatibility requirements:
 - No external URLs or linked files, <foreignObject>, script, animation, external stylesheet, or external font.
@@ -1047,7 +1050,7 @@ def img_svg_crop_manifest_template(
     svg_path: Path,
 ) -> dict[str, Any]:
     return {
-        "version": 2,
+        "version": 3,
         "source_image_path": str(source_image_path),
         "svg_path": str(svg_path),
         "canvas": {"width": 1280, "height": 720},
@@ -1067,6 +1070,11 @@ def img_svg_crop_manifest_template(
             "complete": False,
             "items": [],
             "no_visible_text_reason": "REQUIRED only when the source image contains no visible text",
+        },
+        "visual_element_inventory": {
+            "complete": False,
+            "items": [],
+            "no_visible_artwork_reason": "REQUIRED only when the source image contains no visible icons, logos, illustrations, badges, or decorative symbols",
         },
         "crops": [],
         "no_crops_reason": "REQUIRED when crops is empty",
@@ -1138,6 +1146,7 @@ def write_img_svg_review_artifact(job: dict[str, Any]) -> dict[str, Any]:
         "rendered_svg_inspected": bool(previous.get("rendered_svg_inspected")) if unchanged else False,
         "layout_preserved": bool(previous.get("layout_preserved")) if unchanged else False,
         "icons_preserved": bool(previous.get("icons_preserved")) if unchanged else False,
+        "source_specific_artwork_preserved": bool(previous.get("source_specific_artwork_preserved")) if unchanged else False,
         "all_visible_text_editable": bool(previous.get("all_visible_text_editable")) if unchanged else False,
         "no_redesign": bool(previous.get("no_redesign")) if unchanged else False,
         "reviewer": str(previous.get("reviewer") or "") if unchanged else "",
@@ -1269,6 +1278,11 @@ def _approximate_svg_text_bounds(svg_path: Path) -> list[tuple[float, float, flo
         # CJK glyphs are close to 1em; Latin text is narrower. The slightly
         # generous estimate is intentional so a crop cannot touch a label.
         width = max(12.0, max_chars * font_size * 0.95)
+        text_anchor = str(element.attrib.get("text-anchor") or "start").strip().lower()
+        if text_anchor == "middle":
+            x -= width / 2.0
+        elif text_anchor == "end":
+            x -= width
         line_height = font_size * 1.25
         top = y - font_size
         height = max(line_height, len(lines) * line_height)
@@ -1290,8 +1304,10 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
     canvas = manifest.get("canvas") or {}
     if canvas != {"width": 1280, "height": 720}:
         raise ValueError(f"IMG-to-SVG crop manifest canvas must be 1280x720: {path}")
-    if manifest.get("version") != 2:
-        raise ValueError(f"IMG-to-SVG crop manifest must use version 2 with a text inventory: {path}")
+    if manifest.get("version") != 3:
+        raise ValueError(
+            f"IMG-to-SVG crop manifest must use version 3 with text and visual inventories: {path}"
+        )
 
     inventory = manifest.get("visible_text_inventory")
     if not isinstance(inventory, dict) or inventory.get("complete") is not True:
@@ -1353,6 +1369,107 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
     allowed_strategies = {"source_crops", "mixed", "faithful_vector_trace", "no_icons_visible"}
     if icon_strategy not in allowed_strategies:
         raise ValueError(f"IMG-to-SVG crop manifest has invalid icon_strategy: {path}")
+
+    visual_inventory = manifest.get("visual_element_inventory")
+    if not isinstance(visual_inventory, dict) or visual_inventory.get("complete") is not True:
+        raise ValueError(f"IMG-to-SVG crop manifest needs a complete visual_element_inventory: {path}")
+    visual_items = visual_inventory.get("items")
+    if not isinstance(visual_items, list):
+        raise ValueError(f"IMG-to-SVG visual_element_inventory items must be a list: {path}")
+
+    visual_ids: set[str] = set()
+    source_crop_visuals: dict[str, dict[str, Any]] = {}
+    traced_visuals: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(visual_items):
+        if not isinstance(item, dict):
+            raise ValueError(f"IMG-to-SVG visual inventory entry {index} must be an object: {path}")
+        visual_id = str(item.get("id") or "").strip()
+        if not visual_id or visual_id in visual_ids:
+            raise ValueError(f"IMG-to-SVG visual inventory entry {index} needs a unique id: {path}")
+        visual_ids.add(visual_id)
+        content_type = str(item.get("content_type") or "").strip().lower()
+        if content_type not in IMG_SVG_CROP_CONTENT_TYPES:
+            allowed = ", ".join(sorted(IMG_SVG_CROP_CONTENT_TYPES))
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} must declare content_type ({allowed}): {path}"
+            )
+        raw_box = item.get("source_box")
+        if not isinstance(raw_box, list) or len(raw_box) != 4:
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} source_box must be [x, y, width, height]: {path}"
+            )
+        try:
+            x, y, width, height = (float(value) for value in raw_box)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} source_box must be numeric: {path}"
+            ) from exc
+        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
+            raise ValueError(f"IMG-to-SVG visual inventory {visual_id} must stay inside 1280x720: {path}")
+        strategy = str(item.get("strategy") or "").strip()
+        if strategy not in {"source_crop", "faithful_vector_trace"}:
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} needs source_crop or faithful_vector_trace strategy: {path}"
+            )
+        if content_type in IMG_SVG_SOURCE_CROP_DEFAULT_TYPES and strategy != "source_crop":
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} with content_type {content_type} "
+                f"must use source_crop; keep only text, lines, boxes, and simple geometry vector: {path}"
+            )
+        if item.get("fidelity_reviewed") is not True:
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} must confirm fidelity_reviewed=true: {path}"
+            )
+        notes = str(item.get("notes") or "").strip()
+        if len(notes) < 20:
+            raise ValueError(
+                f"IMG-to-SVG visual inventory {visual_id} needs concrete source-vs-render fidelity notes: {path}"
+            )
+        if strategy == "source_crop":
+            source_crop_visuals[visual_id] = item
+        else:
+            traced_visuals[visual_id] = item
+
+    if not visual_items:
+        reason = str(visual_inventory.get("no_visible_artwork_reason") or "").strip()
+        if len(reason) < 20:
+            raise ValueError(
+                f"IMG-to-SVG empty visual_element_inventory needs a specific no_visible_artwork_reason: {path}"
+            )
+        if icon_strategy != "no_icons_visible":
+            raise ValueError(
+                f"IMG-to-SVG empty visual_element_inventory requires no_icons_visible strategy: {path}"
+            )
+    elif source_crop_visuals and traced_visuals and icon_strategy != "mixed":
+        raise ValueError(f"IMG-to-SVG mixed visual strategies require mixed icon_strategy: {path}")
+    elif source_crop_visuals and not traced_visuals and icon_strategy != "source_crops":
+        raise ValueError(f"IMG-to-SVG source-crop visuals require source_crops icon_strategy: {path}")
+    elif traced_visuals and not source_crop_visuals and icon_strategy != "faithful_vector_trace":
+        raise ValueError(
+            f"IMG-to-SVG traced visuals require faithful_vector_trace icon_strategy: {path}"
+        )
+
+    declared_crops_by_id = {
+        str(item.get("id") or "").strip(): item
+        for item in crops
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    if set(declared_crops_by_id) != set(source_crop_visuals):
+        raise ValueError(
+            f"IMG-to-SVG source_crop visual inventory ids must exactly match crop ids: {path}"
+        )
+    for crop_id, visual_item in source_crop_visuals.items():
+        crop_item = declared_crops_by_id[crop_id]
+        if list(visual_item.get("source_box") or []) != list(crop_item.get("source_box") or []):
+            raise ValueError(
+                f"IMG-to-SVG visual inventory and crop source_box mismatch for {crop_id}: {path}"
+            )
+        if str(visual_item.get("content_type") or "").strip().lower() != str(
+            crop_item.get("content_type") or ""
+        ).strip().lower():
+            raise ValueError(
+                f"IMG-to-SVG visual inventory and crop content_type mismatch for {crop_id}: {path}"
+            )
     if crops:
         if icon_strategy not in {"source_crops", "mixed"}:
             raise ValueError(f"IMG-to-SVG crops require source_crops or mixed icon_strategy: {path}")
@@ -1465,6 +1582,7 @@ def validate_img_svg_fidelity_review(job: dict[str, Any], review: dict[str, Any]
         "rendered_svg_inspected",
         "layout_preserved",
         "icons_preserved",
+        "source_specific_artwork_preserved",
         "all_visible_text_editable",
         "no_redesign",
     )
@@ -1516,6 +1634,7 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
         "slide_count": len(images),
         "task_type": "faithful_visual_tracing_not_redesign",
         "priority_order": [
+            "editable_visible_text",
             "pixel_level_visual_resemblance",
             "preserve_every_visible_element_and_icon",
             "exact_copy_geometry_and_reading_order",
@@ -1528,8 +1647,9 @@ def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
             "The source image is the sole visual truth; this is tracing, not redesign."
         ),
         "output_rule": (
-            "Write one final 1280x720 hybrid SVG and one crop manifest per source image. Rebuild stable "
-            "geometry as vectors; preserve every icon exactly by faithful path tracing or source crop."
+            "Write one final 1280x720 hybrid SVG and one version-3 crop manifest per source image. "
+            "Inventory text and artwork; rebuild stable geometry as vectors and use exact tight source "
+            "crops by default for icons, logos, illustrations, photos, and textures."
         ),
         "compiled_prompt": IMG_SVG_COMPILED_PROMPT,
         "compiled_prompt_sha256": prompt_sha256,

@@ -109,12 +109,12 @@ The helper validates these canonical field names before it writes `slide-plans-p
 `render-jobs/img-svg/slide-xx-crops.json`
 
 - Required deterministic icon/crop strategy manifest for every page, including pages that use no crops.
-- Version 2 includes a complete visible-text inventory. Every visible word, number, label, caption, and legend records exact text plus a normalized source box and must appear in SVG `<text>/<tspan>`.
+- Version 3 includes both a complete visible-text inventory and a complete visual-element inventory. Every visible word, number, label, caption, and legend records exact text plus a normalized source box and must appear in SVG `<text>/<tspan>`. Every visible icon, logo, badge, illustration, and decorative symbol records its source box and strategy. Icons, logos, illustrations, photos, and textures require `source_crop`; only simple badges or decorative symbols may use a reviewed `faithful_vector_trace`.
 - Crop entries are tight artwork exceptions only: each declares an allowed `content_type`, `contains_text: false`, and a matching SVG `<image data-crop-id="...">`. The helper rejects broad crops, aggregate raster overuse, adjacent/overlapping crop tiles, crops over inventoried or vector text, and crops outside the normalized 1280x720 canvas.
 - Crop safety limits are 8% per crop, 20% aggregate declared crop area, and 25% total embedded-raster area, plus stricter dimensions for icons, logos, badges, and decorative symbols.
 - Uses normalized 1280x720 `[x, y, width, height]` source boxes.
 - Is consumed by `scripts/embed_img_crops.py`, which writes Base64 PNG data directly into the final SVG without creating temporary PNG assets.
-- An empty crop list requires a specific reason and a `faithful_vector_trace` or `no_icons_visible` strategy.
+- An empty crop list is valid only when all visible artwork has reviewed faithful-vector entries, or the source truly has no artwork and records a specific reason.
 
 `render-jobs/img-svg/reviews/slide-xx-rendered.png`
 
@@ -122,14 +122,14 @@ The helper validates these canonical field names before it writes `slide-plans-p
 
 `render-jobs/img-svg/reviews/slide-xx-fidelity-review.json`
 
-- Stores source/SVG hashes, automatic pixel and edge similarity, reviewer identity, concrete review notes, and explicit confirmations that layout, icons, editable visible text, and original design were preserved.
+- Stores source/SVG hashes, automatic pixel and edge similarity, reviewer identity, concrete review notes, and explicit confirmations that layout, source-specific artwork, editable visible text, and original design were preserved.
 - Any SVG change resets the review to `pending_visual_review`.
 
 `img-svg/*.svg`
 
 - One final model-reconstructed, PowerPoint-compatible 1280x720 SVG for every IMG page.
 - Keeps text and simple geometry vector.
-- May contain embedded Base64 PNG/JPEG `<image>` nodes for source-cropped incompatible regions.
+- May contain embedded Base64 PNG/JPEG `<image>` nodes for tightly source-cropped icons, logos, illustrations, photos, and textures.
 - Must not use a full-slide raster wrapper, external URL/file, `<foreignObject>`, or script.
 - Do not create sibling SVG variant directories such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`.
 

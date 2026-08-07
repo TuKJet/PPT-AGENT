@@ -102,6 +102,9 @@ class PromptContractsAudienceTests(unittest.TestCase):
         self.assertIn("Rasterized visible text is an automatic failure", text)
         self.assertIn("adjacent or overlapping crops", text)
         self.assertIn("`all_visible_text_editable`", text)
+        self.assertIn("visual-element inventory", text)
+        self.assertIn("Preserve icons, logos, illustrations", text)
+        self.assertIn("lines, boxes, dividers, arrows, and simple geometry vector", text)
 
 
 if __name__ == "__main__":
