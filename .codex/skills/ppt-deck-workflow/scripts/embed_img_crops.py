@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-from PIL import Image
+from PIL import Image, ImageFilter
 
 
 SVG_IMAGE_TAG = "{http://www.w3.org/2000/svg}image"
@@ -44,12 +44,127 @@ def scaled_crop_box(
     return left, top, right, bottom
 
 
+def _canvas_box_to_local_crop_box(
+    source_size: tuple[int, int],
+    canvas_size: tuple[int, int],
+    crop_source_box: list[float],
+    removal_box: list[float],
+) -> tuple[int, int, int, int]:
+    crop_left, crop_top, crop_right, crop_bottom = scaled_crop_box(
+        source_size, canvas_size, crop_source_box
+    )
+    left, top, right, bottom = scaled_crop_box(source_size, canvas_size, removal_box)
+    if left < crop_left or top < crop_top or right > crop_right or bottom > crop_bottom:
+        raise ValueError(
+            f"text removal box {removal_box} must stay inside crop box {crop_source_box}"
+        )
+    return left - crop_left, top - crop_top, right - crop_left, bottom - crop_top
+
+
+def _pixel_matches_text_mode(pixel: tuple[int, ...], mode: str) -> bool:
+    red, green, blue = pixel[:3]
+    spread = max(red, green, blue) - min(red, green, blue)
+    if mode == "light_neutral":
+        return min(red, green, blue) > 125 and spread < 34
+    if mode == "dark_neutral":
+        return max(red, green, blue) < 140 and spread < 40
+    if mode == "all":
+        return True
+    raise ValueError(
+        "text_removal_mode must be light_neutral, dark_neutral, or all"
+    )
+
+
+def remove_text_from_backplate(
+    crop: Image.Image,
+    local_boxes: list[tuple[int, int, int, int]],
+    *,
+    mode: str,
+    dilation: int,
+) -> Image.Image:
+    """Remove declared label pixels while retaining surrounding texture/artwork.
+
+    The mask is limited to tight user/model-declared text boxes. Neutral light or
+    dark modes preserve colored ornamentation inside those boxes; ``all`` is a
+    deliberate fallback for flat/gradient regions with no intersecting artwork.
+    Masked runs are filled by horizontal interpolation, which preserves the
+    common left-to-right gradients used by presentation plaques and badges.
+    """
+    result = crop.convert("RGBA")
+    mask = Image.new("L", result.size, 0)
+    mask_pixels = mask.load()
+    source_pixels = result.load()
+    width, height = result.size
+
+    for left, top, right, bottom in local_boxes:
+        for y in range(max(0, top), min(height, bottom)):
+            for x in range(max(0, left), min(width, right)):
+                if _pixel_matches_text_mode(source_pixels[x, y], mode):
+                    mask_pixels[x, y] = 255
+
+    if dilation:
+        size = dilation * 2 + 1
+        mask = mask.filter(ImageFilter.MaxFilter(size=size))
+        mask_pixels = mask.load()
+
+    output = result.copy()
+    output_pixels = output.load()
+    for y in range(height):
+        x = 0
+        while x < width:
+            if mask_pixels[x, y] == 0:
+                x += 1
+                continue
+            start = x
+            while x < width and mask_pixels[x, y] != 0:
+                x += 1
+            end = x - 1
+            left = start - 1
+            right = end + 1
+            while left >= 0 and mask_pixels[left, y] != 0:
+                left -= 1
+            while right < width and mask_pixels[right, y] != 0:
+                right += 1
+            if left >= 0 and right < width:
+                left_color = source_pixels[left, y]
+                right_color = source_pixels[right, y]
+                span = right - left
+                for position in range(start, end + 1):
+                    ratio = (position - left) / span
+                    output_pixels[position, y] = tuple(
+                        round(left_color[channel] * (1 - ratio) + right_color[channel] * ratio)
+                        for channel in range(4)
+                    )
+            elif left >= 0:
+                for position in range(start, end + 1):
+                    output_pixels[position, y] = source_pixels[left, y]
+            elif right < width:
+                for position in range(start, end + 1):
+                    output_pixels[position, y] = source_pixels[right, y]
+    return output
+
+
 def crop_data_uri(
     source: Image.Image,
     canvas_size: tuple[int, int],
-    box: list[float],
+    item: dict[str, Any],
 ) -> str:
-    crop = source.crop(scaled_crop_box(source.size, canvas_size, box))
+    source_box = list(item["source_box"])
+    crop = source.crop(scaled_crop_box(source.size, canvas_size, source_box))
+    if str(item.get("content_type") or "") == "complex_backplate":
+        removal_boxes = list(item.get("text_removal_boxes") or [])
+        local_boxes = [
+            _canvas_box_to_local_crop_box(
+                source.size, canvas_size, source_box, list(removal_box)
+            )
+            for removal_box in removal_boxes
+        ]
+        crop = remove_text_from_backplate(
+            crop,
+            local_boxes,
+            mode=str(item.get("text_removal_mode") or "light_neutral"),
+            dilation=int(item.get("text_removal_dilation", 2)),
+        )
     output = io.BytesIO()
     crop.save(output, format="PNG", optimize=True)
     return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
@@ -83,7 +198,7 @@ def embed_crops(manifest_path: Path, output_path: Path | None = None) -> Path:
             element = images_by_id.get(crop_id)
             if element is None:
                 raise ValueError(f"SVG has no <image data-crop-id='{crop_id}'>")
-            element.set("href", crop_data_uri(source, canvas_size, list(item["source_box"])))
+            element.set("href", crop_data_uri(source, canvas_size, item))
             target_box = list(item.get("target_box") or item["source_box"])
             if len(target_box) != 4:
                 raise ValueError(f"crop target box must be [x, y, width, height]: {crop_id}")

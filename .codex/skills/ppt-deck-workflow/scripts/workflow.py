@@ -142,9 +142,11 @@ PAGE_ROLE_LABELS = {
 }
 
 IMG_SVG_REVIEW_MIN_SIMILARITY = 0.86
-# Raster crops are an escape hatch for fidelity-sensitive artwork, not a way
-# to flatten page content. Keep each crop tight enough that text remains a
-# vector element and reject manifests that try to use broad screenshot bands.
+# Raster crops preserve fidelity-sensitive artwork. Text-free artwork stays a
+# tight source crop. A complex text-bearing ornament may use one local
+# ``complex_backplate`` crop after the helper removes its declared text pixels;
+# the replacement wording must still be present as SVG text above the image.
+# Broad screenshot bands and full-slide wrappers remain forbidden.
 IMG_SVG_MAX_CROP_AREA_RATIO = 0.08
 IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO = 0.20
 IMG_SVG_MAX_EMBEDDED_RASTER_RATIO = 0.25
@@ -157,6 +159,7 @@ IMG_SVG_CROP_CONTENT_TYPES = {
     "illustration",
     "photo",
     "texture",
+    "complex_backplate",
 }
 IMG_SVG_CROP_TYPE_LIMITS = {
     "icon": (180.0, 180.0),
@@ -166,8 +169,11 @@ IMG_SVG_CROP_TYPE_LIMITS = {
     "illustration": (360.0, 260.0),
     "photo": (520.0, 420.0),
     "texture": (520.0, 420.0),
+    "complex_backplate": (560.0, 360.0),
 }
-IMG_SVG_SOURCE_CROP_DEFAULT_TYPES = {"icon", "logo", "illustration", "photo", "texture"}
+IMG_SVG_SOURCE_CROP_DEFAULT_TYPES = {
+    "icon", "logo", "illustration", "photo", "texture", "complex_backplate"
+}
 
 IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
 This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
@@ -196,16 +202,18 @@ Icon and illustration requirements:
 - Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or other approximate icon.
 - Inventory every visible icon, logo, badge, illustration, and decorative symbol before choosing how to reproduce it.
 - Preserve icons, logos, illustrations, photos, and textures directly as tight source-image crops. Do not redraw or approximate them as vector artwork.
+- Use one text-scrubbed complex_backplate only when the source region is compact, depends on non-trivial raster detail or coupled visual effects, integrates editable wording with that detail, can be repaired locally after text removal, and would suffer material visual drift under approximate vector tracing. This is a fidelity-and-editability decision, not a style-specific object rule.
+- A complex_backplate may include its original text only in the source pixels. Declare tight text_removal_boxes and replacement_text_ids; the crop helper removes those text pixels before embedding, and the exact wording must be drawn afterward as SVG <text>/<tspan> above the <image>.
 - Use vectors for editable text, lines, boxes, dividers, arrows, and other simple geometry. A simple badge or decorative symbol may use faithful_vector_trace only after direct source-vs-render comparison establishes near-pixel fidelity.
-- A crop is the default for source-specific artwork, but it must stay tightly limited to that artwork and never become a screenshot of a card, panel, title band, chart area, or page region.
-- Never include visible Chinese/English text, numbers, labels, captions, legends, or text-bearing backgrounds in a crop. Keep those as SVG <text>/<tspan> and vector geometry. If artwork contains text, split the artwork from the text and crop only the non-text pixels.
+- A crop is the default for source-specific artwork. Ordinary source crops must stay tightly limited to isolated artwork and never become a screenshot of a card, panel, title band, chart area, or page region.
+- Do not rasterize visible Chinese/English text, numbers, labels, captions, or legends. For isolated artwork, split artwork away from nearby text. For a compact inseparable styled component, use complex_backplate with declared text removal and editable SVG text replacement instead of approximating away its design character.
 - Before declaring a crop, check its bounds against every nearby text baseline and shrink it until there is clear separation. Use the smallest faithful box (normally an isolated icon or artwork, with a few pixels of edge margin).
 - For every crop, place a matching <image data-crop-id="..."> element and provide its exact source box in normalized 1280x720 coordinates in the crop manifest.
 
 Vectorization requirements:
 - Keep text as <text>/<tspan> when this preserves the original appearance.
 - Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
-- Source-specific artwork may remain as small embedded Base64 PNG crops when it is explicitly inventoried as artwork and contains no text.
+- Source-specific artwork may remain as small embedded Base64 PNG crops when it is explicitly inventoried. A complex_backplate is valid only after its declared source text is removed and replaced by editable SVG text.
 - Do not use one full-page raster image, broad screenshot strips, or large raster patches that dominate the page.
 - Rasterized visible text is an automatic failure even when the rendered SVG has a high pixel-similarity score.
 - Do not split a text-bearing card, panel, band, or chart into adjacent smaller crops to evade crop limits.
@@ -1064,6 +1072,7 @@ def img_svg_crop_manifest_template(
                 for key, value in IMG_SVG_CROP_TYPE_LIMITS.items()
             },
             "text_must_remain_vector": True,
+            "text_scrubbed_complex_backplates_allowed": True,
             "adjacent_crop_tiles_forbidden": True,
         },
         "visible_text_inventory": {
@@ -1219,6 +1228,38 @@ def _svg_crop_ids(svg_path: Path) -> list[str]:
     ]
 
 
+def _svg_text_fragments_after_crop(svg_path: Path, crop_id: str) -> list[str]:
+    """Return SVG text that is painted after one raster backplate.
+
+    SVG document order controls z-order. A text-scrubbed backplate is useful
+    only when its replacement text is emitted later and therefore remains
+    visible/editable above the embedded image.
+    """
+    try:
+        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ElementTree.ParseError):
+        return []
+    elements = list(root.iter())
+    crop_index = next(
+        (
+            index
+            for index, element in enumerate(elements)
+            if element.tag.rsplit("}", 1)[-1].lower() == "image"
+            and str(element.attrib.get("data-crop-id") or "").strip() == crop_id
+        ),
+        None,
+    )
+    if crop_index is None:
+        return []
+    fragments: list[str] = []
+    for element in elements[crop_index + 1:]:
+        if element.tag.rsplit("}", 1)[-1].lower() == "text":
+            normalized = _normalize_img_svg_text("".join(element.itertext()))
+            if normalized:
+                fragments.append(normalized)
+    return fragments
+
+
 def _rects_form_crop_tiles(
     first: tuple[float, float, float, float],
     second: tuple[float, float, float, float],
@@ -1319,6 +1360,7 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
     text_boxes: list[tuple[float, float, float, float]] = []
     text_counts: Counter[str] = Counter()
     inventory_ids: set[str] = set()
+    inventory_by_id: dict[str, tuple[str, tuple[float, float, float, float]]] = {}
     for index, item in enumerate(inventory_items):
         if not isinstance(item, dict):
             raise ValueError(f"IMG-to-SVG text inventory entry {index} must be an object: {path}")
@@ -1340,7 +1382,9 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
             raise ValueError(f"IMG-to-SVG text inventory {text_id} source_box must be numeric: {path}") from exc
         if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
             raise ValueError(f"IMG-to-SVG text inventory {text_id} must stay inside 1280x720: {path}")
-        text_boxes.append((x, y, width, height))
+        text_rect = (x, y, width, height)
+        text_boxes.append(text_rect)
+        inventory_by_id[text_id] = (normalized_text, text_rect)
         text_counts[normalized_text] += 1
 
     if not inventory_items:
@@ -1524,15 +1568,106 @@ def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any
             crop_rect = (x, y, width, height)
             crop_area += width * height
             crop_rects.append((crop_id, crop_rect))
-            if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_boxes):
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} overlaps the visible-text inventory; "
-                    f"keep every word editable: {path}"
-                )
-            if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_bounds):
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} overlaps vector text; shrink the crop and keep the text editable: {path}"
-                )
+            overlapping_inventory_ids = {
+                text_id
+                for text_id, (_, text_rect) in inventory_by_id.items()
+                if _rects_intersect(crop_rect, text_rect)
+            }
+            is_complex_backplate = content_type == "complex_backplate"
+            if is_complex_backplate:
+                if item.get("source_contains_text") is not True:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} must declare source_contains_text=true: {path}"
+                    )
+                replacement_ids = item.get("replacement_text_ids")
+                if not isinstance(replacement_ids, list) or not replacement_ids:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} needs replacement_text_ids: {path}"
+                    )
+                replacement_id_set = {str(value).strip() for value in replacement_ids if str(value).strip()}
+                if len(replacement_id_set) != len(replacement_ids):
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} replacement_text_ids must be unique and non-empty: {path}"
+                    )
+                missing_inventory_ids = replacement_id_set - set(inventory_by_id)
+                if missing_inventory_ids:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} references unknown replacement text ids "
+                        f"{sorted(missing_inventory_ids)}: {path}"
+                    )
+                if replacement_id_set != overlapping_inventory_ids:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} replacement_text_ids must exactly match "
+                        f"the visible text inside the backplate ({sorted(overlapping_inventory_ids)}): {path}"
+                    )
+                removal_mode = str(item.get("text_removal_mode") or "").strip()
+                if removal_mode not in {"light_neutral", "dark_neutral", "all"}:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} text_removal_mode must be "
+                        f"light_neutral, dark_neutral, or all: {path}"
+                    )
+                dilation = item.get("text_removal_dilation", 2)
+                if not isinstance(dilation, int) or dilation < 0 or dilation > 4:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} text_removal_dilation must be an integer 0-4: {path}"
+                    )
+                removal_boxes = item.get("text_removal_boxes")
+                if not isinstance(removal_boxes, list) or not removal_boxes:
+                    raise ValueError(
+                        f"IMG-to-SVG complex_backplate {crop_id} needs tight text_removal_boxes: {path}"
+                    )
+                parsed_removal_boxes: list[tuple[float, float, float, float]] = []
+                for removal_box in removal_boxes:
+                    if not isinstance(removal_box, list) or len(removal_box) != 4:
+                        raise ValueError(
+                            f"IMG-to-SVG complex_backplate {crop_id} has invalid text_removal_boxes: {path}"
+                        )
+                    try:
+                        removal_rect = tuple(float(value) for value in removal_box)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"IMG-to-SVG complex_backplate {crop_id} text_removal_boxes must be numeric: {path}"
+                        ) from exc
+                    rx, ry, rw, rh = removal_rect
+                    if (
+                        rw <= 0 or rh <= 0 or rx < x or ry < y
+                        or rx + rw > x + width or ry + rh > y + height
+                    ):
+                        raise ValueError(
+                            f"IMG-to-SVG complex_backplate {crop_id} text_removal_boxes must stay inside the crop: {path}"
+                        )
+                    parsed_removal_boxes.append(removal_rect)
+                for replacement_id in replacement_id_set:
+                    replacement_text, replacement_rect = inventory_by_id[replacement_id]
+                    if not any(
+                        _rects_intersect(removal_rect, replacement_rect)
+                        for removal_rect in parsed_removal_boxes
+                    ):
+                        raise ValueError(
+                            f"IMG-to-SVG complex_backplate {crop_id} has no removal box for "
+                            f"replacement text {replacement_id}: {path}"
+                        )
+                    later_text = _svg_text_fragments_after_crop(svg_path, crop_id)
+                    if not any(replacement_text in fragment for fragment in later_text):
+                        raise ValueError(
+                            f"IMG-to-SVG complex_backplate {crop_id} replacement text {replacement_id} "
+                            f"must be emitted as SVG text after the <image>: {path}"
+                        )
+            else:
+                if item.get("source_contains_text") is True:
+                    raise ValueError(
+                        f"IMG-to-SVG crop {crop_id} may declare source text only as complex_backplate: {path}"
+                    )
+                if overlapping_inventory_ids:
+                    raise ValueError(
+                        f"IMG-to-SVG crop {crop_id} overlaps the visible-text inventory; "
+                        f"keep every word editable or use a text-scrubbed complex_backplate: {path}"
+                    )
+                if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_bounds):
+                    raise ValueError(
+                        f"IMG-to-SVG crop {crop_id} overlaps vector text; shrink the crop or use a "
+                        f"text-scrubbed complex_backplate: {path}"
+                    )
             exclusion_boxes = item.get("text_exclusion_boxes") or []
             if not isinstance(exclusion_boxes, list):
                 raise ValueError(f"IMG-to-SVG crop {crop_id} text_exclusion_boxes must be a list: {path}")

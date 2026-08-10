@@ -367,10 +367,12 @@ For every `render-jobs/img-svg/slide-xx.json`:
 - Preserve exact wording, numbers, line breaks, hierarchy, sampled colors, relative geometry, spacing, shadows, strokes, diagrams, icons, decorations, and reading order as closely as the image allows.
 - Rebuild text, cards, dividers, arrows, simple diagrams, and other stable geometry using SVG text, paths, groups, rects, circles, lines, polygons, gradients, and clip paths.
 - Preserve logos, icons, badges, small illustrations, and other incompatible or fidelity-sensitive regions by cropping them directly from the source IMG with Pillow and embedding them as Base64 PNG `<image>` elements.
-- Use source crops only for tight, inventoried artwork regions. Never crop a card, panel, title band, chart area, screenshot strip, or any region containing visible Chinese/English text, numbers, labels, captions, or legends. Keep all text as SVG `<text>/<tspan>` and split artwork away from nearby text before cropping.
+- Use ordinary source crops for tight, inventoried, text-free artwork regions. Use one `complex_backplate` only when the region is compact, its appearance depends on non-trivial raster detail or coupled visual effects, editable text is integrated with that detail, local text removal can preserve the surrounding design, and approximate vector reconstruction would cause material visual drift. This is a fidelity-and-editability decision, not a style-specific object rule.
+- A `complex_backplate` is a local source crop whose original text pixels are removed by `embed_img_crops.py` before Base64 embedding. Declare `source_contains_text: true`, tight `text_removal_boxes`, the exact `replacement_text_ids`, `text_removal_mode` (`light_neutral`, `dark_neutral`, or `all`), optional `text_removal_dilation` from 0 to 4, and `contains_text: false` for the cleaned result. Emit the replacement `<text>/<tspan>` after the `<image>` so it remains visible and editable.
+- Never use a backplate for a broad card, title band, chart area, screenshot strip, or page region. Split ordinary artwork away from nearby text; use a backplate only when the visual treatment and editable label are genuinely inseparable without visible quality loss.
 - Before declaring crops, create a complete `visible_text_inventory`. Record every visible word, number, label, caption, and legend verbatim with its normalized 1280x720 source box. Every inventory item must appear in SVG `<text>/<tspan>`; a high similarity score cannot excuse rasterized text.
 - Create a complete visual-element inventory for every visible icon, logo, badge, illustration, and decorative symbol. Icons, logos, illustrations, photos, and textures use `source_crop` by default and must not be redrawn as approximate vectors. Keep text, lines, boxes, dividers, arrows, and simple geometry vector. Only a simple badge or decorative symbol may use `faithful_vector_trace`, after direct source/render comparison confirms near-pixel fidelity.
-- Every crop must declare an allowed `content_type` (`icon`, `logo`, `badge`, `decorative_symbol`, `illustration`, `photo`, or `texture`) and `contains_text: false`. The helper enforces per-type dimensions, an 8% per-crop area ceiling, a 20% aggregate crop ceiling, and a 25% total embedded-raster ceiling; use the smallest faithful box with a small edge margin.
+- Every crop must declare an allowed `content_type` (`icon`, `logo`, `badge`, `decorative_symbol`, `illustration`, `photo`, `texture`, or `complex_backplate`) and `contains_text: false` for the final embedded pixels. The helper enforces per-type dimensions, an 8% per-crop area ceiling, a 20% aggregate crop ceiling, and a 25% total embedded-raster ceiling; use the smallest faithful box with a small edge margin.
 - Never split a card, panel, title band, chart area, screenshot strip, or other text-bearing region into adjacent or overlapping crops. The helper rejects aligned crop tiles and any crop that intersects the visible-text inventory.
 - Do not replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database mark, Lucide symbol, or approximate library icon. Use its exact tight source crop.
 - Do not place the complete source slide inside one full-page `<image>` element. The final exporter must not rasterize the whole reconstructed page.
@@ -398,6 +400,11 @@ Crop manifest shape:
         "id": "title",
         "text": "Exact visible title",
         "source_box": [72, 38, 760, 58]
+      },
+      {
+        "id": "integrated-label-text",
+        "text": "Exact editable label",
+        "source_box": [174, 191, 62, 28]
       }
     ],
     "no_visible_text_reason": ""
@@ -412,6 +419,14 @@ Crop manifest shape:
         "strategy": "source_crop",
         "fidelity_reviewed": true,
         "notes": "The exact tight source crop preserves the original artwork appearance."
+      },
+      {
+        "id": "integrated-label-backplate",
+        "source_box": [128, 154, 150, 132],
+        "content_type": "complex_backplate",
+        "strategy": "source_crop",
+        "fidelity_reviewed": true,
+        "notes": "Text-scrubbed backplate retains non-trivial source detail that would visibly drift under approximate tracing."
       }
     ],
     "no_visible_artwork_reason": ""
@@ -422,6 +437,19 @@ Crop manifest shape:
       "source_box": [552, 535, 64, 68],
       "content_type": "logo",
       "contains_text": false,
+      "text_exclusion_boxes": [],
+      "preserve_aspect_ratio": "none"
+    },
+    {
+      "id": "integrated-label-backplate",
+      "source_box": [128, 154, 150, 132],
+      "content_type": "complex_backplate",
+      "source_contains_text": true,
+      "contains_text": false,
+      "text_removal_boxes": [[174, 191, 62, 28]],
+      "replacement_text_ids": ["integrated-label-text"],
+      "text_removal_mode": "light_neutral",
+      "text_removal_dilation": 2,
       "text_exclusion_boxes": [],
       "preserve_aspect_ratio": "none"
     }
@@ -456,9 +484,11 @@ Every visible icon, logo, badge, illustration, and decorative symbol must remain
 
 Inventory every visible artwork item before choosing its reproduction strategy. Preserve icons, logos, illustrations, photos, and textures directly with exact tight source crops. Keep text, lines, boxes, dividers, arrows, and simple geometry vector. Do not prefer an approximate vector trace merely to produce a zero-image SVG.
 
+Use a local complex_backplate only when the source region is compact, visually non-trivial, inseparable from editable wording without material fidelity loss, and locally repairable after text removal. Declare the original text boxes for removal, scrub only those text pixels, and place the exact replacement SVG text after the image. Choose this hybrid construction from those general conditions, never from a particular visual style or object category.
+
 Keep every visible text item as <text>/<tspan>. Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vectors. Complex non-text artwork may remain as small embedded Base64 PNG crops. Rasterized visible text is an automatic failure even when pixel similarity is high. Do not use one full-page raster image, broad screenshot patches, or adjacent crop tiles that reconstruct a card or panel.
 
-Before cropping, write a complete visible-text inventory with exact text and source boxes. Confirm every item appears verbatim in SVG text and no crop intersects its box.
+Before cropping, write a complete visible-text inventory with exact text and source boxes. Confirm every item appears verbatim in SVG text. Ordinary crops must not intersect those boxes; a complex_backplate may intersect only the exact items listed in replacement_text_ids and covered by text_removal_boxes.
 
 No external URLs/files, <foreignObject>, script, animation, external stylesheet, or external font. Do not simplify visible styling merely to make the SVG shorter.
 
@@ -476,7 +506,7 @@ Before marking conversion complete:
 - Confirm all embedded images are valid Base64 PNG/JPEG data URIs.
 - Confirm there are no external hrefs, `<foreignObject>`, or scripts.
 - Confirm no `<image>` covers the full 1280x720 slide and embedded raster regions do not dominate the page.
-- Confirm every visible-text inventory item exists in SVG `<text>/<tspan>` and no crop intersects its source box.
+- Confirm every visible-text inventory item exists in SVG `<text>/<tspan>`. Ordinary crops do not intersect its source box; complex backplates intersect only declared replacement text, have clean scrubbed pixels, and place the replacement text later in SVG document order.
 - Confirm every visual-element inventory item has a reviewed strategy, every `source_crop` item matches one declared crop, and no source-specific artwork was replaced by a generic approximation.
 - Confirm crops do not form adjacent or overlapping tiles and stay within per-crop, aggregate, and total raster limits.
 - Confirm the exact one-to-one page set and `viewBox="0 0 1280 720"`.
