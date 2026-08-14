@@ -252,6 +252,8 @@ Guardrails:
 
 For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt. After all images are generated, package them into the original IMG PPTX; that export completes the requested IMG workflow while leaving IMG-to-SVG available as a later explicit opt-in.
 
+Compile only the approved final state. After a revision, never pass the user's edit request, rejected wording, or revision history to imagegen. A removed element must disappear from the prompt entirely; do not preserve it through instructions such as `remove X`, `do not show X`, or `without X`. Describe the resulting composition positively instead. If a marked-up screenshot contains crossed-out or rejected content, use it to understand the revision, but prefer the clean final-state plan or an unmarked reference for full-page regeneration.
+
 Before calling imagegen, separate slide-plan text into:
 
 - Visible slide copy: titles, headings, labels, table text, numbers, formulas, and sentences that should appear on the final slide.
@@ -275,6 +277,15 @@ Remove or rewrite implementation-specific layout details:
 - Do not pass placeholder or occupancy text as visible copy. Strip or rewrite markers such as `占位`, `待补充`, `待插入`, `TBD`, `TODO`, `XXX`, `Lorem ipsum`, `[文本]`, `[图片]`, `{placeholder}`, `<placeholder>`, repeated punctuation, fake sample labels, or notes that only mean "reserve this area".
 - When a placeholder represents reserved space, translate it into a visual instruction such as "leave a clean empty area for later image placement" or "show an unlabeled content panel", and explicitly say that no placeholder words or symbols should appear.
 - Do not ask imagegen to create editable text boxes, layers, or separately movable page objects.
+
+For a revised slide, perform one additional semantic-cleaning pass before writing the imagegen prompt:
+
+- Compile from the final-state fields, not from the user's revision message or a diff against the prior slide.
+- Include only visible copy from the cleaned `required_elements` allowlist.
+- Drop rejected literals completely. Do not convert revision history into negative prompt clauses such as `remove X`, `do not render X`, or `X must not appear`.
+- Replace a removal with the positive visual state that occupies the region: clean background, whitespace, a direct connector, a resized surviving module, or another approved final element.
+- Do not pass marked-up screenshots with crossed-out content as a full-page image reference when the final-state plan can drive regeneration. Use an unmarked reference when available; otherwise use the annotation only to infer layout before compiling the prompt.
+- Run a literal residue check against rejected strings before calling imagegen. If a rejected string still appears anywhere in the compiled prompt, rewrite the prompt before generation.
 
 The compiled prompt must ask for one finished 16:9 presentation page image. It should include:
 
@@ -465,6 +476,18 @@ If the user requests changes at a checkpoint:
 1. Edit the relevant JSON artifact directly when the requested change is clear.
 2. Regenerate the downstream artifact after approval.
 3. Do not approve an artifact until the user explicitly approves it.
+
+For every second or later revision, treat the user's message as an edit delta, never as artifact copy. Rewrite the affected slide plan into a clean final-state specification:
+
+- Keep only what the finished slide should contain and how it should be arranged.
+- Rebuild `required_elements` as an allowlist of final visible content.
+- Remove superseded literals from `material`, every `plan` field, the preview, render jobs, and renderer prompts. Do not retain rejected content inside negated phrases such as `delete X`, `do not include X`, or `must not show X`.
+- Translate removals into positive end-state geometry. For example, replace `delete the old card and do not show its label` with `use clean background space; connect the two remaining modules with one short line`.
+- Keep stable safety, brand, and factual constraints when they are independently useful; do not mix them with revision tombstones.
+- Before previewing or preparing render jobs, search the revised slide block for rejected literal strings and revision verbs. Rewrite any residue unless the user explicitly wants that exact wording visible.
+- Do not attach a marked-up reference containing rejected content to a full-page regeneration when the approved final-state plan is sufficient.
+
+Read the final-state revision rules in `references/prompt-contracts.md` before revising an existing slide plan or compiling a renderer prompt from a revised plan.
 
 Relevant files:
 
