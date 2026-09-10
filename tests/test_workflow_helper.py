@@ -12,6 +12,7 @@ from argparse import Namespace
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
+from xml.etree import ElementTree
 
 
 def load_workflow_module():
@@ -493,69 +494,44 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         )
         return self.run_dir / self.workflow.renderer_pptx_name(self.run_dir, "img")
 
-    def prepare_img_svg_evidence(
+    def prepare_img_svg_text_and_crops(
         self,
         page: dict,
         *,
         crops: list[dict] | None = None,
         visible_text_items: list[dict] | None = None,
-        inventory_complete: bool = True,
-        visual_items: list[dict] | None = None,
-        visual_inventory_complete: bool = True,
     ) -> dict:
-        job = json.loads(Path(page["job_path"]).read_text(encoding="utf-8"))
-        evidence = json.loads(Path(page["conversion_evidence_path"]).read_text(encoding="utf-8"))
-        evidence.update({
-            "model_or_agent": "unit-test-vision-agent",
-            "generated_at": "2026-01-01T00:00:00Z",
-        })
-        self.workflow.write_json(Path(page["conversion_evidence_path"]), evidence)
-
         crop_items = list(crops or [])
-        if visual_items is None:
-            resolved_visual_items = [
-                {
-                    "id": item["id"],
-                    "source_box": item["source_box"],
-                    "content_type": item.get("content_type", "icon"),
-                    "strategy": "source_crop",
-                    "fidelity_reviewed": True,
-                    "notes": "Direct comparison selected the exact source crop for this artwork.",
-                }
-                for item in crop_items
+        if visible_text_items is None:
+            svg_root = ElementTree.fromstring(Path(page["target_path"]).read_text(encoding="utf-8"))
+            visible_text_items = [
+                {"id": f"text-{index}", "text": "".join(node.itertext())}
+                for index, node in enumerate(
+                    (item for item in svg_root.iter() if item.tag.rsplit("}", 1)[-1] == "text"),
+                    start=1,
+                )
             ]
-        else:
-            resolved_visual_items = list(visual_items)
-        strategies = {item.get("strategy") for item in resolved_visual_items}
-        if strategies == {"source_crop"}:
-            icon_strategy = "source_crops"
-        elif strategies == {"faithful_vector_trace"}:
-            icon_strategy = "faithful_vector_trace"
-        elif strategies:
-            icon_strategy = "mixed"
-        else:
-            icon_strategy = "no_icons_visible"
         crop_manifest = {
             "version": 3,
             "source_image_path": page["source_image_path"],
             "svg_path": page["target_path"],
             "canvas": {"width": 1280, "height": 720},
-            "icon_strategy": icon_strategy,
-            "visible_text_inventory": {
-                "complete": inventory_complete,
-                "items": list(visible_text_items or []),
-                "no_visible_text_reason": "The synthetic one-pixel source contains no visible text.",
-            },
-            "visual_element_inventory": {
-                "complete": visual_inventory_complete,
-                "items": resolved_visual_items,
-                "no_visible_artwork_reason": "The synthetic one-pixel source contains no visible artwork.",
-            },
+            "visible_text": list(visible_text_items or []),
             "crops": crop_items,
-            "no_crops_reason": "The synthetic unit-test slide contains no visible icons or decorative artwork.",
         }
-        self.workflow.write_json(Path(page["crop_manifest_path"]), crop_manifest)
-        return job
+        if not crop_items:
+            crop_manifest["no_crops_reason"] = "No raster crop is needed for this synthetic slide."
+        crop_path = Path(page["crop_manifest_path"])
+        if crop_items:
+            self.workflow.write_json(crop_path, crop_manifest)
+        elif crop_path.exists():
+            crop_path.unlink()
+        page["visible_text"] = list(visible_text_items or [])
+        jobs_manifest_path = self.run_dir / "render-jobs" / "img-svg" / "manifest.json"
+        jobs_manifest = json.loads(jobs_manifest_path.read_text(encoding="utf-8"))
+        jobs_manifest["slides"][int(page["index"]) - 1] = page
+        self.workflow.write_json(jobs_manifest_path, jobs_manifest)
+        return page
 
     def fake_render_review(self, source_path: Path, svg_path: Path, preview_path: Path) -> dict:
         preview_path.parent.mkdir(parents=True, exist_ok=True)
@@ -564,7 +540,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "pixel_similarity": 1.0,
             "edge_similarity": 1.0,
             "combined_similarity": 1.0,
-            "recommended_minimum": self.workflow.IMG_SVG_REVIEW_MIN_SIMILARITY,
+            "recommended_minimum": 0.0,
         }
 
     def complete_img_svg_after_review(self, page: dict) -> None:
@@ -573,20 +549,13 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "render_img_svg_review",
             side_effect=self.fake_render_review,
         ):
-            with self.assertRaisesRegex(RuntimeError, "visual review is pending"):
-                self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
 
             review_path = Path(page["fidelity_review_path"])
             review = json.loads(review_path.read_text(encoding="utf-8"))
             review.update({
                 "status": "pass",
-                "source_image_inspected": True,
-                "rendered_svg_inspected": True,
-                "layout_preserved": True,
-                "icons_preserved": True,
-                "source_specific_artwork_preserved": True,
-                "all_visible_text_editable": True,
-                "no_redesign": True,
+                "text_checked": True,
                 "reviewer": "unit-test-reviewer",
                 "notes": "Source and rendered preview match for the synthetic test slide.",
             })
@@ -676,19 +645,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             Path(page["crop_manifest_path"]).name,
             "slide-01-crops.json",
         )
-        job = json.loads(Path(page["job_path"]).read_text(encoding="utf-8"))
-        self.assertEqual(
-            Path(job["crop_helper_path"]).name,
-            "embed_img_crops.py",
-        )
-        self.assertIn("faithful visual tracing", job["compiled_prompt"])
-        self.assertIn("NOT a slide redesign", job["compiled_prompt"])
-        self.assertEqual(
-            job["required_model_input"]["mode"],
-            "image_and_prompt_same_model_turn",
-        )
-        self.assertTrue(Path(page["conversion_evidence_path"]).exists())
-        self.assertTrue(Path(page["crop_manifest_path"]).exists())
+        self.assertFalse(Path(page["crop_manifest_path"]).exists())
 
         Path(page["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
@@ -696,7 +653,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "<text x='80' y='120'>Opening</text></svg>",
             encoding="utf-8",
         )
-        self.prepare_img_svg_evidence(page)
+        self.prepare_img_svg_text_and_crops(page)
         self.complete_img_svg_after_review(page)
 
         state = self.workflow.load_state(self.run_dir)
@@ -742,7 +699,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             encoding="utf-8",
         )
         page = manifest["slides"][0]
-        self.prepare_img_svg_evidence(
+        self.prepare_img_svg_text_and_crops(
             page,
             crops=[{
                 "id": "icon",
@@ -776,7 +733,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "</svg>",
             encoding="utf-8",
         )
-        self.prepare_img_svg_evidence(
+        self.prepare_img_svg_text_and_crops(
             page,
             visible_text_items=[{
                 "id": "tier-1-rank",
@@ -818,7 +775,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "</svg>",
             encoding="utf-8",
         )
-        self.prepare_img_svg_evidence(
+        self.prepare_img_svg_text_and_crops(
             page,
             visible_text_items=[{
                 "id": "tier-1-rank",
@@ -838,172 +795,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
                 "text_exclusion_boxes": [],
             }],
         )
-        with self.assertRaisesRegex(RuntimeError, "must be emitted as SVG text after"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_crop_that_overlaps_vector_text(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/>"
-            "<text x='100' y='150' font-size='28'>可编辑标题</text>"
-            "<image data-crop-id='wide-artwork' x='80' y='100' width='200' height='100' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
-            "</svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            crops=[{
-                "id": "wide-artwork",
-                "source_box": [80, 100, 200, 100],
-                "content_type": "illustration",
-                "contains_text": False,
-                "text_exclusion_boxes": [],
-            }],
-        )
-        with self.assertRaisesRegex(RuntimeError, "overlaps vector text"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_crop_without_text_safety_declaration(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/>"
-            "<image data-crop-id='icon' x='100' y='100' width='64' height='64' href='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='/>"
-            "</svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            crops=[{
-                "id": "icon",
-                "source_box": [100, 100, 64, 64],
-                "content_type": "icon",
-            }],
-        )
-        with self.assertRaisesRegex(RuntimeError, "contains_text=false"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_incomplete_visible_text_inventory(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/><text x='80' y='120'>Opening</text></svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(page, inventory_complete=False)
-        with self.assertRaisesRegex(RuntimeError, "complete visible_text_inventory"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_incomplete_visual_element_inventory(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/></svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(page, visual_inventory_complete=False)
-        with self.assertRaisesRegex(RuntimeError, "complete visual_element_inventory"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_unreviewed_vector_artwork(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/><path d='M100 100h40v40z'/></svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            visual_items=[{
-                "id": "simple-decorative-badge",
-                "source_box": [100, 100, 40, 40],
-                "content_type": "decorative_symbol",
-                "strategy": "faithful_vector_trace",
-                "fidelity_reviewed": False,
-                "notes": "The vector artwork has not yet been compared with the source image.",
-            }],
-        )
-        with self.assertRaisesRegex(RuntimeError, "fidelity_reviewed=true"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_requires_source_crop_for_icons(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/><path d='M100 100h40v40z'/></svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            visual_items=[{
-                "id": "source-specific-icon",
-                "source_box": [100, 100, 40, 40],
-                "content_type": "icon",
-                "strategy": "faithful_vector_trace",
-                "fidelity_reviewed": True,
-                "notes": "The icon was compared directly, but policy still requires its exact crop.",
-            }],
-        )
-        with self.assertRaisesRegex(RuntimeError, "must use source_crop"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_crop_missing_from_visual_inventory(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/>"
-            f"<image data-crop-id='icon' x='100' y='100' width='64' height='64' href='data:image/png;base64,{png}'/>"
-            "</svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            crops=[{
-                "id": "icon",
-                "source_box": [100, 100, 64, 64],
-                "content_type": "icon",
-                "contains_text": False,
-            }],
-            visual_items=[],
-        )
-        with self.assertRaisesRegex(RuntimeError, "source_crop visual inventory ids"):
+        with self.assertRaisesRegex(ValueError, "replacement text must appear after"):
             self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
 
     def test_img_svg_rejects_visible_text_missing_from_svg_text_nodes(self) -> None:
@@ -1018,7 +810,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
             "<rect width='1280' height='720' fill='#ffffff'/></svg>",
             encoding="utf-8",
         )
-        self.prepare_img_svg_evidence(
+        self.prepare_img_svg_text_and_crops(
             page,
             visible_text_items=[{
                 "id": "opening-title",
@@ -1026,10 +818,15 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
                 "source_box": [80, 80, 180, 50],
             }],
         )
-        with self.assertRaisesRegex(RuntimeError, "rasterized text is not editable"):
+        with self.assertRaisesRegex(ValueError, "visible text missing from SVG text nodes"):
             self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
 
-    def test_img_svg_rejects_adjacent_crop_tiles(self) -> None:
+    def _prepare_backplate_case(
+        self,
+        *,
+        text_removal_boxes: list[list[float]],
+        text_removal_mode: str = "light_neutral",
+    ) -> dict:
         self.export_img()
         self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
         manifest = json.loads(
@@ -1040,75 +837,97 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         Path(page["target_path"]).write_text(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
             "<rect width='1280' height='720' fill='#ffffff'/>"
-            f"<image data-crop-id='tile-a' x='100' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
-            f"<image data-crop-id='tile-b' x='200' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
-            "</svg>",
+            f"<image data-crop-id='rank-plaque' x='100' y='100' width='200' height='100' href='data:image/png;base64,{png}'/>"
+            "<text x='140' y='150' font-size='28'>第1名</text></svg>",
             encoding="utf-8",
         )
-        self.prepare_img_svg_evidence(
+        self.prepare_img_svg_text_and_crops(
             page,
-            crops=[
-                {"id": "tile-a", "source_box": [100, 100, 100, 100], "content_type": "icon", "contains_text": False},
-                {"id": "tile-b", "source_box": [200, 100, 100, 100], "content_type": "icon", "contains_text": False},
-            ],
-        )
-        with self.assertRaisesRegex(RuntimeError, "adjacent/overlapping tiles"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_excessive_aggregate_crop_area(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        boxes = [[0, 0, 250, 250], [500, 0, 250, 250], [1000, 0, 250, 250]]
-        images = "".join(
-            f"<image data-crop-id='art-{index}' x='{box[0]}' y='{box[1]}' width='250' height='250' href='data:image/png;base64,{png}'/>"
-            for index, box in enumerate(boxes, start=1)
-        )
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/>" + images + "</svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
-            crops=[
-                {"id": f"art-{index}", "source_box": box, "content_type": "illustration", "contains_text": False}
-                for index, box in enumerate(boxes, start=1)
-            ],
-        )
-        with self.assertRaisesRegex(RuntimeError, "in aggregate"):
-            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
-
-    def test_img_svg_rejects_broad_content_type_escape_hatch(self) -> None:
-        self.export_img()
-        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
-        manifest = json.loads(
-            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
-        )
-        page = manifest["slides"][0]
-        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        Path(page["target_path"]).write_text(
-            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
-            "<rect width='1280' height='720' fill='#ffffff'/>"
-            f"<image data-crop-id='panel' x='100' y='100' width='100' height='100' href='data:image/png;base64,{png}'/>"
-            "</svg>",
-            encoding="utf-8",
-        )
-        self.prepare_img_svg_evidence(
-            page,
+            visible_text_items=[{"id": "tier-1-rank", "text": "第1名", "source_box": [140, 125, 80, 35]}],
             crops=[{
-                "id": "panel",
-                "source_box": [100, 100, 100, 100],
-                "content_type": "complex_graphic",
+                "id": "rank-plaque",
+                "source_box": [100, 100, 200, 100],
+                "content_type": "complex_backplate",
+                "source_contains_text": True,
                 "contains_text": False,
+                "text_removal_boxes": text_removal_boxes,
+                "replacement_text_ids": ["tier-1-rank"],
+                "text_removal_mode": text_removal_mode,
+                "text_removal_dilation": 2,
             }],
         )
-        with self.assertRaisesRegex(RuntimeError, "must declare content_type"):
+        return page
+
+    def test_img_svg_rejects_backplate_removal_box_outside_crop(self) -> None:
+        self._prepare_backplate_case(text_removal_boxes=[[90, 120, 100, 45]])
+        with self.assertRaisesRegex(ValueError, "text_removal_box must stay inside"):
             self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_rejects_invalid_backplate_removal_parameter(self) -> None:
+        self._prepare_backplate_case(
+            text_removal_boxes=[[135, 120, 100, 45]],
+            text_removal_mode="unsupported",
+        )
+        with self.assertRaisesRegex(ValueError, "text_removal_mode is invalid"):
+            self.workflow.cmd_complete_img_svg(Namespace(run_dir=str(self.run_dir)))
+
+    def test_img_svg_accepts_a_no_crop_page_without_crop_manifest_requirements(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/><text x='80' y='120'>Opening</text></svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_text_and_crops(
+            page,
+            visible_text_items=[{"id": "opening", "text": "Opening"}],
+        )
+        self.complete_img_svg_after_review(page)
+        state = self.workflow.load_state(self.run_dir)
+        self.assertEqual(state["status"], "img_svg_export_ready")
+
+    def test_img_svg_accepts_faithful_vector_icon_without_source_crop(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/><path d='M100 100h40v40z' fill='#1358a8'/></svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_text_and_crops(page)
+        self.complete_img_svg_after_review(page)
+        self.assertEqual(self.workflow.load_state(self.run_dir)["status"], "img_svg_export_ready")
+
+    def test_img_svg_accepts_a_legal_large_photo_crop(self) -> None:
+        self.export_img()
+        self.workflow.cmd_choose_img_svg(Namespace(run_dir=str(self.run_dir), mode="on"))
+        manifest = json.loads(
+            (self.run_dir / "render-jobs" / "img-svg" / "manifest.json").read_text(encoding="utf-8")
+        )
+        page = manifest["slides"][0]
+        png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        Path(page["target_path"]).write_text(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'>"
+            "<rect width='1280' height='720' fill='#ffffff'/>"
+            f"<image data-crop-id='photo' x='100' y='100' width='500' height='300' href='data:image/png;base64,{png}'/>"
+            "</svg>",
+            encoding="utf-8",
+        )
+        self.prepare_img_svg_text_and_crops(
+            page,
+            crops=[{"id": "photo", "source_box": [100, 100, 500, 300], "content_type": "photo", "contains_text": False}],
+        )
+        self.complete_img_svg_after_review(page)
+        self.assertEqual(self.workflow.load_state(self.run_dir)["status"], "img_svg_export_ready")
 
     def test_img_svg_rejects_a_full_slide_raster_wrapper(self) -> None:
         self.export_img()

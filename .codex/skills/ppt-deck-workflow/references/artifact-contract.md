@@ -96,25 +96,16 @@ The helper validates these canonical field names before it writes `slide-plans-p
 
 - Page-local renderer job files for subagent execution.
 
-`render-jobs/img-svg/slide-xx.json`
+`render-jobs/img-svg/manifest.json`
 
-- Post-export IMG-to-SVG model job.
-- Carries the exact `source_image_path`, fully compiled high-fidelity tracing prompt and hash, same-turn model-input rule, final SVG `target_path`, conversion-evidence path, crop-manifest path, fidelity-review paths, and Pillow crop helper path.
+- Version 3 post-export IMG-to-SVG manifest. Its `slides` entries carry each source image, one `prompt_path`, final SVG target under `img-svg/`, optional crop manifest path, review path, and source/SVG/text/crop/environment/preview hashes.
+- There is no per-page job JSON, conversion-evidence file, or page-wide artwork inventory.
 
-`render-jobs/img-svg/slide-xx-conversion-evidence.json`
+`img-svg/slide-xx-crops.json`
 
-- Records the source-image hash, compiled-prompt hash, model/agent, timestamp, and confirmation that the image and prompt were used in the same vision-model turn.
-- Must be completed before the conversion can pass the fidelity gate.
-
-`render-jobs/img-svg/slide-xx-crops.json`
-
-- Required deterministic icon/crop strategy manifest for every page, including pages that use no crops.
-- Version 3 includes both a complete visible-text inventory and a complete visual-element inventory. Every visible word, number, label, caption, and legend records exact text plus a normalized source box and must appear in SVG `<text>/<tspan>`. Every visible icon, logo, badge, illustration, and decorative symbol records its source box and strategy. Icons, logos, illustrations, photos, and textures require `source_crop`; only simple badges or decorative symbols may use a reviewed `faithful_vector_trace`.
-- Crop entries are tight artwork exceptions only: each declares an allowed `content_type`, `contains_text: false`, and a matching SVG `<image data-crop-id="...">`. The helper rejects broad crops, aggregate raster overuse, adjacent/overlapping crop tiles, crops over inventoried or vector text, and crops outside the normalized 1280x720 canvas.
-- Crop safety limits are 8% per crop, 20% aggregate declared crop area, and 25% total embedded-raster area, plus stricter dimensions for icons, logos, badges, and decorative symbols.
-- Uses normalized 1280x720 `[x, y, width, height]` source boxes.
-- Is consumed by `scripts/embed_img_crops.py`, which writes Base64 PNG data directly into the final SVG without creating temporary PNG assets.
-- An empty crop list is valid only when all visible artwork has reviewed faithful-vector entries, or the source truly has no artwork and records a specific reason.
+- Optional deterministic crop manifest. Version 4 is written only when crops are used. The root `visible_text` list carries exact text plus normalized source boxes; only backplate entries carry replacement text ids and scrub boxes.
+- Uses normalized 1280x720 `[x, y, width, height]` source boxes and is consumed by `scripts/embed_img_crops.py`, which writes Base64 PNG data directly into the final SVG without temporary assets.
+- No crop manifest is required for a page that uses only SVG vectors.
 
 `render-jobs/img-svg/reviews/slide-xx-rendered.png`
 
@@ -148,7 +139,7 @@ The helper enforces:
 - no `html` or `svg` export with review enabled until the review subflow is marked complete
 - IMG export completes the requested IMG workflow and leaves IMG-to-SVG in an optional `available` state
 - no IMG-to-SVG opt-in until the original IMG PPTX has been exported
-- no native-SVG PPTX export until every model-generated SVG passes the one-to-one, XML, viewBox, visible-text inventory, embedded-raster safety, crop-tiling, and vector-structure checks
+- no native-SVG PPTX export until every model-generated SVG passes the one-to-one, XML, viewBox, visible-text, embedded-raster safety, and vector-structure checks, with a current passed review bound to its source/SVG hashes
 
 Use:
 

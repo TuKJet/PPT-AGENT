@@ -41,7 +41,7 @@ The common phase must stay renderer-neutral. Do not ask the user to choose `html
 19. If you need to clear stale derived outputs, run helper `clean-render`, then create or verify the renderer source files for that branch, then `export`.
 20. For `img`, `export` creates the original IMG PPTX and completes the requested workflow. Show the IMG PPTX to the user; no decline response is required.
 21. Ask once whether the user wants the optional IMG-to-SVG derivative. Explain that SVG reconstruction preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, disclose the additional model calls/Token usage, and require no decline reply. Do not offer a “keep IMG” response option.
-22. After an explicit opt-in, run `choose-img-svg --mode on`. Pass each job's actual source image and exact compiled high-fidelity tracing prompt together in the same model turn. Complete the conversion evidence and version-3 crop-strategy manifests, including both complete text and visual-element inventories, then write one final SVG to the exact target. Every visible word, number, label, caption, and legend stays in SVG `<text>/<tspan>`; cards, lines, boxes, and simple geometry stay vector. Icons, logos, illustrations, photos, and textures use exact tight Pillow source crops by default and must not be approximated as vectors. Only simple badges or decorative symbols may use a reviewed faithful vector trace. The helper rejects missing SVG text, invalid artwork strategies, text-overlapping crops, broad/excessive raster use, and adjacent crop tiles. Run `complete-img-svg` once to generate rendered comparisons and pending review files; inspect every source/render pair, revise drift, confirm `all_visible_text_editable` and `source_specific_artwork_preserved`, mark faithful pages passed, rerun, then `export-img-svg`. Do not create intermediate SVG variants.
+22. After an explicit opt-in, run `choose-img-svg --mode on`. Read `references/img-svg.md` and use `references/img-svg-prompt.md` as the sole model prompt. Pass each job's source image and compiled prompt together in the same model turn, then write one final SVG to the exact target. Keep visible text and stable geometry vector when faithful; choose a crop or vector trace per difficult artwork element. The lightweight `visible_text` list records repeated text occurrences. A version-4 crop manifest is optional and exists only when crops are used; no conversion-evidence file or artwork inventory is required. Run `complete-img-svg` to generate changed-page comparisons and `pending_visual_review` records; inspect each source/render pair, revise drift, mark passes with `text_checked: true`, rerun, then `export-img-svg`. Do not create intermediate SVG variants.
 23. Report the IMG artifact as complete whether or not the optional derivative is requested.
 
 ## Renderer Guidance
@@ -82,8 +82,8 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --ru
 # helper prints completed plus optional conversion availability and cost warning
 # run the next command only after the user explicitly asks to continue
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
-# attach each source_image_path and compiled_prompt in the same model turn
-# write one final SVG plus conversion evidence and a crop-strategy manifest per page
+# attach each source image and compiled prompt in the same model turn
+# write one final SVG; write a crop manifest only when crops are used
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
 # first run renders review PNGs and stops while visual review is pending
 # inspect each source/render pair, revise drift, mark fidelity reviews pass, then rerun complete-img-svg
@@ -92,15 +92,15 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-
 
 The legacy `--mode off` command remains accepted for compatibility, but it must not be presented as a required user response. The helper rejects IMG-to-SVG conversion before the IMG PPTX export.
 
-When the answer is `on`, keep the conversion path faithful and auditable:
+When the answer is `on`, keep the conversion path faithful and auditable. Read [`img-svg.md`](img-svg.md) and use [`img-svg-prompt.md`](img-svg-prompt.md) as the only model prompt source:
 
 1. Use the original image and compiled tracing prompt in the same model turn; never reconstruct from summaries or memory.
 2. Preserve wording, geometry, palette, spacing, decorations, and every icon without redesign.
-3. Inventory every visible text item and every visible artwork item with source boxes. Keep text and stable geometry vector. Use exact tight source crops by default for icons, logos, illustrations, photos, and textures; reserve reviewed vector tracing for simple badges or decorative symbols.
-4. Put `<image data-crop-id="...">` placeholders directly in the final SVG and use the bundled Pillow helper to embed those source crops.
-5. Record conversion evidence and one version-3 crop-strategy manifest with complete visible-text and visual-element inventories for every page.
-6. Let the first `complete-img-svg` render source-comparison previews and create pending fidelity reviews.
-7. Inspect every pair, revise changed pages, pass the review only when the original design and source-specific artwork are preserved and both `all_visible_text_editable` and `source_specific_artwork_preserved` are true, then rerun completion and export.
+3. Keep visible text and stable geometry vector when faithful. Choose vector reconstruction or a tight source crop for difficult artwork; do not force either strategy by element type.
+4. If crops are needed, put `<image data-crop-id="...">` placeholders in the final SVG and use the bundled Pillow helper to embed them. Associate only backplate scrub boxes with the relevant visible-text items.
+5. Keep the page manifest's lightweight repeated `visible_text` list. Do not create conversion-evidence files or page-wide artwork inventories; a crop manifest is optional and uses version 4.
+6. Let the first `complete-img-svg` render changed pages and create `pending_visual_review` records. Unchanged pages reuse previews and passed reviews unless `--force-render` is used.
+7. Inspect every changed source/render pair, revise drift, mark reviews `pass` with `text_checked: true`, then rerun completion and export. Export requires matching source/SVG hashes and page order.
 
 Do not generate temporary icon HTML, temporary icon PNG files, old-vector SVG layers, overlay SVG layers, or `v1`/`v2`/`clean` SVG directories.
 

@@ -4,6 +4,7 @@ import argparse
 import base64
 import io
 import json
+import math
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -26,7 +27,9 @@ def scaled_crop_box(
     if len(box) != 4:
         raise ValueError("crop box must be [x, y, width, height]")
     x, y, width, height = (float(value) for value in box)
-    if width <= 0 or height <= 0:
+    if not all(math.isfinite(value) for value in (x, y, width, height)):
+        raise ValueError("crop box values must be finite numbers")
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
         raise ValueError("crop width and height must be positive")
 
     source_width, source_height = source_size
@@ -42,6 +45,33 @@ def scaled_crop_box(
             f"crop box {box} maps outside source image {source_width}x{source_height}"
         )
     return left, top, right, bottom
+
+
+def _validated_box(
+    value: Any,
+    *,
+    name: str,
+    canvas_size: tuple[int, int],
+) -> list[float]:
+    """Validate a normalized [x, y, width, height] box before embedding."""
+    try:
+        values = list(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be [x, y, width, height]") from exc
+    if len(values) != 4:
+        raise ValueError(f"{name} must be [x, y, width, height]")
+    try:
+        x, y, width, height = (float(item) for item in values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} values must be finite numbers") from exc
+    if not all(math.isfinite(item) for item in (x, y, width, height)):
+        raise ValueError(f"{name} values must be finite numbers")
+    canvas_width, canvas_height = canvas_size
+    if x < 0 or y < 0 or width <= 0 or height <= 0:
+        raise ValueError(f"{name} must have non-negative origin and positive size")
+    if x + width > canvas_width or y + height > canvas_height:
+        raise ValueError(f"{name} must stay inside canvas {canvas_width}x{canvas_height}")
+    return [x, y, width, height]
 
 
 def _canvas_box_to_local_crop_box(
@@ -149,7 +179,9 @@ def crop_data_uri(
     canvas_size: tuple[int, int],
     item: dict[str, Any],
 ) -> str:
-    source_box = list(item["source_box"])
+    source_box = _validated_box(
+        item["source_box"], name="crop source_box", canvas_size=canvas_size
+    )
     crop = source.crop(scaled_crop_box(source.size, canvas_size, source_box))
     if str(item.get("content_type") or "") == "complex_backplate":
         removal_boxes = list(item.get("text_removal_boxes") or [])
@@ -170,23 +202,85 @@ def crop_data_uri(
     return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
 
 
+def _manifest_canvas_size(manifest: dict[str, Any]) -> tuple[int, int]:
+    canvas = manifest.get("canvas") or {"width": 1280, "height": 720}
+    try:
+        canvas_size = (int(canvas["width"]), int(canvas["height"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("crop manifest canvas must have numeric width and height") from exc
+    if canvas_size[0] <= 0 or canvas_size[1] <= 0:
+        raise ValueError("crop manifest canvas must have positive width and height")
+    return canvas_size
+
+
+def validate_crop_entries(
+    manifest: dict[str, Any], root: ElementTree.Element, *, embedded: bool = False
+) -> list[dict[str, Any]]:
+    """Validate crop declarations and their SVG placeholders without writing files."""
+    canvas_size = _manifest_canvas_size(manifest)
+    crops = list(manifest.get("crops") or [])
+
+    image_elements = [element for element in root.iter() if element.tag == SVG_IMAGE_TAG]
+    svg_ids = [str(element.attrib.get("data-crop-id") or "").strip() for element in image_elements]
+    if any(not crop_id for crop_id in svg_ids):
+        raise ValueError("every SVG <image> crop placeholder must have data-crop-id")
+    duplicate_svg_ids = sorted({crop_id for crop_id in svg_ids if svg_ids.count(crop_id) > 1})
+    if duplicate_svg_ids:
+        raise ValueError(f"SVG crop IDs must be unique: {duplicate_svg_ids}")
+    images_by_id = dict(zip(svg_ids, image_elements))
+
+    declared_ids: list[str] = []
+    for index, item in enumerate(crops):
+        if not isinstance(item, dict):
+            raise ValueError(f"crop declaration {index} must be an object")
+        crop_id = str(item.get("id") or "").strip()
+        if not crop_id:
+            raise ValueError(f"crop declaration {index} must have a non-empty id")
+        if crop_id in declared_ids:
+            raise ValueError(f"crop manifest IDs must be unique: {crop_id}")
+        declared_ids.append(crop_id)
+        _validated_box(
+            item.get("source_box"),
+            name=f"crop source_box ({crop_id})",
+            canvas_size=canvas_size,
+        )
+        target_box = _validated_box(
+            item["target_box"] if "target_box" in item else item.get("source_box"),
+            name=f"crop target_box ({crop_id})",
+            canvas_size=canvas_size,
+        )
+        if embedded and crop_id in images_by_id:
+            image = images_by_id[crop_id]
+            actual_box = _validated_box(
+                [image.get(key, "0") for key in ("x", "y", "width", "height")],
+                name=f"SVG image geometry ({crop_id})", canvas_size=canvas_size,
+            )
+            if not all(math.isclose(a, b, abs_tol=0.01) for a, b in zip(actual_box, target_box)):
+                raise ValueError(f"SVG image geometry does not match crop target_box: {crop_id}")
+
+    if set(declared_ids) != set(svg_ids):
+        missing = sorted(set(declared_ids) - set(svg_ids))
+        extra = sorted(set(svg_ids) - set(declared_ids))
+        raise ValueError(f"crop manifest and SVG crop IDs do not match (missing={missing}, extra={extra})")
+
+    return crops
+
+
 def embed_crops(manifest_path: Path, output_path: Path | None = None) -> Path:
     manifest = read_manifest(manifest_path)
     source_path = Path(manifest["source_image_path"])
     svg_path = Path(manifest["svg_path"])
     target_path = output_path or Path(manifest.get("output_path") or svg_path)
-    canvas = manifest.get("canvas") or {"width": 1280, "height": 720}
-    canvas_size = (int(canvas["width"]), int(canvas["height"]))
-    crops = list(manifest.get("crops") or [])
-
-    if not crops:
-        raise ValueError(f"crop manifest has no crops: {manifest_path}")
+    canvas_size = _manifest_canvas_size(manifest)
 
     ElementTree.register_namespace("", "http://www.w3.org/2000/svg")
     tree = ElementTree.parse(svg_path)
     root = tree.getroot()
+    crops = validate_crop_entries(manifest, root)
+    if not crops:
+        raise ValueError(f"crop manifest has no crops: {manifest_path}")
     images_by_id = {
-        element.attrib.get("data-crop-id"): element
+        str(element.attrib["data-crop-id"]).strip(): element
         for element in root.iter()
         if element.tag == SVG_IMAGE_TAG and element.attrib.get("data-crop-id")
     }
@@ -194,14 +288,16 @@ def embed_crops(manifest_path: Path, output_path: Path | None = None) -> Path:
     with Image.open(source_path) as source:
         source.load()
         for item in crops:
-            crop_id = str(item["id"])
+            crop_id = str(item["id"]).strip()
             element = images_by_id.get(crop_id)
             if element is None:
                 raise ValueError(f"SVG has no <image data-crop-id='{crop_id}'>")
             element.set("href", crop_data_uri(source, canvas_size, item))
-            target_box = list(item.get("target_box") or item["source_box"])
-            if len(target_box) != 4:
-                raise ValueError(f"crop target box must be [x, y, width, height]: {crop_id}")
+            target_box = _validated_box(
+                item["target_box"] if "target_box" in item else item["source_box"],
+                name=f"crop target_box ({crop_id})",
+                canvas_size=canvas_size,
+            )
             for attribute, value in zip(("x", "y", "width", "height"), target_box):
                 element.set(attribute, str(value))
             element.set("preserveAspectRatio", str(item.get("preserve_aspect_ratio") or "none"))

@@ -79,17 +79,11 @@ Treat audience understanding as an internal operating lens for the entire workfl
 
 Audience adaptation is not visual austerity. For management, executive, leadership, or board audiences, make the information more selective and decision-led, but do not automatically turn the deck into black-white-gray text, ban illustrations, suppress brand colors, or remove all visual decoration. Use brand-led color, diagrams, data visuals, editorial imagery, icons, and selective ornament when they clarify the message or improve confidence; remove noise and competing focal points instead.
 
-## Core Rule
+## Workflow Contract
 
-Run the deck as one Codex workflow:
+Run the deck as one staged Codex workflow. Keep the approved artifacts as the source of truth, stop at each user checkpoint, and generate only the next artifact after explicit chat approval. The required order is outline → contents → slide plans → renderer choice → render → export.
 
-1. Generate only the current checkpoint artifact.
-2. Stop at the review checkpoint and ask the user to approve or request changes.
-3. After explicit user approval, generate the next artifact.
-4. Let the user choose `html`, `svg`, or `img` only after outline, contents, and slide plans are each approved.
-5. Render through the chosen branch.
-6. For the `img` branch, exporting the original IMG PPTX completes the requested workflow. Ask one concise optional question about IMG-to-SVG, explain that it preserves vector structure so PowerPoint can convert much of the page into editable shapes, and disclose the additional model/Token usage. The user must not be required to reply merely to decline it.
-
+The original IMG PPTX completes the IMG workflow. Ask once after export whether the user wants the optional SVG derivative; mention additional model/Token usage and that no reply is needed to decline. See `references/img-svg.md` and `references/img-svg-prompt.md` for the derivative contract.
 ## Strict Stage Gate
 
 This workflow is sequential and approval-gated. Do not pre-generate, write, preview, research for, or otherwise prepare downstream artifacts before the current checkpoint is explicitly approved by the user in chat.
@@ -129,31 +123,9 @@ For long decks, generate artifacts incrementally inside Codex and write checkpoi
 
 ## Approval Transparency
 
-Never ask the user to approve an artifact blindly.
+At each outline, contents, and slide-plan checkpoint, provide the exact non-empty Markdown preview path and ask the user to review it. Continue only after explicit approval in chat. A file existing on disk or a helper status is not approval. Keep encoding checks for non-ASCII previews and do not hand off blank or garbled previews.
 
-Whenever the workflow reaches a user approval checkpoint, hand the generated Markdown preview document to the user for direct review. Do not read the preview file and summarize it for the user. The point of the preview Markdown is to give the user the review surface, not to have the agent substitute its own summary.
-
-Required behavior:
-
-- Name the exact Markdown file that was generated.
-- Provide a clickable path to the Markdown file when possible.
-- Tell the user to review that file and reply with approval or requested changes.
-- Do not summarize, paraphrase, excerpt, or pre-judge the Markdown contents unless the user explicitly asks for a summary.
-- Before handing the preview to the user, verify that the preview file is non-empty and visually legible in the intended language. If terminal encoding is ambiguous, inspect the file with a Unicode-safe read path before claiming it is ready.
-- If the preview is blank, garbled, or does not reflect the current artifact, fix the source artifact and regenerate the preview before handing it to the user.
-- Do not proceed past an approval checkpoint until the user has approved after receiving the file link.
-- Treat approval as chat-only: a file existing on disk, a helper status, or the agent's own judgment is not approval.
-- When handing off an approval checkpoint, end the turn after providing the preview path unless the user has already explicitly approved that artifact in the same message.
-- Do not describe a checkpoint as approved, reviewed, or complete based only on the artifact existing on disk.
-
-Encoding safety:
-
-- When manually editing Chinese or other non-ASCII artifact files from the shell, prefer ASCII-safe escaped JSON content if the local shell or path handling has shown encoding instability.
-- If a Windows shell path cannot reliably address the intended run directory because of encoding issues, locate the run directory programmatically first, then update only the current checkpoint artifact.
-- If the intended new run directory cannot be created or initialized in the current permission mode, stop and request approval for directory creation; do not fall back to any existing folder, even if it is empty.
-
-Render-stage review Markdown files such as `reviews/review-*.md` and `editable/review-*.md` are internal QA artifacts, not user approval checkpoints. Do not ask the user to review them one by one, and do not dump per-slide review summaries unless the user asks. At completion, use `slide-status.json` for a concise aggregate status and call out only exceptions: failed checks, warning counts, residual layout issues, fallback behavior, or export caveats.
-
+Render-stage review files are internal QA artifacts, not user approval checkpoints. Report only aggregate status and material exceptions unless the user asks for per-slide detail.
 ## Style Control
 
 If the user provides reference images, screenshots, brand examples, or a written style direction, encode that direction during the slide-plan stage. The plan artifact is the control surface for colors, typography, density, layout rhythm, visual motifs, chart treatment, and page-level art direction.
@@ -178,34 +150,9 @@ Required behavior:
 - Do not wait until HTML/SVG files are generated and then write a rebuild, migration, or batch patch script just to change colors or visual style.
 - Use post-render edits only for small defects or implementation bugs, not for primary art direction.
 
-## Commands
+## Command Reference
 
-Run commands from the active PPT workspace. In repository-local mode this is the project root; in global mode it is the directory where the user wants the new `output/` folder.
-
-Use the correct uv launch prefix for the detected runtime mode. The examples below show repository-local mode; in global mode replace the prefix as described in `Local And Global Runtime Modes`.
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "..." --research "..."
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact outline
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact outline
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact contents
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/... --renderer img
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
-# Optional later opt-in only:
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
-```
-
-The default recommendation at renderer-choice time is `img`. Use `html` when the user prioritizes stable deterministic layout or an editable-PPTX attempt, and use `svg` when the user explicitly wants the direct SVG branch. For `html` or `svg`, run `choose-review` before export.
-
-The `img` branch is a Codex-side full-page image generation route. Use approved `slide-plans.json` as the source of truth, generate one image prompt per slide in chat, call Codex's `imagegen` tool for each full 16:9 slide image, save the resulting images under `output/.../img/`, then package those images into a PPTX with the helper.
-
+Run commands from the active PPT workspace with the repository-local or global prefix described above. The canonical sequence is shown once near the top of this file; use `workflow.py --help` for the complete command list. Keep all artifacts inside one `output/<project>/` directory.
 ## Long Deck Background Execution
 
 Use this for `contents` and `plans` when the deck has more than 10 pages, when the topic implies heavy research/detail, or when an earlier generation phase already took several minutes.
@@ -321,108 +268,12 @@ Text constraints:
 
 ## Optional IMG-to-SVG Post-Export Opt-In
 
-IMG-to-SVG is not a completion gate. The original IMG PPTX is the completed deliverable. SVG reconstruction calls a vision-capable model once per page and therefore consumes additional model usage/Token budget. Start it only after the user explicitly asks to continue.
+The original IMG PPTX is complete before SVG conversion. Ask once after export: “是否需要继续转 SVG？矢量部分可在 PowerPoint 中转换为可编辑形状；转换会额外调用模型并产生 Token/费用。需要时回复‘继续转 SVG’，不需要则无需回复。” Do not present a decline option. After opt-in, use [`references/img-svg.md`](references/img-svg.md) and the sole model prompt in [`references/img-svg-prompt.md`](references/img-svg-prompt.md).
 
-1. Generate every full-slide IMG page under `img/`.
-2. Run normal `export`. It creates `<topic>-img.pptx`, records the IMG workflow as `completed`, and prints `img_svg_conversion=available_on_explicit_request` plus the additional-usage warning.
-3. Give the user the exact IMG PPTX path, state that the requested workflow is complete, and ask one concise optional question about continuing to SVG. Explain that SVG conversion reconstructs text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, while consuming additional model/Token usage. Do not require a decline reply.
-4. Never present a second response option such as “保留 IMG 即可”, “不转换”, or `off`. Silence already means no extra work.
-5. Only after an explicit opt-in, run:
+The derivative writes one final SVG per source IMG, preserves visible text as SVG text, and exports native SVG media. The detailed crop, backplate, visual review, hash binding, and PowerPoint boundary rules live in the referenced contract.
+## Renderer Choice And Review
 
-For a Chinese conversation, prefer this concise handoff instead of a two-option question:
-
-```text
-原始 IMG PPTX 已完成：[文件路径]。本次工作流已结束，无需额外回复。
-是否需要继续转 SVG？转换会尽量保留文字和简单几何的矢量结构，之后可在 PowerPoint 中转换为可编辑形状；该步骤会按页重新调用模型并产生额外 Token/费用。需要时回复“继续转 SVG”，不需要则无需回复。
-```
-
-Do not repeat a long explanation about SVG object semantics unless the user asks for technical details.
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-img-svg --run-dir output/... --mode on
-```
-
-6. Read `render-jobs/img-svg/manifest.json`. Every page job contains a fully compiled `compiled_prompt`, its hash, the mandatory `source_image_path`, a conversion-evidence path, a crop-manifest path, and fidelity-review paths. Pass the actual source IMG and that exact `compiled_prompt` together in the same vision-model turn. The IMG is the sole visual source of truth; this is faithful tracing, not redesign. Do not generate from slide plans, a text summary, memory, or an earlier image inspection.
-7. Create exactly one final SVG per page at the exact `target_path` under `img-svg/`. Do not create layered variants or sibling directories such as `v1`, `v2`, `overlay`, `image-elements`, or `clean`.
-8. Preserve the original wording, line breaks, card geometry, spacing, palette, shadows, dividers, arrows, decorations, and reading order. Never optimize, simplify, normalize, or restyle the page. Rebuild text and stable geometry as SVG vectors only when doing so remains visually faithful.
-9. Keep every visible word, number, label, caption, and legend as SVG `<text>/<tspan>`. Before cropping, complete the page's `visible_text_inventory` with exact text plus normalized 1280x720 source boxes. Ordinary crops may not touch those boxes. A `complex_backplate` may overlap only the exact inventory items listed in its `replacement_text_ids`; its original text pixels must be removed before embedding, and the replacement SVG text must appear later in document order. Pixel similarity never overrides this editability gate.
-10. Preserve every visible logo, icon, illustration, decorative symbol, and visually distinctive composite detail. First complete the `visual_element_inventory`. Isolated non-text artwork normally uses tight source crops embedded as Base64 PNG `<image data-crop-id="...">` nodes. Keep text, lines, boxes, dividers, arrows, and simple geometry vector. Use one local `complex_backplate` only when all of these conditions hold: the region is compact; its appearance depends on non-trivial raster detail or interactions that are costly to trace faithfully; editable text is visually integrated with that detail; the original text can be removed locally without destroying the surrounding design; and vector approximation would cause material visual drift. Declare `source_contains_text: true`, tight `text_removal_boxes`, `replacement_text_ids`, a `text_removal_mode`, and `contains_text: false` for the cleaned result. The helper removes the declared source text pixels and the model overlays exact editable SVG text. Never use a backplate as a broad card, title band, chart area, screenshot strip, or full-slide wrapper. The helper still applies per-type dimensions, an 8% per-crop area ceiling, a 20% aggregate crop ceiling, a 25% embedded-raster ceiling, and rejects adjacent/overlapping crop tiles.
-11. Complete the generated `slide-xx-conversion-evidence.json` to record that the image and compiled prompt were used in the same model turn. Complete every version-3 `slide-xx-crops.json`, including both the complete visible-text inventory and complete visual-element inventory. An empty crop list is valid only when every visible artwork item has a reviewed `faithful_vector_trace` entry, or the source truly contains no artwork and records a specific reason.
-12. Use the bundled deterministic helper for declared source crops and text-scrubbed complex backplates. It maps 1280x720 coordinates to the original image dimensions, removes only the declared text pixels from backplates, and writes Base64 data directly into the final SVG without creating temporary PNG files:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --manifest output/.../render-jobs/img-svg/slide-01-crops.json
-```
-
-13. Run `complete-img-svg` once. It validates technical SVG compatibility, renders every SVG to `render-jobs/img-svg/reviews/slide-xx-rendered.png`, records pixel/edge similarity, and creates `slide-xx-fidelity-review.json`. The first run is expected to stop while visual review is pending.
-14. Use `view_image` on the source IMG and rendered PNG for every page in the same active turn. Compare them left-to-right and top-to-bottom. Confirm that every visible text item is an SVG text node and every inventoried artwork item is a faithful reviewed vector trace, an exact tight source crop, or a clean `complex_backplate` with its wording restored as vector text. Specifically inspect scrubbed areas for doubled text, smears, rectangular patches, lost ornament, or visible seams. Revise any changed composition, missing/approximated icon, simplified decoration, color drift, line-break change, or geometry mismatch. Only after the page is faithful and all visible text is editable, mark its fidelity review `status` as `pass`, confirm all required booleans including `all_visible_text_editable` and `source_specific_artwork_preserved`, identify the reviewer, and add concrete notes. A similarity score below the recommended minimum requires either revision or a specific override reason; do not use a generic override to accept visible redesign.
-15. Rerun `complete-img-svg`, then export:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-img-svg --run-dir output/...
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
-```
-
-The fidelity gate requires one exact SVG per IMG, valid XML, `viewBox="0 0 1280 720"`, vector page structure, safe embedded Base64 PNG/JPEG crops, no external URL/file, `<foreignObject>`, or script, same-turn image-input evidence, a completed crop manifest, rendered comparison evidence, and an explicit source-vs-render review pass. The final exporter embeds native `.svg` media plus its PowerPoint preview; it must not rasterize the SVG back into the deck.
-
-After the SVG PPTX is exported, give the user these concise Microsoft Office desktop steps:
-
-1. Open the `-img-svg.pptx` in desktop PowerPoint and select the SVG object on the slide.
-2. Right-click and choose **Convert to Shape**. The **Graphics Format** contextual tab is another entry point when available.
-3. Select individual converted pieces and edit fill, outline, position, or size from **Shape Format**.
-4. If the result remains grouped, use **Shape Format → Group → Ungroup**; repeat only when another group level remains. Re-group the edited pieces when needed.
-
-Clarify the boundary in one sentence: vector parts become editable Office shapes, but this does not guarantee semantic text boxes, native charts, or SmartArt; text may become vector shapes and embedded raster crops remain images. Do not overstate the result as a fully native, semantically editable slide.
-
-Use Playwright for final SVG rendering and visual QA, not for routine icon crop generation. When Microsoft PowerPoint is installed, open the final PPTX and export all slides to PNG for the final Office rendering check.
-
-Do not run `clean-render` between the original IMG PPTX export and a later opt-in conversion; the original IMG PPTX is an input artifact and must remain available beside the SVG derivative. If a fresh IMG render is required, restart that render intentionally; the new IMG export completes normally and leaves conversion available again.
-
-## Approval Checkpoints
-
-After `outline`, return the `outline-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks. Stop here until the user approves; do not research or generate `contents.json` yet.
-
-After `contents`, return the `contents-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks. Stop here until the user approves; do not generate `slide-plans.json` yet.
-
-After `plans`, return the `slide-plans-preview.md` path to the user and ask them to review the file directly. Do not read or summarize the file unless the user asks. Stop here until the user approves; do not choose a renderer or render yet.
-
-After slide plans are approved, ask:
-
-- `img` (recommended): full-page image generation through Codex imagegen; best for visually polished slides that should look like finished presentation images, including pages with Chinese copy, numbers, labels, and structured information.
-- `html`: stable deterministic layout, image PPTX, and an editable PPTX export attempt; offer it when those properties matter, but do not recommend it by default.
-- `svg`: lighter source files and faster visual drafts.
-- For `html` and `svg`, also ask whether to enable the render review subflow. Default recommendation: `off`.
-
-Present `img` first and identify it as the default recommendation. Do not recommend `html` merely because the user asked for a deliverable deck; reserve it for an explicit need for deterministic layout or an editable-PPTX attempt.
-
-When asking, explicitly mention that this branch uses Codex-authored renderer files and deterministic export, not a repository AI review/fix loop. Review is an explicit Codex-side subflow, not an automatic repo-side loop.
-
-Only run the final render after the user chooses `html`, `svg`, or `img`.
-
-IMG-to-SVG is separate from renderer choice. Never bundle it into this earlier question. After the original IMG PPTX has been generated, it is an optional one-sided opt-in, not a required yes/no completion prompt.
-
-For `html` and `svg`, confirm review preference before export:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode off
-```
-
-Or, when the user wants review enabled:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-review --run-dir output/... --mode on
-```
-
-Before every final render, clean render-only outputs from previous failed or interrupted runs so exported PPTX files cannot include stale slides:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-render --run-dir output/...
-```
-
-In this Codex-authored branch, `clean-render` is for derived outputs only. It must not be used as a way to wipe `html/`, `svg/`, or `img/` source pages. If you truly need to rebuild renderer source files from scratch, do that intentionally after confirming the branch state instead of assuming cleanup should delete them.
-
-Do not delete approved source artifacts such as `outline.json`, `contents.json`, `slide-plans.json`, previews, `workflow-state.json`, or renderer source pages that were already authored for the active branch.
-
+Ask for `html`, `svg`, or `img` only after the three approved checkpoints. Recommend `img` by default. For `html` or `svg`, ask whether render review is wanted and record `choose-review --mode off` or `on`; `off` is the default. IMG-to-SVG is asked only after the original IMG PPTX export.
 ## Multi-Renderer Compare Discipline
 
 When the user wants `html` and `img`, or any multi-renderer comparison:

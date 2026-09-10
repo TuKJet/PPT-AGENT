@@ -6,10 +6,13 @@ import binascii
 import hashlib
 import io
 import json
+import math
+import platform
+import re
+from importlib.metadata import version as package_version
 import os
 import shutil
 import sys
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +35,9 @@ WORKSPACE_ROOT = Path(
 if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
 
+if str(SKILL_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(SKILL_ROOT / "scripts"))
+from embed_img_crops import validate_crop_entries, _validated_box
 from filename_utils import safe_filename_part, slide_filename
 
 STATE_FILE = "workflow-state.json"
@@ -141,97 +147,7 @@ PAGE_ROLE_LABELS = {
     "ending": "结束页",
 }
 
-IMG_SVG_REVIEW_MIN_SIMILARITY = 0.86
-# Raster crops preserve fidelity-sensitive artwork. Text-free artwork stays a
-# tight source crop. A complex text-bearing ornament may use one local
-# ``complex_backplate`` crop after the helper removes its declared text pixels;
-# the replacement wording must still be present as SVG text above the image.
-# Broad screenshot bands and full-slide wrappers remain forbidden.
-IMG_SVG_MAX_CROP_AREA_RATIO = 0.08
-IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO = 0.20
-IMG_SVG_MAX_EMBEDDED_RASTER_RATIO = 0.25
-IMG_SVG_CROP_TILE_GAP = 8.0
-IMG_SVG_CROP_CONTENT_TYPES = {
-    "icon",
-    "logo",
-    "badge",
-    "decorative_symbol",
-    "illustration",
-    "photo",
-    "texture",
-    "complex_backplate",
-}
-IMG_SVG_CROP_TYPE_LIMITS = {
-    "icon": (180.0, 180.0),
-    "logo": (240.0, 180.0),
-    "badge": (180.0, 180.0),
-    "decorative_symbol": (180.0, 180.0),
-    "illustration": (360.0, 260.0),
-    "photo": (520.0, 420.0),
-    "texture": (520.0, 420.0),
-    "complex_backplate": (560.0, 360.0),
-}
-IMG_SVG_SOURCE_CROP_DEFAULT_TYPES = {
-    "icon", "logo", "illustration", "photo", "texture", "complex_backplate"
-}
-
-IMG_SVG_COMPILED_PROMPT = """Task type: faithful visual tracing of an existing presentation slide.
-This is NOT a slide redesign, restyling, simplification, or content-rewriting task.
-
-Use the attached slide image as the sole and mandatory visual source of truth. Inspect the attached image directly in this same model turn while producing the SVG. Do not reconstruct the slide from a textual summary, slide plan, design system, previous memory, or a description of the image.
-
-Priority order:
-1. Every visible word, number, label, caption, and legend remains editable SVG <text>/<tspan>.
-2. Pixel-level visual resemblance to the attached image at 1280x720.
-3. Preservation of every visible element, including icons and decorations.
-4. Exact wording, reading order, relative position, scale, alignment, spacing, and line breaks.
-5. PowerPoint-compatible SVG rendering.
-6. Editability of simple geometry.
-7. SVG simplicity.
-
-Canvas: width 1280, height 720, viewBox="0 0 1280 720".
-
-Strict faithfulness requirements:
-- Preserve all visible Chinese and English text verbatim. Do not rewrite, abbreviate, summarize, correct, or reorganize it.
-- Preserve title position, font scale, line breaks, alignment, card geometry, border radius, spacing, margins, arrows, dividers, footer, shadows, strokes, fills, badges, icon backgrounds, and decorative marks.
-- Sample colors from the attached image. Do not replace them with an approximate design-system palette unless visually indistinguishable.
-- Do not normalize spacing, improve the composition, introduce a new visual style, or remove decorative elements.
-
-Icon and illustration requirements:
-- Every visible icon, logo, badge, illustration, and decorative symbol must remain.
-- Never replace an original icon with a generic plus, checkmark, circle, arrow, user silhouette, database symbol, or other approximate icon.
-- Inventory every visible icon, logo, badge, illustration, and decorative symbol before choosing how to reproduce it.
-- Preserve icons, logos, illustrations, photos, and textures directly as tight source-image crops. Do not redraw or approximate them as vector artwork.
-- Use one text-scrubbed complex_backplate only when the source region is compact, depends on non-trivial raster detail or coupled visual effects, integrates editable wording with that detail, can be repaired locally after text removal, and would suffer material visual drift under approximate vector tracing. This is a fidelity-and-editability decision, not a style-specific object rule.
-- A complex_backplate may include its original text only in the source pixels. Declare tight text_removal_boxes and replacement_text_ids; the crop helper removes those text pixels before embedding, and the exact wording must be drawn afterward as SVG <text>/<tspan> above the <image>.
-- Use vectors for editable text, lines, boxes, dividers, arrows, and other simple geometry. A simple badge or decorative symbol may use faithful_vector_trace only after direct source-vs-render comparison establishes near-pixel fidelity.
-- A crop is the default for source-specific artwork. Ordinary source crops must stay tightly limited to isolated artwork and never become a screenshot of a card, panel, title band, chart area, or page region.
-- Do not rasterize visible Chinese/English text, numbers, labels, captions, or legends. For isolated artwork, split artwork away from nearby text. For a compact inseparable styled component, use complex_backplate with declared text removal and editable SVG text replacement instead of approximating away its design character.
-- Before declaring a crop, check its bounds against every nearby text baseline and shrink it until there is clear separation. Use the smallest faithful box (normally an isolated icon or artwork, with a few pixels of edge margin).
-- For every crop, place a matching <image data-crop-id="..."> element and provide its exact source box in normalized 1280x720 coordinates in the crop manifest.
-
-Vectorization requirements:
-- Keep text as <text>/<tspan> when this preserves the original appearance.
-- Rebuild cards, backgrounds, lines, dividers, arrows, and simple geometry as vector elements.
-- Source-specific artwork may remain as small embedded Base64 PNG crops when it is explicitly inventoried. A complex_backplate is valid only after its declared source text is removed and replaced by editable SVG text.
-- Do not use one full-page raster image, broad screenshot strips, or large raster patches that dominate the page.
-- Rasterized visible text is an automatic failure even when the rendered SVG has a high pixel-similarity score.
-- Do not split a text-bearing card, panel, band, or chart into adjacent smaller crops to evade crop limits.
-- Build a complete visible-text inventory before cropping. Every inventory item must appear verbatim in SVG <text>/<tspan>, with its source-image box recorded so no crop can overlap it.
-- Build a complete visual-element inventory. Every visible artwork item must be classified as source_crop or faithful_vector_trace. An empty crop list is valid only when every visible artwork item has a reviewed faithful-vector entry, or the source truly contains no artwork.
-
-Compatibility requirements:
-- No external URLs or linked files, <foreignObject>, script, animation, external stylesheet, or external font.
-- Avoid unsupported filters only when they cause PowerPoint rendering problems; do not simplify visible styling unnecessarily.
-
-Self-check before returning:
-- Compare the SVG against the attached image from left to right and top to bottom.
-- Confirm every visible icon and decorative element is present.
-- Confirm every visible word and number is represented by SVG text, not pixels inside an <image>.
-- Confirm no card, title, label, arrow, or footer has been moved, simplified, or redesigned.
-- Confirm the result looks like the same slide, not a newly designed slide.
-
-Output exactly one final 1280x720 SVG and one crop manifest. Do not output alternative SVG versions or explanatory prose."""
+IMG_SVG_PROMPT_PATH = SKILL_ROOT / "references" / "img-svg-prompt.md"
 
 
 def default_img_svg_conversion() -> dict[str, Any]:
@@ -355,29 +271,16 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
             "review": dict(merged.get("render_review") or default_renderer_state(active_renderer)["review"]),
         }
 
-    normalized_renderers: dict[str, Any] = {}
-    for renderer, entry in renderers.items():
-        normalized = default_renderer_state(renderer)
-        if isinstance(entry, dict):
-            normalized.update(entry)
-            normalized["artifacts"] = dict(normalized.get("artifacts") or {})
-            normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
-        if renderer == "img":
-            conversion = normalized.get("svg_conversion")
-            normalized["svg_conversion"] = {
-                **default_img_svg_conversion(),
-                **(dict(conversion) if isinstance(conversion, dict) else {}),
-            }
-            # Version 5 required a no-op user response before an IMG run could
-            # complete. Version 6 treats the exported IMG PPTX as the completed
-            # deliverable and leaves SVG conversion as a later opt-in action.
-            if normalized["svg_conversion"].get("status") == "pending_choice":
-                normalized["svg_conversion"]["status"] = "available"
-                normalized["svg_conversion"]["requires_explicit_opt_in"] = True
-                normalized["svg_conversion"]["additional_model_usage_required"] = True
-            if normalized.get("status") == "img_svg_choice_pending":
-                normalized["status"] = "completed"
-        normalized_renderers[renderer] = normalized
+    normalized_renderers = {renderer: _normalize_renderer_state(renderer, entry)
+                            for renderer, entry in renderers.items()}
+    # V5 required a decline reply after IMG export. Migrate that old state only.
+    for entry in normalized_renderers.values():
+        conversion = entry.get("svg_conversion", {})
+        if conversion.get("status") == "pending_choice":
+            conversion.update(status="available", requires_explicit_opt_in=True,
+                              additional_model_usage_required=True)
+        if entry.get("status") == "img_svg_choice_pending":
+            entry["status"] = "completed"
 
     merged["artifacts"] = artifacts
     merged["renderers"] = normalized_renderers
@@ -387,25 +290,21 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def renderer_state(state: dict[str, Any], renderer: str) -> dict[str, Any]:
-    renderers = state.setdefault("renderers", {})
-    entry = renderers.get(renderer)
-    if not isinstance(entry, dict):
-        entry = default_renderer_state(renderer)
-        renderers[renderer] = entry
-        return entry
+def _normalize_renderer_state(renderer: str, entry: Any) -> dict[str, Any]:
     normalized = default_renderer_state(renderer)
-    normalized.update(entry)
+    if isinstance(entry, dict):
+        normalized.update(entry)
     normalized["artifacts"] = dict(normalized.get("artifacts") or {})
     normalized["review"] = dict(normalized.get("review") or default_renderer_state(renderer)["review"])
     if renderer == "img":
-        conversion = normalized.get("svg_conversion")
-        normalized["svg_conversion"] = {
-            **default_img_svg_conversion(),
-            **(dict(conversion) if isinstance(conversion, dict) else {}),
-        }
-    renderers[renderer] = normalized
+        normalized["svg_conversion"] = {**default_img_svg_conversion(), **dict(normalized.get("svg_conversion") or {})}
     return normalized
+
+
+def renderer_state(state: dict[str, Any], renderer: str) -> dict[str, Any]:
+    renderers = state.setdefault("renderers", {})
+    renderers[renderer] = _normalize_renderer_state(renderer, renderers.get(renderer))
+    return renderers[renderer]
 
 
 def load_state(run_dir: Path) -> dict[str, Any]:
@@ -1036,854 +935,270 @@ def text_sha256(value: str) -> str:
     return sha256_bytes(value.encode("utf-8"))
 
 
-def img_svg_conversion_evidence_template(
-    source_image_path: Path,
-    prompt_sha256: str,
-) -> dict[str, Any]:
-    return {
-        "version": 1,
-        "source_image_path": str(source_image_path),
-        "source_image_sha256": file_sha256(source_image_path),
-        "prompt_sha256": prompt_sha256,
-        "input_mode": "image_and_prompt_same_model_turn",
-        "source_image_attached": True,
-        "visual_source_of_truth": "source_image_only",
-        "model_or_agent": "REQUIRED: record the vision-capable model or Codex agent",
-        "generated_at": "REQUIRED: ISO-8601 timestamp",
-    }
-
-
-def img_svg_crop_manifest_template(
-    source_image_path: Path,
-    svg_path: Path,
-) -> dict[str, Any]:
-    return {
-        "version": 3,
-        "source_image_path": str(source_image_path),
-        "svg_path": str(svg_path),
-        "canvas": {"width": 1280, "height": 720},
-        "icon_strategy": "REQUIRED: source_crops | mixed | faithful_vector_trace | no_icons_visible",
-        "crop_policy": {
-            "max_area_ratio": IMG_SVG_MAX_CROP_AREA_RATIO,
-            "max_total_area_ratio": IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO,
-            "max_embedded_raster_ratio": IMG_SVG_MAX_EMBEDDED_RASTER_RATIO,
-            "type_limits": {
-                key: {"max_width": value[0], "max_height": value[1]}
-                for key, value in IMG_SVG_CROP_TYPE_LIMITS.items()
-            },
-            "text_must_remain_vector": True,
-            "text_scrubbed_complex_backplates_allowed": True,
-            "adjacent_crop_tiles_forbidden": True,
-        },
-        "visible_text_inventory": {
-            "complete": False,
-            "items": [],
-            "no_visible_text_reason": "REQUIRED only when the source image contains no visible text",
-        },
-        "visual_element_inventory": {
-            "complete": False,
-            "items": [],
-            "no_visible_artwork_reason": "REQUIRED only when the source image contains no visible icons, logos, illustrations, badges, or decorative symbols",
-        },
-        "crops": [],
-        "no_crops_reason": "REQUIRED when crops is empty",
-    }
-
-
-def render_img_svg_review(
-    source_image_path: Path,
-    svg_path: Path,
-    preview_path: Path,
-) -> dict[str, float]:
+def render_img_svg_review(source_image_path: Path, svg_path: Path, preview_path: Path) -> dict[str, float]:
     from pptx_builder import svg_to_png_bytes
 
     preview_bytes = svg_to_png_bytes(svg_path)
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     preview_path.write_bytes(preview_bytes)
-
     with Image.open(source_image_path) as source, Image.open(io.BytesIO(preview_bytes)) as rendered:
         source_rgb = source.convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS)
         rendered_rgb = rendered.convert("RGB").resize((1280, 720), Image.Resampling.LANCZOS)
-
-        pixel_difference = ImageChops.difference(source_rgb, rendered_rgb)
-        pixel_mae = sum(ImageStat.Stat(pixel_difference).mean) / 3.0
-        pixel_similarity = max(0.0, 1.0 - pixel_mae / 255.0)
-
-        source_edges = source_rgb.filter(ImageFilter.FIND_EDGES)
-        rendered_edges = rendered_rgb.filter(ImageFilter.FIND_EDGES)
-        edge_difference = ImageChops.difference(source_edges, rendered_edges)
-        edge_mae = sum(ImageStat.Stat(edge_difference).mean) / 3.0
-        edge_similarity = max(0.0, 1.0 - edge_mae / 255.0)
-
-    combined_similarity = pixel_similarity * 0.65 + edge_similarity * 0.35
+        pixel_mae = sum(ImageStat.Stat(ImageChops.difference(source_rgb, rendered_rgb)).mean) / 3
+        edge_mae = sum(ImageStat.Stat(ImageChops.difference(
+            source_rgb.filter(ImageFilter.FIND_EDGES), rendered_rgb.filter(ImageFilter.FIND_EDGES)
+        )).mean) / 3
+    pixel_similarity = max(0.0, 1 - pixel_mae / 255)
+    edge_similarity = max(0.0, 1 - edge_mae / 255)
     return {
         "pixel_similarity": round(pixel_similarity, 6),
         "edge_similarity": round(edge_similarity, 6),
-        "combined_similarity": round(combined_similarity, 6),
-        "recommended_minimum": IMG_SVG_REVIEW_MIN_SIMILARITY,
+        "combined_similarity": round(pixel_similarity * .65 + edge_similarity * .35, 6),
     }
 
 
-def write_img_svg_review_artifact(job: dict[str, Any]) -> dict[str, Any]:
-    source_image_path = Path(job["source_image_path"])
-    svg_path = Path(job["target_path"])
-    preview_path = Path(job["rendered_preview_path"])
-    review_path = Path(job["fidelity_review_path"])
-    source_hash = file_sha256(source_image_path)
-    svg_hash = file_sha256(svg_path)
-    prompt_hash = str(job["compiled_prompt_sha256"])
-    metrics = render_img_svg_review(source_image_path, svg_path, preview_path)
+def img_svg_render_environment() -> str:
+    """Cache identity for local renderer and installed font files; force-render is also available."""
+    from playwright_runtime import playwright_cache
 
-    previous = read_json(review_path, {}) if review_path.exists() else {}
-    unchanged = (
-        previous.get("source_image_sha256") == source_hash
-        and previous.get("svg_sha256") == svg_hash
-        and previous.get("prompt_sha256") == prompt_hash
-    )
-    review = {
-        "version": 1,
-        "slide_index": int(job["index"]),
-        "source_image_path": str(source_image_path),
-        "source_image_sha256": source_hash,
-        "svg_path": str(svg_path),
-        "svg_sha256": svg_hash,
-        "rendered_preview_path": str(preview_path),
-        "prompt_sha256": prompt_hash,
-        "automatic_metrics": metrics,
-        "status": previous.get("status", "pending_visual_review") if unchanged else "pending_visual_review",
-        "source_image_inspected": bool(previous.get("source_image_inspected")) if unchanged else False,
-        "rendered_svg_inspected": bool(previous.get("rendered_svg_inspected")) if unchanged else False,
-        "layout_preserved": bool(previous.get("layout_preserved")) if unchanged else False,
-        "icons_preserved": bool(previous.get("icons_preserved")) if unchanged else False,
-        "source_specific_artwork_preserved": bool(previous.get("source_specific_artwork_preserved")) if unchanged else False,
-        "all_visible_text_editable": bool(previous.get("all_visible_text_editable")) if unchanged else False,
-        "no_redesign": bool(previous.get("no_redesign")) if unchanged else False,
-        "reviewer": str(previous.get("reviewer") or "") if unchanged else "",
-        "notes": str(previous.get("notes") or "") if unchanged else "",
-        "low_similarity_override_reason": str(previous.get("low_similarity_override_reason") or "") if unchanged else "",
-        "updated_at": utc_now(),
-    }
-    write_json(review_path, review)
-    return review
+    roots = [Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts",
+             Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Microsoft/Windows/Fonts"] if os.name == "nt" else [
+                 Path("/usr/share/fonts"), Path("/usr/local/share/fonts"), Path.home() / ".local/share/fonts",
+                 Path("/System/Library/Fonts"), Path("/Library/Fonts"), Path.home() / "Library/Fonts"]
+    renderer_hashes = [file_sha256(RUNTIME_ROOT / name) for name in ("pptx_builder.py", "playwright_runtime.py")]
+    files = []
+    for root in roots:
+        if root.is_dir():
+            files.extend(path for path in root.rglob("*") if path.is_file())
+    explicit_browser = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    if explicit_browser:
+        files.append(Path(explicit_browser))
+    cache = playwright_cache()
+    fingerprint = [(str(path), path.stat().st_size, path.stat().st_mtime_ns) for path in sorted(set(files))]
+    return text_sha256(json.dumps([platform.platform(), package_version("playwright"),
+                                  str(cache), sorted(p.name for p in cache.glob("*")), renderer_hashes, fingerprint]))
 
 
-def validate_img_svg_conversion_evidence(job: dict[str, Any]) -> dict[str, Any]:
-    path = Path(job["conversion_evidence_path"])
-    if not path.is_file():
-        raise ValueError(f"IMG-to-SVG conversion evidence is missing: {path}")
-    evidence = read_json(path)
-    source_path = Path(job["source_image_path"])
-    if Path(str(evidence.get("source_image_path") or "")).resolve() != source_path.resolve():
-        raise ValueError(f"IMG-to-SVG evidence source path mismatch: {path}")
-    if evidence.get("source_image_sha256") != file_sha256(source_path):
-        raise ValueError(f"IMG-to-SVG evidence source hash mismatch: {path}")
-    if evidence.get("prompt_sha256") != job.get("compiled_prompt_sha256"):
-        raise ValueError(f"IMG-to-SVG evidence prompt hash mismatch: {path}")
-    if evidence.get("input_mode") != "image_and_prompt_same_model_turn":
-        raise ValueError(f"IMG-to-SVG evidence must record image_and_prompt_same_model_turn: {path}")
-    if evidence.get("source_image_attached") is not True:
-        raise ValueError(f"IMG-to-SVG evidence must confirm the source image was attached: {path}")
-    if evidence.get("visual_source_of_truth") != "source_image_only":
-        raise ValueError(f"IMG-to-SVG evidence must use source_image_only as visual truth: {path}")
-    if not str(evidence.get("model_or_agent") or "").strip() or str(evidence.get("model_or_agent")).startswith("REQUIRED"):
-        raise ValueError(f"IMG-to-SVG evidence must record the model or agent: {path}")
-    if not str(evidence.get("generated_at") or "").strip() or str(evidence.get("generated_at")).startswith("REQUIRED"):
-        raise ValueError(f"IMG-to-SVG evidence must record generated_at: {path}")
-    return evidence
-
-
-def _rects_intersect(first: tuple[float, float, float, float], second: tuple[float, float, float, float]) -> bool:
+def _rects_intersect(first, second) -> bool:
     fx, fy, fw, fh = first
     sx, sy, sw, sh = second
     return min(fx + fw, sx + sw) > max(fx, sx) and min(fy + fh, sy + sh) > max(fy, sy)
 
 
 def _normalize_img_svg_text(value: str) -> str:
-    return "".join(str(value).split())
+    return "".join(value.split())
 
 
 def _svg_visible_text_items(svg_path: Path) -> list[str]:
-    try:
-        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ElementTree.ParseError):
-        return []
-    fragments: list[str] = []
-    for element in root.iter():
-        if element.tag.rsplit("}", 1)[-1].lower() == "text":
-            normalized = _normalize_img_svg_text("".join(element.itertext()))
-            if normalized:
-                fragments.append(normalized)
-    return fragments
+    root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    return [_normalize_img_svg_text("".join(node.itertext())) for node in root.iter()
+            if node.tag.rsplit("}", 1)[-1] == "text"]
 
 
-def _svg_crop_ids(svg_path: Path) -> list[str]:
-    try:
-        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ElementTree.ParseError):
-        return []
-    return [
-        str(element.attrib.get("data-crop-id") or "").strip()
-        for element in root.iter()
-        if element.tag.rsplit("}", 1)[-1].lower() == "image"
-    ]
+def _require_text_occurrences(items: list[dict[str, Any]], fragments: list[str], *, complete: bool = True) -> None:
+    # Consume each match, so one occurrence cannot satisfy repeated labels.
+    remaining = ["".join(fragments)]
+    for item in sorted(items, key=lambda item: len(item["text"]), reverse=True):
+        text = _normalize_img_svg_text(item["text"])
+        for index, fragment in enumerate(remaining):
+            if text in fragment:
+                before, after = fragment.split(text, 1)
+                remaining[index:index + 1] = [before, after]
+                break
+        else:
+            raise ValueError(f"IMG-to-SVG visible text missing from SVG text nodes: {item['id']}: {item['text']}")
+    if complete and any(remaining):
+        raise ValueError("IMG-to-SVG SVG contains extra text not recorded in visible_text")
 
 
-def _svg_text_fragments_after_crop(svg_path: Path, crop_id: str) -> list[str]:
-    """Return SVG text that is painted after one raster backplate.
-
-    SVG document order controls z-order. A text-scrubbed backplate is useful
-    only when its replacement text is emitted later and therefore remains
-    visible/editable above the embedded image.
-    """
-    try:
-        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ElementTree.ParseError):
-        return []
-    elements = list(root.iter())
-    crop_index = next(
-        (
-            index
-            for index, element in enumerate(elements)
-            if element.tag.rsplit("}", 1)[-1].lower() == "image"
-            and str(element.attrib.get("data-crop-id") or "").strip() == crop_id
-        ),
-        None,
-    )
-    if crop_index is None:
-        return []
-    fragments: list[str] = []
-    for element in elements[crop_index + 1:]:
-        if element.tag.rsplit("}", 1)[-1].lower() == "text":
-            normalized = _normalize_img_svg_text("".join(element.itertext()))
-            if normalized:
-                fragments.append(normalized)
-    return fragments
-
-
-def _rects_form_crop_tiles(
-    first: tuple[float, float, float, float],
-    second: tuple[float, float, float, float],
-) -> bool:
-    fx, fy, fw, fh = first
-    sx, sy, sw, sh = second
-    horizontal_gap = max(sx - (fx + fw), fx - (sx + sw), 0.0)
-    vertical_gap = max(sy - (fy + fh), fy - (sy + sh), 0.0)
-    vertical_overlap = max(0.0, min(fy + fh, sy + sh) - max(fy, sy))
-    horizontal_overlap = max(0.0, min(fx + fw, sx + sw) - max(fx, sx))
-    vertical_alignment = vertical_overlap / max(1.0, min(fh, sh))
-    horizontal_alignment = horizontal_overlap / max(1.0, min(fw, sw))
-    return (
-        horizontal_gap <= IMG_SVG_CROP_TILE_GAP and vertical_alignment >= 0.65
-    ) or (
-        vertical_gap <= IMG_SVG_CROP_TILE_GAP and horizontal_alignment >= 0.65
-    )
-
-
-def _approximate_svg_text_bounds(svg_path: Path) -> list[tuple[float, float, float, float]]:
-    """Approximate visible <text> bounds to catch crops that swallow vector text.
-
-    SVG text has no portable layout API. This conservative estimate is only a
-    safety net; the manifest's explicit contains_text=false declaration and
-    the model prompt remain the primary crop policy.
-    """
-    try:
-        root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ElementTree.ParseError):
-        return []
-
-    bounds: list[tuple[float, float, float, float]] = []
-    for element in root.iter():
-        if element.tag.rsplit("}", 1)[-1].lower() != "text":
-            continue
-        if element.attrib.get("transform"):
-            # Transformed text is uncommon in generated slides; skip it rather
-            # than inventing a coordinate transform and risk false positives.
-            continue
-        try:
-            x = float((element.attrib.get("x") or "0").split()[0])
-            y = float((element.attrib.get("y") or "0").split()[0])
-            font_size = float(str(element.attrib.get("font-size") or "16").replace("px", ""))
-        except (TypeError, ValueError):
-            continue
-        font_size = max(6.0, min(font_size, 160.0))
-        lines: list[str] = []
-        if element.text and element.text.strip():
-            lines.append(element.text.strip())
-        for child in element:
-            if child.tag.rsplit("}", 1)[-1].lower() == "tspan":
-                lines.append("".join(child.itertext()).strip())
-        lines = [line for line in lines if line]
-        if not lines:
-            continue
-        max_chars = max(len(line) for line in lines)
-        # CJK glyphs are close to 1em; Latin text is narrower. The slightly
-        # generous estimate is intentional so a crop cannot touch a label.
-        width = max(12.0, max_chars * font_size * 0.95)
-        text_anchor = str(element.attrib.get("text-anchor") or "start").strip().lower()
-        if text_anchor == "middle":
-            x -= width / 2.0
-        elif text_anchor == "end":
-            x -= width
-        line_height = font_size * 1.25
-        top = y - font_size
-        height = max(line_height, len(lines) * line_height)
-        bounds.append((x, top, width, height))
-    return bounds
+def img_svg_text_items(job: dict[str, Any]) -> list[dict[str, Any]]:
+    # Old jobs keep their text inventory inside the V3 crop manifest. Read it
+    # without recreating the deleted visual inventory or self-attestation gate.
+    items = job.get("visible_text")
+    crop_path = Path(job["crop_manifest_path"])
+    if items is None and crop_path.exists():
+        crop = read_json(crop_path)
+        items = crop.get("visible_text", crop.get("visible_text_inventory", {}).get("items"))
+    if items is None:
+        # Legacy jobs may lack text metadata. Seed a checklist from the SVG;
+        # the V2 review still requires comparison against the actual source IMG.
+        items = [{"id": f"text-{index}", "text": text} for index, text in
+                 enumerate(_svg_visible_text_items(Path(job["target_path"])), start=1) if text]
+    if not isinstance(items, list):
+        raise ValueError("IMG-to-SVG visible_text must be a list of {id, text} items (empty for no text)")
+    ids = set()
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"].strip() or item["id"] in ids:
+            raise ValueError("IMG-to-SVG visible_text needs unique non-empty ids")
+        if not isinstance(item.get("text"), str) or not item["text"].strip():
+            raise ValueError("IMG-to-SVG visible_text needs non-empty text")
+        ids.add(item["id"])
+    return items
 
 
 def validate_img_svg_crop_manifest(job: dict[str, Any], svg_stats: dict[str, Any]) -> dict[str, Any]:
-    path = Path(job["crop_manifest_path"])
-    if not path.is_file():
-        raise ValueError(f"IMG-to-SVG crop manifest is missing: {path}")
-    manifest = read_json(path)
-    source_path = Path(job["source_image_path"])
     svg_path = Path(job["target_path"])
-    if Path(str(manifest.get("source_image_path") or "")).resolve() != source_path.resolve():
-        raise ValueError(f"IMG-to-SVG crop manifest source path mismatch: {path}")
-    if Path(str(manifest.get("svg_path") or "")).resolve() != svg_path.resolve():
-        raise ValueError(f"IMG-to-SVG crop manifest SVG path mismatch: {path}")
-    canvas = manifest.get("canvas") or {}
-    if canvas != {"width": 1280, "height": 720}:
-        raise ValueError(f"IMG-to-SVG crop manifest canvas must be 1280x720: {path}")
-    if manifest.get("version") != 3:
-        raise ValueError(
-            f"IMG-to-SVG crop manifest must use version 3 with text and visual inventories: {path}"
-        )
-
-    inventory = manifest.get("visible_text_inventory")
-    if not isinstance(inventory, dict) or inventory.get("complete") is not True:
-        raise ValueError(f"IMG-to-SVG crop manifest needs a complete visible_text_inventory: {path}")
-    inventory_items = inventory.get("items")
-    if not isinstance(inventory_items, list):
-        raise ValueError(f"IMG-to-SVG visible_text_inventory items must be a list: {path}")
-
-    text_boxes: list[tuple[float, float, float, float]] = []
-    text_counts: Counter[str] = Counter()
-    inventory_ids: set[str] = set()
-    inventory_by_id: dict[str, tuple[str, tuple[float, float, float, float]]] = {}
-    for index, item in enumerate(inventory_items):
-        if not isinstance(item, dict):
-            raise ValueError(f"IMG-to-SVG text inventory entry {index} must be an object: {path}")
-        text_id = str(item.get("id") or "").strip()
-        if not text_id or text_id in inventory_ids:
-            raise ValueError(f"IMG-to-SVG text inventory entry {index} needs a unique id: {path}")
-        inventory_ids.add(text_id)
-        normalized_text = _normalize_img_svg_text(str(item.get("text") or ""))
-        if not normalized_text:
-            raise ValueError(f"IMG-to-SVG text inventory {text_id} needs exact visible text: {path}")
-        raw_box = item.get("source_box")
-        if not isinstance(raw_box, list) or len(raw_box) != 4:
-            raise ValueError(
-                f"IMG-to-SVG text inventory {text_id} source_box must be [x, y, width, height]: {path}"
-            )
+    items = img_svg_text_items(job)
+    _require_text_occurrences(items, _svg_visible_text_items(svg_path))
+    path = Path(job["crop_manifest_path"])
+    if not path.exists():
+        if svg_stats["embedded_image_count"]:
+            raise ValueError("IMG-to-SVG embedded images need a crop manifest")
+        return {}
+    manifest = read_json(path)
+    for key, expected in (("source_image_path", job["source_image_path"]), ("svg_path", job["target_path"])):
+        if Path(manifest[key]).resolve() != Path(expected).resolve():
+            raise ValueError(f"IMG-to-SVG crop manifest {key} mismatch")
+    root = ElementTree.fromstring(svg_path.read_text(encoding="utf-8"))
+    if manifest.get("canvas", {"width": 1280, "height": 720}) != {"width": 1280, "height": 720}:
+        raise ValueError("IMG-to-SVG crop canvas must be 1280x720")
+    crops = validate_crop_entries(manifest, root, embedded=True)
+    text_by_id = {item["id"]: item for item in items}
+    # Text boxes are needed only around crop conflicts/backplate replacements.
+    local_items = manifest.get("visible_text", manifest.get("visible_text_inventory", {}).get("items", []))
+    if not isinstance(local_items, list):
+        raise ValueError("IMG-to-SVG crop visible_text must be a list")
+    for item in local_items:
+        if item["id"] not in text_by_id or item["text"] != text_by_id[item["id"]]["text"]:
+            raise ValueError("IMG-to-SVG crop text must match the page visible_text items")
+        if "source_box" in item:
+            _validated_box(item["source_box"], name="text source_box", canvas_size=(1280, 720))
+    boxed_items = {item["id"]: item for item in local_items if "source_box" in item}
+    elements = list(root.iter())
+    for crop in crops:
+        if crop.get("contains_text") is not False:
+            raise ValueError("IMG-to-SVG crop must declare contains_text=false for the final pixels")
+        overlapping = {key for key, item in boxed_items.items() if _rects_intersect(crop["source_box"], item["source_box"])}
+        if crop.get("content_type") != "complex_backplate":
+            if overlapping or crop.get("source_contains_text"):
+                raise ValueError("IMG-to-SVG crop overlaps visible text; shrink it or use a scrubbed backplate")
+            continue
+        replacement = crop.get("replacement_text_ids", [])
+        if not replacement or len(set(replacement)) != len(replacement) or set(replacement) != overlapping:
+            raise ValueError("IMG-to-SVG backplate replacement_text_ids must match boxed text inside the crop")
+        removals = crop.get("text_removal_boxes", [])
+        if not removals:
+            raise ValueError("IMG-to-SVG backplate needs text_removal_boxes")
+        if crop.get("text_removal_mode", "light_neutral") not in {"light_neutral", "dark_neutral", "all"}:
+            raise ValueError("IMG-to-SVG backplate text_removal_mode is invalid")
+        dilation = crop.get("text_removal_dilation", 2)
+        if type(dilation) is not int or not 0 <= dilation <= 4:
+            raise ValueError("IMG-to-SVG backplate text_removal_dilation must be an integer 0-4")
+        cx, cy, cw, ch = crop["source_box"]
+        for box in removals:
+            rx, ry, rw, rh = _validated_box(box, name="text_removal_box", canvas_size=(1280, 720))
+            if rx < cx or ry < cy or rx + rw > cx + cw or ry + rh > cy + ch:
+                raise ValueError("IMG-to-SVG text_removal_box must stay inside backplate")
+        position = next(i for i, node in enumerate(elements) if node.attrib.get("data-crop-id") == crop["id"])
+        later_text = [_normalize_img_svg_text("".join(node.itertext())) for node in elements[position + 1:]
+                      if node.tag.rsplit("}", 1)[-1] == "text"]
+        for key in replacement:
+            tx, ty, tw, th = boxed_items[key]["source_box"]
+            if not any(rx <= tx and ry <= ty and rx + rw >= tx + tw and ry + rh >= ty + th for rx, ry, rw, rh in removals):
+                raise ValueError(f"IMG-to-SVG backplate removal box must cover replacement text {key}")
         try:
-            x, y, width, height = (float(value) for value in raw_box)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"IMG-to-SVG text inventory {text_id} source_box must be numeric: {path}") from exc
-        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
-            raise ValueError(f"IMG-to-SVG text inventory {text_id} must stay inside 1280x720: {path}")
-        text_rect = (x, y, width, height)
-        text_boxes.append(text_rect)
-        inventory_by_id[text_id] = (normalized_text, text_rect)
-        text_counts[normalized_text] += 1
-
-    if not inventory_items:
-        reason = str(inventory.get("no_visible_text_reason") or "").strip()
-        if len(reason) < 20:
-            raise ValueError(
-                f"IMG-to-SVG empty visible_text_inventory needs a specific no_visible_text_reason: {path}"
-            )
-
-    svg_text_items = _svg_visible_text_items(svg_path)
-    missing_text = [
-        text for text, count in text_counts.items()
-        if sum(fragment.count(text) for fragment in svg_text_items) < count
-    ]
-    if missing_text:
-        preview = ", ".join(missing_text[:5])
-        raise ValueError(
-            f"IMG-to-SVG visible text is missing from SVG <text>/<tspan> ({preview}); "
-            f"rasterized text is not editable: {path}"
-        )
-
-    crops = manifest.get("crops")
-    if not isinstance(crops, list):
-        raise ValueError(f"IMG-to-SVG crop manifest crops must be a list: {path}")
-    icon_strategy = str(manifest.get("icon_strategy") or "")
-    allowed_strategies = {"source_crops", "mixed", "faithful_vector_trace", "no_icons_visible"}
-    if icon_strategy not in allowed_strategies:
-        raise ValueError(f"IMG-to-SVG crop manifest has invalid icon_strategy: {path}")
-
-    visual_inventory = manifest.get("visual_element_inventory")
-    if not isinstance(visual_inventory, dict) or visual_inventory.get("complete") is not True:
-        raise ValueError(f"IMG-to-SVG crop manifest needs a complete visual_element_inventory: {path}")
-    visual_items = visual_inventory.get("items")
-    if not isinstance(visual_items, list):
-        raise ValueError(f"IMG-to-SVG visual_element_inventory items must be a list: {path}")
-
-    visual_ids: set[str] = set()
-    source_crop_visuals: dict[str, dict[str, Any]] = {}
-    traced_visuals: dict[str, dict[str, Any]] = {}
-    for index, item in enumerate(visual_items):
-        if not isinstance(item, dict):
-            raise ValueError(f"IMG-to-SVG visual inventory entry {index} must be an object: {path}")
-        visual_id = str(item.get("id") or "").strip()
-        if not visual_id or visual_id in visual_ids:
-            raise ValueError(f"IMG-to-SVG visual inventory entry {index} needs a unique id: {path}")
-        visual_ids.add(visual_id)
-        content_type = str(item.get("content_type") or "").strip().lower()
-        if content_type not in IMG_SVG_CROP_CONTENT_TYPES:
-            allowed = ", ".join(sorted(IMG_SVG_CROP_CONTENT_TYPES))
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} must declare content_type ({allowed}): {path}"
-            )
-        raw_box = item.get("source_box")
-        if not isinstance(raw_box, list) or len(raw_box) != 4:
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} source_box must be [x, y, width, height]: {path}"
-            )
-        try:
-            x, y, width, height = (float(value) for value in raw_box)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} source_box must be numeric: {path}"
-            ) from exc
-        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
-            raise ValueError(f"IMG-to-SVG visual inventory {visual_id} must stay inside 1280x720: {path}")
-        strategy = str(item.get("strategy") or "").strip()
-        if strategy not in {"source_crop", "faithful_vector_trace"}:
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} needs source_crop or faithful_vector_trace strategy: {path}"
-            )
-        if content_type in IMG_SVG_SOURCE_CROP_DEFAULT_TYPES and strategy != "source_crop":
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} with content_type {content_type} "
-                f"must use source_crop; keep only text, lines, boxes, and simple geometry vector: {path}"
-            )
-        if item.get("fidelity_reviewed") is not True:
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} must confirm fidelity_reviewed=true: {path}"
-            )
-        notes = str(item.get("notes") or "").strip()
-        if len(notes) < 20:
-            raise ValueError(
-                f"IMG-to-SVG visual inventory {visual_id} needs concrete source-vs-render fidelity notes: {path}"
-            )
-        if strategy == "source_crop":
-            source_crop_visuals[visual_id] = item
-        else:
-            traced_visuals[visual_id] = item
-
-    if not visual_items:
-        reason = str(visual_inventory.get("no_visible_artwork_reason") or "").strip()
-        if len(reason) < 20:
-            raise ValueError(
-                f"IMG-to-SVG empty visual_element_inventory needs a specific no_visible_artwork_reason: {path}"
-            )
-        if icon_strategy != "no_icons_visible":
-            raise ValueError(
-                f"IMG-to-SVG empty visual_element_inventory requires no_icons_visible strategy: {path}"
-            )
-    elif source_crop_visuals and traced_visuals and icon_strategy != "mixed":
-        raise ValueError(f"IMG-to-SVG mixed visual strategies require mixed icon_strategy: {path}")
-    elif source_crop_visuals and not traced_visuals and icon_strategy != "source_crops":
-        raise ValueError(f"IMG-to-SVG source-crop visuals require source_crops icon_strategy: {path}")
-    elif traced_visuals and not source_crop_visuals and icon_strategy != "faithful_vector_trace":
-        raise ValueError(
-            f"IMG-to-SVG traced visuals require faithful_vector_trace icon_strategy: {path}"
-        )
-
-    declared_crops_by_id = {
-        str(item.get("id") or "").strip(): item
-        for item in crops
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-    if set(declared_crops_by_id) != set(source_crop_visuals):
-        raise ValueError(
-            f"IMG-to-SVG source_crop visual inventory ids must exactly match crop ids: {path}"
-        )
-    for crop_id, visual_item in source_crop_visuals.items():
-        crop_item = declared_crops_by_id[crop_id]
-        if list(visual_item.get("source_box") or []) != list(crop_item.get("source_box") or []):
-            raise ValueError(
-                f"IMG-to-SVG visual inventory and crop source_box mismatch for {crop_id}: {path}"
-            )
-        if str(visual_item.get("content_type") or "").strip().lower() != str(
-            crop_item.get("content_type") or ""
-        ).strip().lower():
-            raise ValueError(
-                f"IMG-to-SVG visual inventory and crop content_type mismatch for {crop_id}: {path}"
-            )
-    if crops:
-        if icon_strategy not in {"source_crops", "mixed"}:
-            raise ValueError(f"IMG-to-SVG crops require source_crops or mixed icon_strategy: {path}")
-        svg_crop_ids = _svg_crop_ids(svg_path)
-        declared_crop_ids = [str(item.get("id") or "").strip() for item in crops if isinstance(item, dict)]
-        if any(not crop_id for crop_id in svg_crop_ids) or Counter(svg_crop_ids) != Counter(declared_crop_ids):
-            raise ValueError(
-                f"IMG-to-SVG SVG <image data-crop-id> values must exactly match the crop manifest: {path}"
-            )
-        text_bounds = _approximate_svg_text_bounds(Path(job["target_path"]))
-        total_area = 1280.0 * 720.0
-        crop_rects: list[tuple[str, tuple[float, float, float, float]]] = []
-        crop_area = 0.0
-        seen_crop_ids: set[str] = set()
-        for index, item in enumerate(crops):
-            if not isinstance(item, dict):
-                raise ValueError(f"IMG-to-SVG crop entry {index} must be an object: {path}")
-            crop_id = str(item.get("id") or "").strip()
-            if not crop_id or crop_id in seen_crop_ids:
-                raise ValueError(f"IMG-to-SVG crop entry {index} needs a unique stable id: {path}")
-            seen_crop_ids.add(crop_id)
-            content_type = str(item.get("content_type") or "").strip().lower()
-            if content_type not in IMG_SVG_CROP_CONTENT_TYPES:
-                allowed = ", ".join(sorted(IMG_SVG_CROP_CONTENT_TYPES))
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} must declare content_type ({allowed}): {path}"
-                )
-            if item.get("contains_text") is not False:
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} must declare contains_text=false; keep all text as SVG: {path}"
-                )
-            raw_box = item.get("source_box")
-            if not isinstance(raw_box, list) or len(raw_box) != 4:
-                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must be [x, y, width, height]: {path}")
-            try:
-                x, y, width, height = (float(value) for value in raw_box)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must be numeric: {path}") from exc
-            if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1280 or y + height > 720:
-                raise ValueError(f"IMG-to-SVG crop {crop_id} source_box must stay inside 1280x720: {path}")
-            max_width, max_height = IMG_SVG_CROP_TYPE_LIMITS[content_type]
-            if width > max_width or height > max_height:
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} is too broad for {content_type} "
-                    f"({width:g}x{height:g}, max {max_width:g}x{max_height:g}); "
-                    f"crop only the incompatible artwork: {path}"
-                )
-            if width * height > total_area * IMG_SVG_MAX_CROP_AREA_RATIO:
-                raise ValueError(
-                    f"IMG-to-SVG crop {crop_id} covers more than {IMG_SVG_MAX_CROP_AREA_RATIO:.0%} of the slide: {path}"
-                )
-            crop_rect = (x, y, width, height)
-            crop_area += width * height
-            crop_rects.append((crop_id, crop_rect))
-            overlapping_inventory_ids = {
-                text_id
-                for text_id, (_, text_rect) in inventory_by_id.items()
-                if _rects_intersect(crop_rect, text_rect)
-            }
-            is_complex_backplate = content_type == "complex_backplate"
-            if is_complex_backplate:
-                if item.get("source_contains_text") is not True:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} must declare source_contains_text=true: {path}"
-                    )
-                replacement_ids = item.get("replacement_text_ids")
-                if not isinstance(replacement_ids, list) or not replacement_ids:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} needs replacement_text_ids: {path}"
-                    )
-                replacement_id_set = {str(value).strip() for value in replacement_ids if str(value).strip()}
-                if len(replacement_id_set) != len(replacement_ids):
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} replacement_text_ids must be unique and non-empty: {path}"
-                    )
-                missing_inventory_ids = replacement_id_set - set(inventory_by_id)
-                if missing_inventory_ids:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} references unknown replacement text ids "
-                        f"{sorted(missing_inventory_ids)}: {path}"
-                    )
-                if replacement_id_set != overlapping_inventory_ids:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} replacement_text_ids must exactly match "
-                        f"the visible text inside the backplate ({sorted(overlapping_inventory_ids)}): {path}"
-                    )
-                removal_mode = str(item.get("text_removal_mode") or "").strip()
-                if removal_mode not in {"light_neutral", "dark_neutral", "all"}:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} text_removal_mode must be "
-                        f"light_neutral, dark_neutral, or all: {path}"
-                    )
-                dilation = item.get("text_removal_dilation", 2)
-                if not isinstance(dilation, int) or dilation < 0 or dilation > 4:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} text_removal_dilation must be an integer 0-4: {path}"
-                    )
-                removal_boxes = item.get("text_removal_boxes")
-                if not isinstance(removal_boxes, list) or not removal_boxes:
-                    raise ValueError(
-                        f"IMG-to-SVG complex_backplate {crop_id} needs tight text_removal_boxes: {path}"
-                    )
-                parsed_removal_boxes: list[tuple[float, float, float, float]] = []
-                for removal_box in removal_boxes:
-                    if not isinstance(removal_box, list) or len(removal_box) != 4:
-                        raise ValueError(
-                            f"IMG-to-SVG complex_backplate {crop_id} has invalid text_removal_boxes: {path}"
-                        )
-                    try:
-                        removal_rect = tuple(float(value) for value in removal_box)
-                    except (TypeError, ValueError) as exc:
-                        raise ValueError(
-                            f"IMG-to-SVG complex_backplate {crop_id} text_removal_boxes must be numeric: {path}"
-                        ) from exc
-                    rx, ry, rw, rh = removal_rect
-                    if (
-                        rw <= 0 or rh <= 0 or rx < x or ry < y
-                        or rx + rw > x + width or ry + rh > y + height
-                    ):
-                        raise ValueError(
-                            f"IMG-to-SVG complex_backplate {crop_id} text_removal_boxes must stay inside the crop: {path}"
-                        )
-                    parsed_removal_boxes.append(removal_rect)
-                for replacement_id in replacement_id_set:
-                    replacement_text, replacement_rect = inventory_by_id[replacement_id]
-                    if not any(
-                        _rects_intersect(removal_rect, replacement_rect)
-                        for removal_rect in parsed_removal_boxes
-                    ):
-                        raise ValueError(
-                            f"IMG-to-SVG complex_backplate {crop_id} has no removal box for "
-                            f"replacement text {replacement_id}: {path}"
-                        )
-                    later_text = _svg_text_fragments_after_crop(svg_path, crop_id)
-                    if not any(replacement_text in fragment for fragment in later_text):
-                        raise ValueError(
-                            f"IMG-to-SVG complex_backplate {crop_id} replacement text {replacement_id} "
-                            f"must be emitted as SVG text after the <image>: {path}"
-                        )
-            else:
-                if item.get("source_contains_text") is True:
-                    raise ValueError(
-                        f"IMG-to-SVG crop {crop_id} may declare source text only as complex_backplate: {path}"
-                    )
-                if overlapping_inventory_ids:
-                    raise ValueError(
-                        f"IMG-to-SVG crop {crop_id} overlaps the visible-text inventory; "
-                        f"keep every word editable or use a text-scrubbed complex_backplate: {path}"
-                    )
-                if any(_rects_intersect(crop_rect, text_rect) for text_rect in text_bounds):
-                    raise ValueError(
-                        f"IMG-to-SVG crop {crop_id} overlaps vector text; shrink the crop or use a "
-                        f"text-scrubbed complex_backplate: {path}"
-                    )
-            exclusion_boxes = item.get("text_exclusion_boxes") or []
-            if not isinstance(exclusion_boxes, list):
-                raise ValueError(f"IMG-to-SVG crop {crop_id} text_exclusion_boxes must be a list: {path}")
-            for exclusion in exclusion_boxes:
-                if not isinstance(exclusion, list) or len(exclusion) != 4:
-                    raise ValueError(f"IMG-to-SVG crop {crop_id} has invalid text_exclusion_boxes: {path}")
-                try:
-                    exclusion_rect = tuple(float(value) for value in exclusion)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"IMG-to-SVG crop {crop_id} text_exclusion_boxes must be numeric: {path}") from exc
-                if _rects_intersect(crop_rect, exclusion_rect):
-                    raise ValueError(
-                        f"IMG-to-SVG crop {crop_id} intersects a declared text exclusion box; keep text outside crops: {path}"
-                    )
-        if crop_area > total_area * IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO:
-            raise ValueError(
-                f"IMG-to-SVG crop manifest covers more than {IMG_SVG_MAX_CROP_TOTAL_AREA_RATIO:.0%} "
-                f"of the slide in aggregate; reconstruct cards and text as vectors: {path}"
-            )
-        for first_index, (first_id, first_rect) in enumerate(crop_rects):
-            for second_id, second_rect in crop_rects[first_index + 1:]:
-                if _rects_form_crop_tiles(first_rect, second_rect):
-                    raise ValueError(
-                        f"IMG-to-SVG crops {first_id} and {second_id} form adjacent/overlapping tiles; "
-                        f"do not split a text-bearing region to evade crop limits: {path}"
-                    )
-    else:
-        if svg_stats.get("embedded_image_count", 0):
-            raise ValueError(
-                f"IMG-to-SVG SVG contains embedded images but the crop manifest is empty; "
-                f"declare every <image data-crop-id> crop: {path}"
-            )
-        reason = str(manifest.get("no_crops_reason") or "").strip()
-        if len(reason) < 20:
-            raise ValueError(f"IMG-to-SVG empty crop manifest needs a specific no_crops_reason: {path}")
-        if icon_strategy not in {"faithful_vector_trace", "no_icons_visible"}:
-            raise ValueError(f"IMG-to-SVG empty crop manifest needs a trace/no-icons strategy: {path}")
+            _require_text_occurrences([text_by_id[key] for key in replacement], later_text, complete=False)
+        except ValueError as exc:
+            raise ValueError("IMG-to-SVG replacement text must appear after the backplate image") from exc
     return manifest
 
 
-def validate_img_svg_fidelity_review(job: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+def img_svg_review_inputs(job: dict[str, Any], environment: str) -> dict[str, Any]:
+    crop_path = Path(job["crop_manifest_path"])
+    return {
+        "version": 2,
+        "slide_index": job["index"],
+        "source_image_path": str(Path(job["source_image_path"]).resolve()),
+        "source_image_sha256": file_sha256(Path(job["source_image_path"])),
+        "svg_path": str(Path(job["target_path"]).resolve()),
+        "svg_sha256": file_sha256(Path(job["target_path"])),
+        "text_sha256": text_sha256(json.dumps(img_svg_text_items(job), ensure_ascii=False, sort_keys=True)),
+        "crop_sha256": file_sha256(crop_path) if crop_path.exists() else None,
+        "render_environment": environment,
+    }
+
+
+def write_img_svg_review_artifact(job: dict[str, Any], *, environment: str | None = None, force_render: bool = False,
+                                  svg_stats: dict[str, Any] | None = None) -> dict[str, Any]:
+    inputs = img_svg_review_inputs(job, environment or img_svg_render_environment())
     path = Path(job["fidelity_review_path"])
+    preview = Path(job["rendered_preview_path"])
+    previous = read_json(path, {})
+    unchanged = all(previous.get(key) == value for key, value in inputs.items())
+    if unchanged and preview.is_file() and previous.get("preview_sha256") == file_sha256(preview) and not force_render:
+        return previous
+    metrics = render_img_svg_review(Path(job["source_image_path"]), Path(job["target_path"]), preview)
+    review = {**inputs, "rendered_preview_path": str(preview), "preview_sha256": file_sha256(preview),
+              "automatic_metrics": metrics, "status": "pending_visual_review", "text_checked": False,
+              "svg_diagnostics": svg_stats if svg_stats is not None else validate_ppt_compatible_svg(Path(job["target_path"])),
+              "reviewer": "", "notes": "", "updated_at": utc_now()}
+    write_json(path, review)
+    return review
+
+
+def validate_img_svg_fidelity_review(job: dict[str, Any], review: dict[str, Any], *, environment: str | None = None) -> dict[str, Any]:
+    inputs = img_svg_review_inputs(job, environment or img_svg_render_environment())
+    if any(review.get(key) != value for key, value in inputs.items()):
+        raise ValueError("IMG-to-SVG review is stale; run complete-img-svg and review changed pages")
+    preview = Path(job["rendered_preview_path"])
+    if not preview.is_file() or review.get("preview_sha256") != file_sha256(preview):
+        raise ValueError("IMG-to-SVG review preview changed or is missing; rerun complete-img-svg")
     if review.get("status") != "pass":
-        raise RuntimeError(f"IMG-to-SVG visual review is pending: {path}")
-    required_true = (
-        "source_image_inspected",
-        "rendered_svg_inspected",
-        "layout_preserved",
-        "icons_preserved",
-        "source_specific_artwork_preserved",
-        "all_visible_text_editable",
-        "no_redesign",
-    )
-    missing = [key for key in required_true if review.get(key) is not True]
-    if missing:
-        raise ValueError(f"IMG-to-SVG visual review is missing confirmations {missing}: {path}")
-    if not str(review.get("reviewer") or "").strip():
-        raise ValueError(f"IMG-to-SVG visual review must record a reviewer: {path}")
-    if len(str(review.get("notes") or "").strip()) < 12:
-        raise ValueError(f"IMG-to-SVG visual review needs concrete notes: {path}")
-    similarity = float((review.get("automatic_metrics") or {}).get("combined_similarity", 0.0))
-    if similarity < IMG_SVG_REVIEW_MIN_SIMILARITY:
-        override = str(review.get("low_similarity_override_reason") or "").strip()
-        if len(override) < 20:
-            raise ValueError(
-                f"IMG-to-SVG similarity {similarity:.3f} is below {IMG_SVG_REVIEW_MIN_SIMILARITY:.2f}; "
-                f"revise the slide or record a concrete low_similarity_override_reason: {path}"
-            )
+        raise RuntimeError(f"IMG-to-SVG visual review is pending: {job['fidelity_review_path']}")
+    if review.get("text_checked") is not True or not str(review.get("reviewer", "")).strip() or not str(review.get("notes", "")).strip():
+        raise ValueError("IMG-to-SVG passed review needs text_checked, reviewer and concrete notes")
     return review
 
 
 def prepare_img_svg_jobs(run_dir: Path, state: dict[str, Any]) -> Path:
     images = require_complete_img_sources(run_dir)
-    jobs = slide_jobs(run_dir)
+    plans = slide_jobs(run_dir)
     jobs_dir = render_jobs_root(run_dir, "img-svg")
     target_dir = run_dir / "img-svg"
-    reviews_dir = jobs_dir / "reviews"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     target_dir.mkdir(parents=True, exist_ok=True)
-
-    # A fresh opt-in must regenerate every SVG from the current IMG pages.
-    for stale in target_dir.glob("*.svg"):
-        stale.unlink()
-    for stale in jobs_dir.glob("*.json"):
-        stale.unlink()
-    if reviews_dir.exists():
-        shutil.rmtree(reviews_dir)
-    reviews_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt_sha256 = text_sha256(IMG_SVG_COMPILED_PROMPT)
-
-    shared_context_path = jobs_dir / "shared-context.json"
-    write_json(shared_context_path, {
-        "version": 2,
-        "topic": infer_topic(run_dir),
-        "audience": state.get("audience"),
-        "renderer": "img-svg",
-        "source_renderer": "img",
-        "slide_count": len(images),
-        "task_type": "faithful_visual_tracing_not_redesign",
-        "priority_order": [
-            "editable_visible_text",
-            "pixel_level_visual_resemblance",
-            "preserve_every_visible_element_and_icon",
-            "exact_copy_geometry_and_reading_order",
-            "powerpoint_compatibility",
-            "editability",
-            "svg_simplicity",
-        ],
-        "model_input_rule": (
-            "Attach each source_image_path and the compiled_prompt in the same vision-model turn. "
-            "The source image is the sole visual truth; this is tracing, not redesign."
-        ),
-        "output_rule": (
-            "Write one final 1280x720 hybrid SVG and one version-3 crop manifest per source image. "
-            "Inventory text and artwork; rebuild stable geometry as vectors and use exact tight source "
-            "crops by default for icons, logos, illustrations, photos, and textures."
-        ),
-        "compiled_prompt": IMG_SVG_COMPILED_PROMPT,
-        "compiled_prompt_sha256": prompt_sha256,
-        "completion_rule": (
-            "complete-img-svg renders each SVG for comparison and requires conversion evidence, a crop "
-            "manifest, and an explicit source-vs-render visual review pass before export."
-        ),
-        "crop_helper_path": str(
-            Path(__file__).resolve().parent / "embed_img_crops.py"
-        ),
-    })
-
-    manifest_slides: list[dict[str, Any]] = []
-    for index, image_path in enumerate(images, start=1):
-        plan = jobs[index - 1] if index - 1 < len(jobs) else {}
-        target_path = target_dir / f"{image_path.stem}.svg"
-        job_path = jobs_dir / f"slide-{index:02d}.json"
-        crop_manifest_path = jobs_dir / f"slide-{index:02d}-crops.json"
-        conversion_evidence_path = jobs_dir / f"slide-{index:02d}-conversion-evidence.json"
-        fidelity_review_path = reviews_dir / f"slide-{index:02d}-fidelity-review.json"
-        rendered_preview_path = reviews_dir / f"slide-{index:02d}-rendered.png"
-        payload = {
-            "version": 2,
-            "renderer": "img-svg",
-            "source_renderer": "img",
-            "index": int(plan.get("index", index)),
-            "title": plan.get("title", image_path.stem),
-            "page_role": plan.get("page_role", "content"),
-            "source_image_path": str(image_path),
-            "target_path": str(target_path),
-            "crop_manifest_path": str(crop_manifest_path),
-            "conversion_evidence_path": str(conversion_evidence_path),
-            "fidelity_review_path": str(fidelity_review_path),
-            "rendered_preview_path": str(rendered_preview_path),
-            "shared_context_path": str(shared_context_path),
-            "prompt_contract_path": str(
-                Path(__file__).resolve().parents[1] / "references" / "prompt-contracts.md"
-            ),
-            "prompt_contract_section": "IMG-to-SVG Model Conversion Contract",
-            "compiled_prompt": IMG_SVG_COMPILED_PROMPT,
-            "compiled_prompt_sha256": prompt_sha256,
-            "required_model_input": {
-                "mode": "image_and_prompt_same_model_turn",
-                "image_path": str(image_path),
-                "prompt_field": "compiled_prompt",
-                "visual_source_of_truth": "source_image_only",
-            },
-            "crop_helper_path": str(
-                Path(__file__).resolve().parent / "embed_img_crops.py"
-            ),
-        }
-        write_json(job_path, payload)
-        write_json(
-            crop_manifest_path,
-            img_svg_crop_manifest_template(image_path, target_path),
-        )
-        write_json(
-            conversion_evidence_path,
-            img_svg_conversion_evidence_template(image_path, prompt_sha256),
-        )
-        manifest_slides.append({
-            "index": payload["index"],
-            "title": payload["title"],
-            "source_image_path": str(image_path),
-            "job_path": str(job_path),
-            "target_path": str(target_path),
-            "crop_manifest_path": str(crop_manifest_path),
-            "conversion_evidence_path": str(conversion_evidence_path),
-            "fidelity_review_path": str(fidelity_review_path),
-            "rendered_preview_path": str(rendered_preview_path),
-            "compiled_prompt_sha256": prompt_sha256,
+    slides = []
+    for index, (source, plan) in enumerate(zip(images, plans), start=1):
+        slides.append({
+            "index": index, "title": plan.get("title", source.stem),
+            "source_image_path": str(source), "target_path": str(target_dir / f"{source.stem}.svg"),
+            "crop_manifest_path": str(jobs_dir / f"slide-{index:02d}-crops.json"),
+            "rendered_preview_path": str(jobs_dir / "reviews" / f"slide-{index:02d}-rendered.png"),
+            "fidelity_review_path": str(jobs_dir / "reviews" / f"slide-{index:02d}-fidelity-review.json"),
+            "visible_text": [],
         })
-
-    manifest_path = jobs_dir / "manifest.json"
-    write_json(manifest_path, {
-        "version": 2,
-        "renderer": "img-svg",
-        "source_renderer": "img",
-        "topic": infer_topic(run_dir),
-        "slide_count": len(images),
-        "shared_context_path": str(shared_context_path),
-        "slides": manifest_slides,
+    manifest_path = write_json(jobs_dir / "manifest.json", {
+        "version": 3, "renderer": "img-svg", "slide_count": len(slides),
+        "prompt_path": str(IMG_SVG_PROMPT_PATH), "slides": slides,
     })
-
     entry = renderer_state(state, "img")
-    conversion = dict(entry.get("svg_conversion") or {})
-    entry["svg_conversion"] = {
-        **conversion,
-        "mode": "on",
-        "status": "pending_generation",
-        "manifest_path": str(manifest_path),
-        "shared_context_path": str(shared_context_path),
-        "target_dir": str(target_dir),
-        "updated_at": utc_now(),
-    }
-    entry["status"] = "img_svg_generation_pending"
-    state["status"] = "img_svg_generation_pending"
+    entry["svg_conversion"].update({"mode": "on", "status": "pending_generation", "manifest_path": str(manifest_path)})
     save_state(run_dir, state)
     return manifest_path
+
+
+def img_svg_jobs(run_dir: Path, conversion: dict[str, Any]) -> list[dict[str, Any]]:
+    manifest = read_json(Path(conversion["manifest_path"]))
+    pages = manifest.get("slides", [])
+    images = require_complete_img_sources(run_dir)
+    if len(pages) != len(images) or manifest.get("slide_count", len(pages)) != len(images):
+        raise ValueError("IMG-to-SVG pages mismatch with source images")
+    jobs = []
+    for index, (page, source) in enumerate(zip(pages, images), start=1):
+        # V2 per-page jobs remain readable; they need a new V2 review, not regeneration.
+        job = read_json(Path(page["job_path"])) if manifest.get("version", 2) < 3 else page
+        expected = run_dir / "img-svg" / f"{source.stem}.svg"
+        if job["index"] != index or Path(job["source_image_path"]).resolve() != source.resolve() or Path(job["target_path"]).resolve() != expected.resolve():
+            raise ValueError("IMG-to-SVG page mapping/order mismatch")
+        for key in ("crop_manifest_path", "rendered_preview_path", "fidelity_review_path"):
+            if not is_within(Path(job[key]).resolve(), run_dir.resolve()):
+                raise ValueError(f"IMG-to-SVG {key} must remain in the project")
+        jobs.append(job)
+    actual = {path.resolve() for path in (run_dir / "img-svg").glob("*.svg")}
+    expected = {Path(job["target_path"]).resolve() for job in jobs}
+    if actual != expected:
+        raise ValueError("IMG-to-SVG output mismatch: missing or extra SVG pages")
+    return jobs
 
 
 def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
@@ -1904,7 +1219,7 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
     if normalized_view_box != [0.0, 0.0, 1280.0, 720.0]:
         raise ValueError(f"SVG viewBox must be exactly '0 0 1280 720': {path}")
 
-    forbidden = {"foreignobject", "script"}
+    forbidden = {"foreignobject", "script", "animate", "animatetransform", "animatemotion", "set"}
     raster_area = 0.0
     vector_element_count = 0
     embedded_image_count = 0
@@ -1948,7 +1263,7 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
                 height = float(element.attrib.get("height", "0"))
             except ValueError as exc:
                 raise ValueError(f"SVG <image> geometry must be numeric: {path}") from exc
-            if width <= 0 or height <= 0:
+            if not all(math.isfinite(v) for v in (x, y, width, height)) or width <= 0 or height <= 0:
                 raise ValueError(f"SVG <image> width and height must be positive: {path}")
             if x <= 1 and y <= 1 and width >= 1278 and height >= 718:
                 raise ValueError(
@@ -1956,6 +1271,8 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
                 )
             raster_area += width * height
         for attribute, value in element.attrib.items():
+            if attribute.rsplit("}", 1)[-1].lower().startswith("on"):
+                raise ValueError(f"SVG contains an event handler: {path}")
             if (
                 attribute.rsplit("}", 1)[-1].lower() == "href"
                 and value
@@ -1964,15 +1281,13 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
                 raise ValueError(f"SVG contains an external href: {path}")
 
     source = path.read_text(encoding="utf-8").lower()
-    if any(marker in source for marker in ("url(http://", "url(https://", "@import")):
-        raise ValueError(f"SVG contains external image or stylesheet data: {path}")
+    if "@import" in source:
+        raise ValueError(f"SVG contains external stylesheet data: {path}")
+    for reference in re.findall(r"url\s*\((.*?)\)", source, re.DOTALL):
+        if not reference.strip().strip("\"'").startswith("#"):
+            raise ValueError(f"SVG contains an external CSS resource: {path}")
     if vector_element_count == 0:
         raise ValueError(f"SVG must contain vector text or shape elements: {path}")
-    if raster_area > 1280 * 720 * IMG_SVG_MAX_EMBEDDED_RASTER_RATIO:
-        raise ValueError(
-            f"SVG embedded raster regions cover more than {IMG_SVG_MAX_EMBEDDED_RASTER_RATIO:.0%} "
-            f"of the slide; reconstruct cards and text as vectors: {path}"
-        )
     return {
         "vector_element_count": vector_element_count,
         "embedded_image_count": embedded_image_count,
@@ -1981,67 +1296,30 @@ def validate_ppt_compatible_svg(path: Path) -> dict[str, Any]:
     }
 
 
-def complete_img_svg_generation(run_dir: Path) -> list[Path]:
+def complete_img_svg_generation(run_dir: Path, *, force_render: bool = False) -> list[Path]:
     state = load_state(run_dir)
     if state.get("renderer") != "img":
         raise RuntimeError("IMG-to-SVG completion is only available for the img renderer")
     entry = renderer_state(state, "img")
-    conversion = dict(entry.get("svg_conversion") or {})
+    conversion = entry["svg_conversion"]
     if conversion.get("mode") != "on":
         raise RuntimeError("IMG-to-SVG conversion is not enabled")
-    if conversion.get("status") != "pending_generation":
-        raise RuntimeError("IMG-to-SVG generation is not pending")
-
-    manifest = read_json(Path(conversion["manifest_path"]))
-    expected_paths = [Path(item["target_path"]) for item in manifest.get("slides", [])]
-    actual_paths = sorted((run_dir / "img-svg").glob("*.svg"))
-    if {path.resolve() for path in actual_paths} != {path.resolve() for path in expected_paths}:
-        raise ValueError(
-            f"IMG-to-SVG output mismatch: expected {len(expected_paths)} exact page files, found {len(actual_paths)}"
-        )
-    issues: list[str] = []
-    review_paths: list[str] = []
-    for item in manifest.get("slides", []):
-        job = read_json(Path(item["job_path"]))
-        svg_path = Path(job["target_path"])
-        svg_stats = validate_ppt_compatible_svg(svg_path)
-        try:
-            validate_img_svg_conversion_evidence(job)
-        except (ValueError, FileNotFoundError) as exc:
-            issues.append(str(exc))
-        try:
-            validate_img_svg_crop_manifest(job, svg_stats)
-        except (ValueError, FileNotFoundError) as exc:
-            issues.append(str(exc))
-
-        review = write_img_svg_review_artifact(job)
-        review_paths.append(str(job["fidelity_review_path"]))
-        try:
-            validate_img_svg_fidelity_review(job, review)
-        except (ValueError, RuntimeError) as exc:
-            issues.append(str(exc))
-
-    if issues:
-        detail = "\n- ".join(issues)
-        raise RuntimeError(
-            "IMG-to-SVG fidelity gate is not satisfied. Inspect each source image beside its rendered "
-            "preview, repair the SVG when needed, complete the evidence/crop manifests, mark the fidelity "
-            f"review pass, and rerun complete-img-svg:\n- {detail}"
-        )
-
-    entry["svg_conversion"] = {
-        **conversion,
-        "status": "completed",
-        "svg_count": len(actual_paths),
-        "svg_paths": [str(path) for path in actual_paths],
-        "fidelity_review_paths": review_paths,
-        "fidelity_gate": "passed",
-        "completed_at": utc_now(),
-    }
-    entry["status"] = "img_svg_export_ready"
-    state["status"] = "img_svg_export_ready"
+    jobs = img_svg_jobs(run_dir, conversion)
+    environment = img_svg_render_environment()
+    pending = False
+    for job in jobs:
+        stats = validate_ppt_compatible_svg(Path(job["target_path"]))
+        validate_img_svg_crop_manifest(job, stats)
+        review = write_img_svg_review_artifact(job, environment=environment, force_render=force_render, svg_stats=stats)
+        if review["status"] != "pass":
+            pending = True
+        else:
+            validate_img_svg_fidelity_review(job, review, environment=environment)
+    conversion["status"] = "pending_generation" if pending else "completed"
+    entry["status"] = "img_svg_review_pending" if pending else "img_svg_export_ready"
+    state["status"] = entry["status"]
     save_state(run_dir, state)
-    return actual_paths
+    return [] if pending else [Path(job["target_path"]) for job in jobs]
 
 
 def export_svg(run_dir: Path) -> Path:
@@ -2189,12 +1467,15 @@ def export_img_svg(run_dir: Path) -> Path:
     from pptx_builder import build_native_svg_pptx
 
     svg_dir = run_dir / "img-svg"
-    svg_paths = sorted(svg_dir.glob("*.svg"))
-    for svg_path in svg_paths:
-        validate_ppt_compatible_svg(svg_path)
+    jobs = img_svg_jobs(run_dir, conversion)
+    environment = img_svg_render_environment()
+    for job in jobs:
+        validate_img_svg_fidelity_review(job, read_json(Path(job["fidelity_review_path"])), environment=environment)
+        stats = validate_ppt_compatible_svg(Path(job["target_path"]))
+        validate_img_svg_crop_manifest(job, stats)
 
     pptx_path = run_dir / renderer_pptx_name(run_dir, "img-svg")
-    build_native_svg_pptx(svg_dir, pptx_path)
+    build_native_svg_pptx(svg_dir, pptx_path, svg_paths=[Path(job["target_path"]) for job in jobs])
 
     manifest = read_json(Path(conversion["manifest_path"]))
     slides = manifest.get("slides", [])
@@ -2416,9 +1697,9 @@ def cmd_choose_img_svg(args: argparse.Namespace) -> None:
 
 def cmd_complete_img_svg(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
-    svg_paths = complete_img_svg_generation(run_dir)
+    svg_paths = complete_img_svg_generation(run_dir, force_render=getattr(args, "force_render", False))
     print(f"img_svg_completed={len(svg_paths)}", flush=True)
-    print("next=export-img-svg", flush=True)
+    print("next=export-img-svg" if svg_paths else "next=review-img-svg", flush=True)
 
 
 def cmd_export_img_svg(args: argparse.Namespace) -> None:
@@ -2564,6 +1845,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     complete_img_svg = sub.add_parser("complete-img-svg")
     complete_img_svg.add_argument("--run-dir", required=True)
+    complete_img_svg.add_argument("--force-render", action="store_true", help="Regenerate previews and invalidate visual reviews")
     complete_img_svg.set_defaults(func=cmd_complete_img_svg)
 
     export_img_svg_parser = sub.add_parser("export-img-svg")

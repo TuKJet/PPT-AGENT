@@ -87,24 +87,19 @@ class PromptContractsAudienceTests(unittest.TestCase):
             / "skills"
             / "ppt-deck-workflow"
             / "references"
-            / "prompt-contracts.md"
+            / "img-svg-prompt.md"
         )
         text = path.read_text(encoding="utf-8")
 
-        self.assertIn("This is NOT a slide redesign", text)
-        self.assertIn("sole and mandatory visual source of truth", text)
-        self.assertIn("Pixel-level visual resemblance", text)
-        self.assertIn("Every visible icon", text)
-        self.assertIn("Never replace an original icon", text)
-        self.assertIn("image_and_prompt_same_model_turn", text)
-        self.assertIn("combined similarity", text)
-        self.assertIn("complete `visible_text_inventory`", text)
-        self.assertIn("Rasterized visible text is an automatic failure", text)
-        self.assertIn("adjacent or overlapping crops", text)
-        self.assertIn("`all_visible_text_editable`", text)
-        self.assertIn("visual-element inventory", text)
-        self.assertIn("Preserve icons, logos, illustrations", text)
-        self.assertIn("lines, boxes, dividers, arrows, and simple geometry vector", text)
+        self.assertIn("not redesign", text.lower())
+        self.assertIn("sole visual source of truth", text)
+        self.assertIn("every visible word", text.lower())
+        self.assertIn("Choose the representation", text)
+        self.assertIn("complex_backplate", text)
+        self.assertIn("version-4 crop manifest", text)
+        self.assertIn("visible_text", text)
+        self.assertIn("adjacent tile", text)
+        self.assertIn("Do not create conversion-evidence files", text)
 
 
 if __name__ == "__main__":

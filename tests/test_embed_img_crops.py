@@ -7,6 +7,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from xml.etree import ElementTree
 
 from PIL import Image
@@ -29,6 +30,25 @@ def load_crop_module():
 
 
 class EmbedImgCropsTests(unittest.TestCase):
+    def _case(self, root: Path, svg: str, crops: list[dict]) -> Path:
+        source_path = root / "slide.png"
+        Image.new("RGB", (100, 50), "#ffffff").save(source_path)
+        svg_path = root / "slide.svg"
+        svg_path.write_text(svg, encoding="utf-8")
+        manifest_path = root / "crops.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "source_image_path": str(source_path),
+                    "svg_path": str(svg_path),
+                    "canvas": {"width": 100, "height": 50},
+                    "crops": crops,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return manifest_path
+
     def test_embeds_a_scaled_source_crop_without_writing_temp_pngs(self) -> None:
         module = load_crop_module()
         with tempfile.TemporaryDirectory() as tmp:
@@ -139,6 +159,89 @@ class EmbedImgCropsTests(unittest.TestCase):
             self.assertLess(max(embedded.getpixel((15, 11))), 130)
             self.assertEqual(embedded.getpixel((30, 10)), (218, 163, 93))
             self.assertEqual(list(root.glob("*.png")), [source_path])
+
+    def test_rejects_duplicate_manifest_crop_ids(self) -> None:
+        module = load_crop_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._case(
+                root,
+                "<svg xmlns='http://www.w3.org/2000/svg'><image data-crop-id='logo'/></svg>",
+                [
+                    {"id": "logo", "source_box": [0, 0, 10, 10]},
+                    {"id": "logo", "source_box": [10, 0, 10, 10]},
+                ],
+            )
+            with self.assertRaisesRegex(ValueError, "manifest IDs must be unique"):
+                module.embed_crops(manifest)
+
+    def test_rejects_duplicate_svg_crop_ids(self) -> None:
+        module = load_crop_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._case(
+                root,
+                "<svg xmlns='http://www.w3.org/2000/svg'><image data-crop-id='logo'/><image data-crop-id='logo'/></svg>",
+                [{"id": "logo", "source_box": [0, 0, 10, 10]}],
+            )
+            with self.assertRaisesRegex(ValueError, "SVG crop IDs must be unique"):
+                module.embed_crops(manifest)
+
+    def test_rejects_crop_id_reference_mismatch(self) -> None:
+        module = load_crop_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._case(
+                root,
+                "<svg xmlns='http://www.w3.org/2000/svg'><image data-crop-id='other'/></svg>",
+                [{"id": "logo", "source_box": [0, 0, 10, 10]}],
+            )
+            with self.assertRaisesRegex(ValueError, "do not match"):
+                module.embed_crops(manifest)
+
+    def test_rejects_non_finite_and_out_of_canvas_boxes(self) -> None:
+        module = load_crop_module()
+        cases = [
+            (["NaN", 0, 10, 10], "finite numbers"),
+            ([0, 0, 0, 10], "positive size"),
+            ([95, 0, 10, 10], "stay inside canvas"),
+        ]
+        for box, message in cases:
+            with self.subTest(box=box):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    manifest = self._case(
+                        root,
+                        "<svg xmlns='http://www.w3.org/2000/svg'><image data-crop-id='logo'/></svg>",
+                        [{"id": "logo", "source_box": box}],
+                    )
+                    with self.assertRaisesRegex(ValueError, message):
+                        module.embed_crops(manifest)
+
+    def test_rejects_unresolved_crop_placeholder(self) -> None:
+        module = load_crop_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._case(
+                root,
+                "<svg xmlns='http://www.w3.org/2000/svg'><image data-crop-id='logo' href='placeholder'/></svg>",
+                [{"id": "logo", "source_box": [0, 0, 10, 10]}],
+            )
+            with patch.object(module, "crop_data_uri", return_value="placeholder"):
+                with self.assertRaisesRegex(ValueError, "unresolved crop placeholders"):
+                    module.embed_crops(manifest)
+
+    def test_shared_validation_allows_an_explicit_no_crop_manifest(self) -> None:
+        module = load_crop_module()
+        root = ElementTree.fromstring(
+            "<svg xmlns='http://www.w3.org/2000/svg'><rect width='100' height='50'/></svg>"
+        )
+        self.assertEqual(
+            module.validate_crop_entries(
+                {"canvas": {"width": 100, "height": 50}, "crops": []}, root
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
+import posixpath
+import re
 import zipfile
+from collections.abc import Sequence
+from xml.etree import ElementTree
 from pathlib import Path
 
 from pptx import Presentation
@@ -72,11 +77,185 @@ def build_pptx(svg_dir: Path, output_path: Path) -> Path:
     return output_path
 
 
-def build_native_svg_pptx(svg_dir: Path, output_path: Path) -> Path:
-    """Build a widescreen PPTX with each source page embedded as native SVG."""
-    svg_files = sorted(svg_dir.glob("*.svg"))
-    if not svg_files:
+def _svg_paths(svg_dir: Path, svg_paths: Sequence[Path] | None) -> list[Path]:
+    if svg_paths is None:
+        paths = sorted(svg_dir.glob("*.svg"))
+    else:
+        paths = [Path(path) for path in svg_paths]
+    if not paths:
         raise ValueError(f"SVG directory is empty: {svg_dir}")
+    missing = [path for path in paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"SVG source is missing: {missing[0]}")
+    return paths
+
+
+def _style_declarations(value: str) -> dict[str, str]:
+    """Parse the simple declaration form emitted by the browser exporter."""
+    declarations: dict[str, str] = {}
+    for declaration in value.split(";"):
+        if ":" not in declaration:
+            continue
+        name, item = declaration.split(":", 1)
+        name = " ".join(name.lower().split())
+        item = " ".join(item.lower().split())
+        if name and item:
+            declarations[name] = item
+    return declarations
+
+
+def _style_value_matches(expected: str, actual: str) -> bool:
+    if expected == actual:
+        return True
+    # Chromium serializes hex colors as rgb(...), while preserving the same style.
+    if expected.startswith("#") and len(expected) in {4, 7}:
+        digits = expected[1:]
+        if len(digits) == 3:
+            digits = "".join(char * 2 for char in digits)
+        rgb = tuple(int(digits[index:index + 2], 16) for index in (0, 2, 4))
+        return actual.replace(" ", "") in {
+            f"rgb({rgb[0]},{rgb[1]},{rgb[2]})",
+            f"rgba({rgb[0]},{rgb[1]},{rgb[2]},1)",
+        }
+    return False
+
+
+def _svg_signature(svg_text: str, reference_text: str | None = None) -> str:
+    """Hash SVG structure, allowing only exporter-added root sizing and style declarations."""
+    root = ElementTree.fromstring(svg_text)
+    reference_root = ElementTree.fromstring(reference_text) if reference_text is not None else root
+
+    def canonical(node: ElementTree.Element, reference: ElementTree.Element, *, is_root: bool) -> tuple:
+        reference_attributes = {
+            key.rsplit("}", 1)[-1]
+            for key in reference.attrib
+            if key.rsplit("}", 1)[-1] != "style"
+            and not (is_root and key.rsplit("}", 1)[-1] in {"width", "height"})
+        }
+        attrs = tuple(
+            sorted(
+                (key.rsplit("}", 1)[-1], value)
+                for key, value in node.attrib.items()
+                if key.rsplit("}", 1)[-1] in reference_attributes
+            )
+        )
+        expected_style = _style_declarations(reference.attrib.get("style", ""))
+        actual_style = _style_declarations(node.attrib.get("style", ""))
+        style = tuple(
+            sorted(
+                (name, value)
+                for name, value in expected_style.items()
+                if name in actual_style and _style_value_matches(value, actual_style[name])
+            )
+        )
+        # A missing source declaration must change the signature as well.
+        if len(style) != len(expected_style):
+            style = ("__missing_source_style__",)
+        if len(node) != len(reference):
+            children = ("__child_count_mismatch__", len(node), len(reference))
+        else:
+            children = tuple(
+                canonical(child, reference_child, is_root=False)
+                for child, reference_child in zip(node, reference)
+            )
+        return (
+            node.tag.rsplit("}", 1)[-1],
+            attrs,
+            style,
+            node.text or "",
+            node.tail or "",
+            children,
+        )
+
+    return hashlib.sha256(repr(canonical(root, reference_root, is_root=True)).encode("utf-8")).hexdigest()
+
+
+def _validate_native_svg_package(output_path: Path, svg_texts: Sequence[str]) -> None:
+    """Verify slide-to-SVG relationships and preserve the submitted SVG order."""
+    rel_namespace = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    with zipfile.ZipFile(output_path) as archive:
+        names = set(archive.namelist())
+        slide_numbers = sorted(
+            int(match.group(1))
+            for name in names
+            if (match := re.fullmatch(r"ppt/slides/slide(\d+)\.xml", name))
+        )
+        expected_numbers = list(range(1, len(svg_texts) + 1))
+        if slide_numbers != expected_numbers:
+            raise RuntimeError(
+                f"Native SVG slide count/order check failed: expected {expected_numbers}, found {slide_numbers}"
+            )
+
+        expected_signatures = [_svg_signature(svg_text) for svg_text in svg_texts]
+
+        referenced_svg_names: list[str] = []
+        for slide_number, expected_signature in zip(slide_numbers, expected_signatures):
+            slide_name = f"ppt/slides/slide{slide_number}.xml"
+            slide_root = ElementTree.fromstring(archive.read(slide_name))
+            svg_blips = [
+                node
+                for node in slide_root.iter()
+                if node.tag.rsplit("}", 1)[-1] == "svgBlip"
+            ]
+            if len(svg_blips) != 1:
+                raise RuntimeError(
+                    f"Native SVG relationship check failed for slide {slide_number}: "
+                    f"expected one svgBlip, found {len(svg_blips)}"
+                )
+            relationship_id = svg_blips[0].get(f"{rel_namespace}embed")
+            rels_name = f"ppt/slides/_rels/slide{slide_number}.xml.rels"
+            if not relationship_id or rels_name not in names:
+                raise RuntimeError(f"Native SVG relationship check failed for slide {slide_number}")
+            rels_root = ElementTree.fromstring(archive.read(rels_name))
+            target = next(
+                (
+                    relationship.get("Target")
+                    for relationship in rels_root
+                    if relationship.get("Id") == relationship_id
+                ),
+                None,
+            )
+            if not target:
+                raise RuntimeError(
+                    f"Native SVG relationship check failed for slide {slide_number}: "
+                    f"missing target for {relationship_id}"
+                )
+            media_name = posixpath.normpath(
+                posixpath.join(posixpath.dirname(slide_name), target)
+            ).lstrip("/")
+            if not media_name.startswith("ppt/media/") or not media_name.endswith(".svg") or media_name not in names:
+                raise RuntimeError(
+                    f"Native SVG relationship check failed for slide {slide_number}: invalid target {target}"
+                )
+            referenced_svg_names.append(media_name)
+            actual_signature = _svg_signature(
+                archive.read(media_name).decode("utf-8"),
+                reference_text=svg_texts[slide_number - 1],
+            )
+            if actual_signature != expected_signature:
+                raise RuntimeError(
+                    f"Native SVG order/content check failed for slide {slide_number}: "
+                    "embedded SVG does not match the submitted page"
+                )
+
+        archive_svg_names = sorted(
+            name for name in names if name.startswith("ppt/media/") and name.endswith(".svg")
+        )
+        if len(archive_svg_names) != len(svg_texts) or set(referenced_svg_names) != set(archive_svg_names):
+            raise RuntimeError(
+                f"Native SVG media check failed: expected {len(svg_texts)} referenced SVG media files, "
+                f"found {len(archive_svg_names)}"
+            )
+
+
+def build_native_svg_pptx(
+    svg_dir: Path,
+    output_path: Path,
+    *,
+    svg_paths: Sequence[Path] | None = None,
+) -> Path:
+    """Build a widescreen PPTX with each source page embedded as native SVG."""
+    svg_files = _svg_paths(svg_dir, svg_paths)
 
     bundle_path = (
         Path(__file__).resolve().parent
@@ -150,17 +329,13 @@ def build_native_svg_pptx(svg_dir: Path, output_path: Path) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(base64.b64decode(encoded))
 
-    with zipfile.ZipFile(output_path) as archive:
-        embedded_svgs = [
-            name
-            for name in archive.namelist()
-            if name.startswith("ppt/media/") and name.endswith(".svg")
-        ]
-    if len(embedded_svgs) < len(svg_files):
-        output_path.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"Native SVG embedding check failed: expected {len(svg_files)} SVG media files, "
-            f"found {len(embedded_svgs)}"
+    try:
+        _validate_native_svg_package(
+            output_path,
+            [path.read_text(encoding="utf-8") for path in svg_files],
         )
+    except (ElementTree.ParseError, UnicodeDecodeError, KeyError, RuntimeError) as exc:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Native SVG embedding check failed: {exc}") from exc
 
     return output_path
