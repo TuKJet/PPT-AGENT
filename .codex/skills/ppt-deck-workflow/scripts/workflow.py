@@ -159,7 +159,7 @@ def default_img_svg_conversion() -> dict[str, Any]:
 
 def default_state() -> dict[str, Any]:
     return {
-        "version": 6,
+        "version": 7,
         "status": "new",
         "approvals": {},
         "artifacts": {},
@@ -174,16 +174,7 @@ def default_state() -> dict[str, Any]:
 
 
 def default_renderer_state(renderer: str | None = None) -> dict[str, Any]:
-    review = {"mode": None, "status": "not_applicable"}
-    if renderer in {"html", "svg"}:
-        review = {"mode": None, "status": "pending_choice"}
-    elif renderer == "img":
-        review = dict(RENDER_REVIEW_NOT_APPLICABLE)
-    state = {
-        "status": "new",
-        "artifacts": {},
-        "review": review,
-    }
+    state = {"status": "new", "artifacts": {}, "review": dict(RENDER_REVIEW_NOT_APPLICABLE)}
     if renderer == "img":
         state["svg_conversion"] = default_img_svg_conversion()
     return state
@@ -286,7 +277,7 @@ def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     merged["renderers"] = normalized_renderers
     if merged.get("status") == "img_svg_choice_pending":
         merged["status"] = "completed"
-    merged["version"] = 6
+    merged["version"] = 7
     return merged
 
 
@@ -342,16 +333,11 @@ def init_state(run_dir: Path, *, topic: str, audience: str, pages: str, research
 
 
 def ensure_render_ready(run_dir: Path, renderer: str) -> None:
-    state = load_state(run_dir)
-    if renderer not in {"html", "svg"}:
-        return
-    review = renderer_state(state, renderer).get("review") or {}
-    review_status = review.get("status")
-    review_mode = review.get("mode")
-    if review_status == "pending_choice":
-        raise RuntimeError(f"{renderer} review preference is not confirmed. Confirm review preference first.")
-    if review_mode == "on" and review_status != "completed":
-        raise RuntimeError(f"{renderer} review subflow is not complete. Complete the review subflow first.")
+    require_approved(run_dir, "slide_plans")
+    if renderer not in {"img", "pptd"}:
+        raise ValueError("renderer must be img or pptd; HTML and standalone SVG are removed")
+    if load_state(run_dir).get("renderer") != renderer:
+        raise RuntimeError(f"choose-renderer --renderer {renderer} is required first")
 
 
 def mark_artifact(run_dir: Path, state: dict[str, Any], name: str, path: Path, preview_path: Path) -> None:
@@ -781,19 +767,19 @@ def render_jobs_root(run_dir: Path, renderer: str) -> Path:
 
 
 def render_target_path(run_dir: Path, renderer: str, index: int, title: str) -> Path:
-    extensions = {
-        "html": "html",
-        "svg": "svg",
-        "img": "png",
-    }
-    return run_dir / renderer / slide_filename(index, title, extensions[renderer])
+    if renderer == "pptd":
+        return run_dir / "pptd" / "pages" / slide_filename(index, title, "page")
+    if renderer != "img":
+        raise ValueError("renderer must be img or pptd")
+    return run_dir / "img" / slide_filename(index, title, "png")
 
 
 def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     require_approved(run_dir, "slide_plans")
-    if renderer not in {"html", "svg", "img"}:
-        raise ValueError("renderer must be html, svg, or img")
+    if renderer not in {"img", "pptd"}:
+        raise ValueError("renderer must be img or pptd")
 
+    ensure_render_ready(run_dir, renderer)
     state = load_state(run_dir)
     plan_document = slide_plan_document(run_dir)
     slides = list(plan_document.get("slides") or [])
@@ -801,6 +787,9 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     target_dir = run_dir / renderer
     target_dir.mkdir(parents=True, exist_ok=True)
+    if renderer == "pptd":
+        (target_dir / "pages").mkdir(exist_ok=True)
+        (target_dir / "media").mkdir(exist_ok=True)
 
     shared_context_path = jobs_dir / "shared-context.json"
     shared_context = {
@@ -811,16 +800,6 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         "design_system": plan_document.get("design_system") or {},
         "renderer": renderer,
         "slide_count": len(slides),
-        "slides": [
-            {
-                "index": int(job.get("index", idx)),
-                "title": job.get("title", f"Slide {idx}"),
-                "page_role": job.get("page_role", "content"),
-                "material": job.get("material", ""),
-                "plan": job.get("plan", ""),
-            }
-            for idx, job in enumerate(slides, start=1)
-        ],
     }
     write_json(shared_context_path, shared_context)
 
@@ -1322,105 +1301,37 @@ def complete_img_svg_generation(run_dir: Path, *, force_render: bool = False) ->
     return [] if pending else [Path(job["target_path"]) for job in jobs]
 
 
-def export_svg(run_dir: Path) -> Path:
-    require_approved(run_dir, "slide_plans")
-    from pptx_builder import build_pptx
+def validate_pptd_project(run_dir: Path) -> dict[str, Any]:
+    ensure_render_ready(run_dir, "pptd")
+    from pptd_runtime import validate_project
+    return validate_project(run_dir / "pptd", expected_pages=len(slide_jobs(run_dir)))
 
-    svg_dir = run_dir / "svg"
-    svg_files = sorted(svg_dir.glob("*.svg")) if svg_dir.exists() else []
-    if not svg_files:
-        raise ValueError(
-            f"SVG directory is empty: {svg_dir}. "
-            "This branch needs Codex-authored SVG source files before export."
-        )
 
-    pptx_path = run_dir / renderer_pptx_name(run_dir, "svg")
-    build_pptx(svg_dir, pptx_path)
-    jobs = slide_jobs(run_dir)
+def export_pptd(run_dir: Path) -> Path:
+    report = validate_pptd_project(run_dir)
+    from pptd_runtime import export_project
+    output = run_dir / renderer_pptx_name(run_dir, "pptd")
+    summary = export_project(run_dir / "pptd", output)
+    write_json(run_dir / "pptd-export.json", summary)
     write_slide_status(run_dir, {
-        f"{int(job.get('index', i)):02d}": {
-            "title": job.get("title", f"Slide {i}"),
-            "page_role": job.get("page_role", "content"),
-            "validation_status": "codex_generated",
-            "export_ready": True,
-        }
-        for i, job in enumerate(jobs, start=1)
-    }, renderer="svg")
-    mark_completed(run_dir, "svg", {"pptx": pptx_path})
-    return pptx_path
+        f"{i:02d}": {"page_path": path, "validation_status": "structure_and_pptx_verified",
+                      "visual_review": "not_verified_by_helper", "export_ready": True}
+        for i, path in enumerate(report["pages"], start=1)
+    }, renderer="pptd")
+    mark_completed(run_dir, "pptd", {"pptx": output, "project": run_dir / "pptd"})
+    return output
 
 
-def export_html(run_dir: Path, editable_engine: str | None = None) -> Path:
-    require_approved(run_dir, "slide_plans")
-    from html_pipeline.html_builder import build_pptx
+def cmd_validate_pptd(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    print(json.dumps(validate_pptd_project(run_dir), ensure_ascii=False), flush=True)
 
-    topic = infer_topic(run_dir)
-    html_dir = run_dir / "html"
-    html_files = sorted(html_dir.glob("*.html")) if html_dir.exists() else []
-    if not html_files:
-        raise ValueError(
-            f"HTML directory is empty: {html_dir}. "
-            "This branch needs Codex-authored HTML source files before export. "
-            "If you used clean-render, note that it only clears derived outputs; "
-            "HTML pages still must exist in this branch."
-        )
 
-    image_pptx = run_dir / renderer_pptx_name(run_dir, "html")
-    build_pptx(html_dir, image_pptx)
-
-    jobs = slide_jobs(run_dir)
-    slide_meta = []
-    for i, html_path in enumerate(html_files, start=1):
-        job = jobs[i - 1] if i - 1 < len(jobs) else {}
-        slide_meta.append({
-            "index": int(job.get("index", i)),
-            "title": job.get("title") or html_path.stem,
-            "page_role": job.get("page_role", "content"),
-            "html_path": str(html_path),
-        })
-
-    status = {
-        f"{item['index']:02d}": {
-            "title": item["title"],
-            "page_role": item["page_role"],
-            "validation_status": "codex_generated",
-            "export_ready": True,
-            "html_path": item["html_path"],
-        }
-        for item in slide_meta
-    }
-    write_slide_status(run_dir, status, renderer="html")
-
-    artifacts = {"image_pptx": image_pptx}
-    editable_dir = run_dir / "editable"
-    try:
-        from vendor_presentation_core.export.dom_pptx_exporter import build_dom_editable_deck_from_html
-
-        editable_pptx = build_dom_editable_deck_from_html(
-            html_dir=html_dir,
-            out_dir=editable_dir,
-            slide_meta=slide_meta,
-            deck_name=topic,
-        )
-        artifacts["editable_pptx"] = editable_pptx
-    except Exception as exc:
-        print(f"[warning] editable export skipped: {exc}", flush=True)
-
-    manifest = {
-        "version": 1,
-        "source": "codex-skill",
-        "topic": topic,
-        "renderer": "html",
-        "slides": slide_meta,
-        "image_pptx_path": str(image_pptx),
-        "editable_pptx_path": str(artifacts.get("editable_pptx", "")),
-        "editable_engine": editable_engine or "dom_export",
-        "updated_at": utc_now(),
-    }
-    manifest_path = write_json(run_dir / "editable-ppt-chain.json", manifest)
-    artifacts["chain_manifest"] = manifest_path
-    mark_completed(run_dir, "html", artifacts)
-    return image_pptx
+def cmd_open_pptd_editor(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    validate_pptd_project(run_dir)
+    from pptd_runtime import serve_editor
+    serve_editor(run_dir / "pptd", port=args.port, open_browser=args.open)
 
 
 def export_img(run_dir: Path) -> Path:
@@ -1521,7 +1432,7 @@ def export_img_svg(run_dir: Path) -> Path:
 
 def clean_render_outputs(run_dir: Path) -> None:
     root = run_dir.resolve()
-    # Keep renderer source dirs. Codex authors html/svg/img directly in this branch,
+    # Keep renderer source dirs. Codex authors img/pptd directly in this branch,
     # so default cleanup should only remove derived outputs and review artifacts.
     for name in ("reviews", "editable"):
         target = (run_dir / name).resolve()
@@ -1583,73 +1494,19 @@ def cmd_approve(args: argparse.Namespace) -> None:
 def cmd_choose_renderer(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     require_approved(run_dir, "slide_plans")
+    if args.renderer not in {"img", "pptd"}:
+        raise ValueError("renderer must be img or pptd")
     state = load_state(run_dir)
     state["renderer"] = args.renderer
     entry = renderer_state(state, args.renderer)
-    if args.renderer in {"html", "svg"}:
-        entry["review"] = {
-            "mode": None,
-            "status": "pending_choice",
-        }
-        entry["status"] = "review_choice_pending"
-        state["render_review"] = dict(entry["review"])
-        state["status"] = "review_choice_pending"
-    else:
-        entry["review"] = {
-            **RENDER_REVIEW_NOT_APPLICABLE,
-            "confirmed_at": utc_now(),
-        }
-        entry["svg_conversion"] = default_img_svg_conversion()
-        entry["status"] = "render_ready"
-        state["render_review"] = dict(entry["review"])
-        state["status"] = "render_ready"
-    save_state(run_dir, state)
-    print(f"renderer={args.renderer}", flush=True)
-    if args.renderer in {"html", "svg"}:
-        print("next=choose-review", flush=True)
-
-
-def cmd_choose_review(args: argparse.Namespace) -> None:
-    run_dir = normalize_run_dir(args.run_dir)
-    state = load_state(run_dir)
-    renderer = state.get("renderer")
-    if renderer not in {"html", "svg"}:
-        raise RuntimeError("review choice is only available for html or svg renderer")
-    entry = renderer_state(state, renderer)
-    entry["review"] = {
-        "mode": args.mode,
-        "status": "pending" if args.mode == "on" else "skipped",
-        "confirmed_at": utc_now(),
-    }
-    entry["status"] = "render_review_pending" if args.mode == "on" else "render_ready"
-    state["render_review"] = dict(entry["review"])
-    state["status"] = entry["status"]
-    save_state(run_dir, state)
-    print(f"review_mode={args.mode}", flush=True)
-    if args.mode == "on":
-        print("next=complete-review", flush=True)
-
-
-def cmd_complete_review(args: argparse.Namespace) -> None:
-    run_dir = normalize_run_dir(args.run_dir)
-    state = load_state(run_dir)
-    renderer = state.get("renderer")
-    if renderer not in {"html", "svg"}:
-        raise RuntimeError("render review completion is only available for html or svg renderer")
-    entry = renderer_state(state, renderer)
-    review = entry.get("review") or {}
-    if review.get("mode") != "on":
-        raise RuntimeError("render review is not enabled")
-    entry["review"] = {
-        **review,
-        "status": "completed",
-        "completed_at": utc_now(),
-    }
+    entry["review"] = {**RENDER_REVIEW_NOT_APPLICABLE, "confirmed_at": utc_now()}
     entry["status"] = "render_ready"
     state["render_review"] = dict(entry["review"])
     state["status"] = "render_ready"
     save_state(run_dir, state)
-    print(f"review_completed={renderer}", flush=True)
+    print(f"renderer={args.renderer}", flush=True)
+    print(f"branch_guide={SKILL_ROOT / 'references' / (args.renderer + '.md')}", flush=True)
+    print("next=prepare-render-jobs", flush=True)
 
 
 def cmd_choose_img_svg(args: argparse.Namespace) -> None:
@@ -1713,8 +1570,8 @@ def cmd_export_img_svg(args: argparse.Namespace) -> None:
 def cmd_prepare_render_jobs(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     renderer = args.renderer or load_state(run_dir).get("renderer")
-    if renderer not in {"html", "svg", "img"}:
-        raise RuntimeError("renderer must be html, svg, or img")
+    if renderer not in {"img", "pptd"}:
+        raise RuntimeError("renderer must be img or pptd")
     manifest = prepare_render_jobs(run_dir, renderer)
     print(f"render_jobs={manifest}", flush=True)
 
@@ -1725,14 +1582,12 @@ def cmd_export(args: argparse.Namespace) -> None:
     renderer = args.renderer or state.get("renderer")
     if renderer:
         ensure_render_ready(run_dir, renderer)
-    if renderer == "html":
-        out = export_html(run_dir, editable_engine=args.editable_engine)
-    elif renderer == "svg":
-        out = export_svg(run_dir)
+    if renderer == "pptd":
+        out = export_pptd(run_dir)
     elif renderer == "img":
         out = export_img(run_dir)
     else:
-        raise ValueError("renderer must be html, svg, or img")
+        raise ValueError("renderer must be img or pptd")
     if renderer == "img":
         print(f"img_pptx={out}", flush=True)
         print(f"completed={out}", flush=True)
@@ -1784,7 +1639,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     if slides:
         ready = sum(1 for item in slides.values() if item.get("export_ready"))
         print(f"slides_ready={ready}/{len(slides)}", flush=True)
-    patterns = {"html": "*.html", "svg": "*.svg", "img": "*.*", "img-svg": "*.svg"}
+    patterns = {"pptd/pages": "*.page", "img": "*.*", "img-svg": "*.svg"}
     for name, pattern in patterns.items():
         count = len(list((run_dir / name).glob(pattern))) if (run_dir / name).exists() else 0
         if count:
@@ -1821,13 +1676,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     choose = sub.add_parser("choose-renderer")
     choose.add_argument("--run-dir", required=True)
-    choose.add_argument("--renderer", choices=["html", "svg", "img"], required=True)
+    choose.add_argument("--renderer", choices=["img", "pptd"], required=True)
     choose.set_defaults(func=cmd_choose_renderer)
-
-    choose_review = sub.add_parser("choose-review")
-    choose_review.add_argument("--run-dir", required=True)
-    choose_review.add_argument("--mode", choices=["off", "on"], required=True)
-    choose_review.set_defaults(func=cmd_choose_review)
 
     choose_img_svg = sub.add_parser("choose-img-svg")
     choose_img_svg.add_argument("--run-dir", required=True)
@@ -1836,12 +1686,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     jobs = sub.add_parser("prepare-render-jobs")
     jobs.add_argument("--run-dir", required=True)
-    jobs.add_argument("--renderer", choices=["html", "svg", "img"], default=None)
+    jobs.add_argument("--renderer", choices=["img", "pptd"], default=None)
     jobs.set_defaults(func=cmd_prepare_render_jobs)
-
-    complete_review = sub.add_parser("complete-review")
-    complete_review.add_argument("--run-dir", required=True)
-    complete_review.set_defaults(func=cmd_complete_review)
 
     complete_img_svg = sub.add_parser("complete-img-svg")
     complete_img_svg.add_argument("--run-dir", required=True)
@@ -1854,13 +1700,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     export = sub.add_parser("export")
     export.add_argument("--run-dir", required=True)
-    export.add_argument("--renderer", choices=["html", "svg", "img"], default=None)
-    export.add_argument("--editable-engine", default=None)
+    export.add_argument("--renderer", choices=["img", "pptd"], default=None)
     export.set_defaults(func=cmd_export)
 
     clean = sub.add_parser("clean-render")
     clean.add_argument("--run-dir", required=True)
     clean.set_defaults(func=lambda args: clean_render_outputs(normalize_run_dir(args.run_dir)))
+
+    validate = sub.add_parser("validate-pptd")
+    validate.add_argument("--run-dir", required=True)
+    validate.set_defaults(func=cmd_validate_pptd)
+
+    editor = sub.add_parser("open-pptd-editor")
+    editor.add_argument("--run-dir", required=True)
+    editor.add_argument("--port", type=int, default=0)
+    editor.add_argument("--open", action="store_true", help="Open the system browser")
+    editor.set_defaults(func=cmd_open_pptd_editor)
 
     status = sub.add_parser("status")
     status.add_argument("--run-dir", required=True)

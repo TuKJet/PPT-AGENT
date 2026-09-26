@@ -109,7 +109,29 @@ class GlobalSkillInstallTests(unittest.TestCase):
                 capture_output=True,
                 check=True,
             )
-            self.assertIn("choose-img-svg", result.stdout)
+            self.assertIn("open-pptd-editor", result.stdout)
+            self.assertTrue((installed / "assets/pptd/editor/index.html").is_file())
+            self.assertTrue((installed / "assets/pptd/editor/neo-ppt/assets/pptd_wasm_bg-DPPWdROu.wasm").is_file())
+            self.assertTrue((installed / "references/pptd-format.md").is_file())
+            self.assertTrue((installed / "scripts/pptd_runtime.py").is_file())
+            self.assertIn("pyyaml", (installed / "runtime/pyproject.toml").read_text())
+
+    @unittest.skipUnless(__import__("shutil").which("node"), "Node required")
+    def test_installed_pptd_exports_without_reference_checkout(self) -> None:
+        from test_pptd_runtime import make_project
+        installer = load_installer_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = installer.install_skill(root / "ppt-deck-workflow")
+            project = root / "workspace/pptd"
+            make_project(project)
+            # New process resolves runtime and WASM exclusively inside the installed Skill.
+            code = "import sys; sys.path.insert(0, sys.argv[1]); import pptd_runtime as p; from pathlib import Path; print(p.export_project(Path(sys.argv[2]), Path(sys.argv[3]))['zip_integrity'])"
+            result = subprocess.run([sys.executable, "-B", "-c", code,
+                                     str(target / "scripts"), str(project), str(root / "result.pptx")],
+                                    cwd=root, text=True, capture_output=True, check=True)
+            self.assertIn("passed", result.stdout)
+            self.assertTrue((root / "result.pptx").is_file())
 
     def test_force_is_required_to_replace_an_existing_skill(self) -> None:
         installer = load_installer_module()

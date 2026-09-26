@@ -12,7 +12,7 @@ class PromptContractsAudienceTests(unittest.TestCase):
             / "skills"
             / "ppt-deck-workflow"
             / "references"
-            / "prompt-contracts.md"
+            / "outline.md"
         )
         text = path.read_text(encoding="utf-8")
 
@@ -29,7 +29,7 @@ class PromptContractsAudienceTests(unittest.TestCase):
             / "skills"
             / "ppt-deck-workflow"
             / "references"
-            / "prompt-contracts.md"
+            / "outline.md"
         )
         text = path.read_text(encoding="utf-8")
 
@@ -45,7 +45,7 @@ class PromptContractsAudienceTests(unittest.TestCase):
             / "skills"
             / "ppt-deck-workflow"
             / "references"
-            / "prompt-contracts.md"
+            / "slide-plans.md"
         )
         text = path.read_text(encoding="utf-8")
 
@@ -60,7 +60,7 @@ class PromptContractsAudienceTests(unittest.TestCase):
             / "skills"
             / "ppt-deck-workflow"
             / "references"
-            / "prompt-contracts.md"
+            / "slide-plans.md"
         )
         text = path.read_text(encoding="utf-8")
 

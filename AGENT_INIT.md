@@ -63,7 +63,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py --help
 uv run python -B -m unittest discover -s tests -p "test_*.py"
 ```
 
-Do not claim the installation is complete until the helper lists the IMG-to-SVG commands and the test suite reports `OK`.
+Do not claim the installation is complete until the helper lists `validate-pptd` and `open-pptd-editor` and the test suite reports `OK`.
 
 ## Agent Self-Install As A Global Skill
 
@@ -104,7 +104,7 @@ Fallback target when `CODEX_HOME` is unset:
 ~/.codex/skills/ppt-deck-workflow
 ```
 
-The installed skill includes its own deterministic runtime under `runtime/`; it does not import files from the original checkout. The runtime includes HTML screenshot export, image/SVG PPTX export, editable DOM export, Pillow crop embedding, and the bundled JavaScript PPTX exporter.
+The installed skill includes its own deterministic runtime under `runtime/`; it does not import files from the original checkout. The Skill bundles the local PPTD editor and WASM exporter under `assets/pptd/`, plus image export and the optional IMG-to-SVG runtime. Legacy utilities are retained for compatibility, not offered as renderer choices.
 
 The installer records its GitHub repository, branch, commit, dirty-source status, managed file hashes, selected Playwright requirement, cache-reuse decision, and browser revision in `.install-state.json`. By default it records `https://github.com/TuKJet/PPT-AGENT.git` and branch `codex/all-logic-in-skills` when Git discovery is unavailable.
 
@@ -137,7 +137,7 @@ Expected results:
 
 - Every `Test-Path` returns `True`.
 - `workflow.py --help` exits successfully.
-- The command list contains `choose-img-svg`, `complete-img-svg`, and `export-img-svg`.
+- The command list contains `validate-pptd` and `open-pptd-editor`; renderer choices are `img` and `pptd`.
 
 ### Global Workspace Behavior
 
@@ -209,7 +209,7 @@ Always run from the repository root and use the local `ppt-deck-workflow` skill.
 
 Codex generates `outline.json`, `contents.json`, `slide-plans.json`, and renderer source files. The helper only manages state, previews, cleanup, and export:
 
-After `slide_plans` approval, present `img` first and recommend it by default. Keep `html` for an explicit deterministic-layout or editable-PPTX need, and keep `svg` for an explicit direct-SVG need.
+After `slide_plans` approval, present `img` first and recommend it by default. Offer `pptd` for editable pages and the local browser editor. These are the only two renderer choices. Load only the selected branch guide; do not read PPTD specifications before selection.
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "12"
@@ -234,15 +234,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py complete-im
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-img-svg --run-dir output/...
 ```
 
-When `on`, pass each `render-jobs/img-svg/slide-xx.json` `source_image_path` directly to a vision-capable model and save one final hybrid SVG to its exact `target_path`. Keep text and simple geometry vector. For incompatible icons, logos, badges, or small complex regions, place tight crop placeholders in that final SVG; never crop visible text, labels, captions, legends, cards, or broad screenshot bands. Crop manifests must declare artwork `content_type` and `contains_text: false`, and deterministic validation rejects broad crops or crops overlapping vector text. Then run:
-
-```bash
-uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --manifest output/.../render-jobs/img-svg/slide-01-crops.json
-```
-
-The helper crops directly from the source IMG with Pillow and embeds Base64 PNG data without temporary PNG files. Do not create layered or versioned SVG intermediates.
-
-After exporting the SVG PPTX, tell the user to select the SVG object in desktop PowerPoint, choose **Convert to Shape**, edit the pieces from **Shape Format**, and use **Shape Format → Group → Ungroup** if they remain grouped. Clarify that vector regions become editable Office shapes, but semantic text boxes, native charts, and SmartArt are not guaranteed; text may be vector outlines and embedded raster crops remain images.
+When the user opts in, read the current `references/img-svg.md` and its linked prompt. Do not preload the optional reconstruction contract during ordinary planning or rendering.
 
 ## Rerun Hygiene
 
@@ -256,17 +248,15 @@ The helper removes render-only outputs and preserves approved source artifacts.
 
 ## Expected Outputs
 
-For HTML:
+For PPTD:
 
-- `output/<run>/html/*.html`
-- `output/<run>/<deck>-html.pptx`
-- `output/<run>/<deck>_editable.pptx` when DOM editable export succeeds
-- `output/<run>/editable-ppt-chain.json`
+- `output/<run>/pptd/deck.pptd`
+- `output/<run>/pptd/pages/*.page`
+- `output/<run>/pptd/media/`
+- `output/<run>/<deck>-pptd.pptx`
+- `output/<run>/slide-status-pptd.json`
 
-For SVG:
-
-- `output/<run>/svg/*.svg`
-- `output/<run>/<deck>-svg.pptx`
+Use `validate-pptd` and `open-pptd-editor` after PPTD selection and generation. Open the printed project folder in Chromium; save before CLI re-export. Do not load the PPTD format guide before selection.
 
 For IMG:
 
@@ -280,9 +270,9 @@ For the optional post-export IMG-to-SVG derivative:
 - `output/<run>/<deck>-img-svg.pptx` with native SVG media
 - `output/<run>/img-svg-chain.json`
 
-For multi-renderer comparison, keep those artifacts in the same run directory and compare `html/`, `svg/`, `img/`, and the renderer-specific PPTX files side by side.
+For multi-renderer comparison, keep those artifacts in the same run directory and compare `pptd/` and `img/`, and the renderer-specific PPTX files side by side.
 
 ## Troubleshooting
 
 - If Playwright cannot launch Chromium, rerun `uv run playwright install --only-shell chromium`.
-- If editable export fails, the image PPTX can still be valid; check `workflow-state.json` and `slide-status.json`.
+- If PPTD export fails, preserve the project and report the error; use browser export for unsupported advanced elements, not an automatic full-slide image fallback.

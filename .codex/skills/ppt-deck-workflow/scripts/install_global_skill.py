@@ -45,6 +45,7 @@ RUNTIME_DIRS = (
     "vendor_presentation_core",
 )
 SKILL_COPY_DIRS = (
+    "assets",
     "agents",
     "references",
     "scripts",
@@ -59,6 +60,7 @@ description = "Self-contained runtime for the globally installed ppt-deck-workfl
 requires-python = ">=3.11"
 dependencies = [
     "pillow>=10.0.0",
+    "pyyaml>=6.0",
     "python-pptx>=1.0.0",
     "{playwright_requirement}",
     "pywin32>=306; sys_platform == 'win32'",

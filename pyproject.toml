@@ -1,10 +1,11 @@
 [project]
 name = "ppt-deck-workflow-agent"
 version = "0.1.0"
-description = "Codex-facing PPT deck workflow with shared planning, HTML/SVG/IMG renderers, and native IMG-to-SVG post-export."
+description = "Codex-facing PPT deck workflow with shared planning, IMG/PPTD renderers, and a local PPTD editor."
 requires-python = ">=3.11"
 dependencies = [
     "pillow>=10.0.0",
+    "pyyaml>=6.0",
     "python-pptx>=1.0.0",
     "playwright>=1.40.0",
 ]

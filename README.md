@@ -1,6 +1,6 @@
 # PPT Deck Workflow Agent
 
-Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and HTML/SVG/IMG renderer branches.
+Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and IMG/PPTD renderer branches.
 
 This branch is skill-first. Codex generates deck content inside the Codex conversation; repository code only handles deterministic artifact bookkeeping, render cleanup, screenshots, and PPTX export.
 
@@ -25,14 +25,16 @@ This branch is skill-first. Codex generates deck content inside the Codex conver
 
 ```text
 大纲预览 → 用户批准 → 内容预览 → 用户批准 → 页面规划预览 → 用户批准
-         → 选择 IMG（推荐）/ HTML / SVG → 渲染并导出 PPTX
+         → 选择 IMG / PPTD → 按需加载分支规范 → 生成并导出 PPTX
+         → PPTD 分支启动本地网页编辑器，打开项目文件夹后继续编辑
 ```
 
 在每个预览阶段回复 `批准` 即可继续，也可以直接提出修改，例如“合并第 3、4 页并压缩到 5 页”。渲染方式的常见选择：
 
 - `IMG`（默认推荐）：生成视觉完成度更高的整页图片；原始 IMG PPTX 导出后，Skill 会再单独询问是否生成 SVG 版本。
-- `HTML`：需要稳定的确定性排版或尝试导出可编辑 PPTX 时选择，但不再作为默认推荐。
-- `SVG`：适合文字、卡片、箭头和简单图形组成的矢量页面。
+- `PPTD`：模型直接生成可编辑页面文件，随后启动本地网页编辑器；可以修改文字、元素位置并导出 PPTX。
+
+PPTD 的生成说明和完整格式规范仅在选中该分支后读取。第一版复用固定版本的本地 neo-ppt 编辑器与 WASM；无需参考仓库或 Kimi 登录。用 Chromium 打开并授权项目的 `pptd/` 文件夹即可保存修改。CLI 导出目前不嵌入字体，复杂元素可使用编辑器导出。HTML 和独立 SVG 不再是可选渲染路线；已有文件不会被删除。
 
 所有项目文件默认写入当前工作区的 `output/<project>/`。在本仓库内使用时会加载项目本地 Skill；在其他工作目录中新建 Codex 任务时，会使用安装到 `$CODEX_HOME/skills/ppt-deck-workflow` 的全局 Skill。
 
@@ -80,12 +82,13 @@ The executable surface is intentionally small:
 - `.codex/skills/ppt-deck-workflow/`: workflow instructions, contracts, and the state/export helper
 - `.codex/skills/ppt-deck-workflow/scripts/install_global_skill.py`: builds a self-contained global skill with a bundled runtime
 - `.codex/skills/ppt-deck-workflow/scripts/update_global_skill.py`: checks, upgrades, and rolls back the installed Skill from its recorded GitHub branch
-- `html_pipeline/html_builder.py`: deterministic 1280x720 HTML screenshot and image-PPTX export
+- `.codex/skills/ppt-deck-workflow/scripts/pptd_runtime.py`: PPTD validation, native export, and local editor server
+- `.codex/skills/ppt-deck-workflow/assets/pptd/`: pinned editor/export assets and source provenance
 - `pptx_builder.py`: deterministic SVG image-PPTX export and native-SVG PPTX export
 - `vendor_presentation_core/export/`: retained DOM editable export and bundled browser runtime
 - `playwright_runtime.py`, `filename_utils.py`: shared deterministic utilities
 
-There is no repository model client, provider configuration, generation pipeline, or runner. HTML/SVG source files are authored by Codex and exporters do not silently rewrite them.
+There is no repository model client, provider configuration, generation pipeline, or runner. IMG and PPTD sources are authored by Codex. Legacy HTML/SVG utilities remain for older artifacts and the optional IMG-to-SVG derivative; they are not renderer choices.
 
 ## Install For An Agent
 
@@ -97,6 +100,7 @@ An Agent can use this repository in either of two modes:
 Both modes require:
 
 - `uv` on `PATH`.
+- Node.js 18+ for PPTD CLI export; Chromium for writable local folder editing.
 - Python 3.11 or newer, which `uv` can provision automatically.
 - Network access during the first dependency and Chromium installation.
 - Git for GitHub branch checks and upgrades of a globally installed Skill.
@@ -124,7 +128,7 @@ uv run python -B -m unittest discover -s tests -p "test_*.py"
 
 Installation is ready when:
 
-- `workflow.py --help` lists `choose-img-svg`, `complete-img-svg`, and `export-img-svg`.
+- `workflow.py --help` lists `validate-pptd` and `open-pptd-editor`; renderer choices are `img` and `pptd`.
 - The test suite ends with `OK`.
 - The Playwright Chromium headless shell is installed without an error.
 
@@ -168,7 +172,7 @@ python3 .codex/skills/ppt-deck-workflow/scripts/install_global_skill.py \
 
 The installer:
 
-1. Copies `SKILL.md`, `agents/`, `references/`, and `scripts/`.
+1. Copies `SKILL.md`, `agents/`, `references/`, `scripts/`, and `assets/` (including the pinned PPTD editor and WASM).
 2. Bundles the deterministic runtime into the installed skill:
    - `filename_utils.py`
    - `playwright_runtime.py`
@@ -193,8 +197,11 @@ Installed layout:
 ├── agents/
 │   └── openai.yaml
 ├── references/
+├── assets/
+│   └── pptd/
 ├── scripts/
 │   ├── workflow.py
+│   ├── pptd_runtime.py
 │   ├── embed_img_crops.py
 │   ├── install_global_skill.py
 │   └── update_global_skill.py
@@ -352,12 +359,7 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py clean-rende
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/...
 ```
 
-Codex writes `outline.json`, `contents.json`, `slide-plans.json`, and the final `html/`, `svg/`, or `img/` renderer files. The helper does not call model APIs.
-
-For `html` and `svg`, renderer choice is followed by an explicit render-review preference:
-
-- `off`: default and recommended unless the user wants an extra review/repair pass
-- `on`: Codex runs a screenshot review subflow before export, then records completion with `complete-review`
+Codex writes `outline.json`, `contents.json`, `slide-plans.json`, and the selected `img/` or `pptd/` sources. The helper does not call model APIs. The branch manuals are loaded only after selection; PPTD's full format reference is not part of the upstream planning prompt.
 
 For `img`, the first `export` creates the original full-image PPTX and completes the requested workflow. Codex should hand off that PPTX, then ask once whether the user wants the optional IMG-to-SVG derivative. Explain that conversion preserves text and simple geometry as vectors so PowerPoint can convert much of the page into editable shapes, and disclose that it uses additional per-page model calls/Token budget. The user only replies to opt in; no reply is required to keep the completed IMG result.
 
@@ -380,15 +382,31 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/embed_img_crops.py --ma
 
 It converts normalized 1280x720 crop boxes to the source IMG resolution and writes the cropped PNG data directly into the final SVG without temporary image files. Playwright remains the final SVG rendering and QA surface.
 
-For multi-renderer comparison, keep everything in the same run directory under `output/<project>/`. Compare outputs by subdirectory and renderer-specific export filenames instead of forking separate `-html` / `-img` project folders.
+For multi-renderer comparison, keep everything in the same run directory under `output/<project>/`. Compare outputs by subdirectory and renderer-specific export filenames instead of forking separate renderer project folders.
 
-For long HTML or SVG decks, prefer `prepare-render-jobs` and let subagents generate one page each while the main agent stays focused on consistency review and export coordination.
+Use `prepare-render-jobs` for page-local IMG/PPTD inputs; load only the selected branch guide.
 
 ## Notes
 
 - Generated decks are written to `output/`.
 - Content research should use Codex-native research/web capability directly, not repository AI provider code.
-- HTML and SVG export require Playwright Chromium.
+- PPTD CLI export requires Node.js 18+; its bundled browser editor uses Chromium for writable folder access.
 - Native IMG-to-SVG PPT export also requires Playwright Chromium because the bundled exporter creates PowerPoint's native SVG media plus its PNG preview and renders final-page QA screenshots.
-- HTML export creates an image PPTX and attempts a DOM-based editable PPTX.
+- PPTD browser previews may request optional remote fonts; unavailable fonts fall back to installed fonts. CLI export does not embed fonts.
 - The former `ppt_workflow.runner`, provider client, generation pipeline, prompt/template runtime, and `.env.example` are intentionally removed from this branch.
+
+## PPTD local editor
+
+After approved slide plans and an explicit PPTD choice:
+
+```bash
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/<project> --renderer pptd
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py prepare-render-jobs --run-dir output/<project>
+# Codex now writes pptd/deck.pptd, pages/*.page and media/.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py validate-pptd --run-dir output/<project>
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py open-pptd-editor --run-dir output/<project> --open
+# Keep this terminal alive. In another terminal, after saving browser edits:
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export --run-dir output/<project>
+```
+
+The server binds loopback on an available port and prints the URL and exact project folder. The first version uses the original folder picker; it does not automatically load the project or merge concurrent browser/Agent edits. Save and reload when handing editing between them. The original demo is not the user's deck.

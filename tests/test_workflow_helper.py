@@ -119,24 +119,23 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
             os.environ["OUTPUT_DIR"] = self.previous_output_dir
         self.tmpdir.cleanup()
 
-    def test_html_renderer_requires_explicit_review_choice(self) -> None:
-        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="html"))
+    def test_removed_renderers_are_rejected(self) -> None:
+        for renderer in ("html", "svg"):
+            with self.subTest(renderer=renderer), self.assertRaises(ValueError):
+                self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer=renderer))
 
-        with self.assertRaisesRegex(RuntimeError, "review preference"):
-            self.workflow.ensure_render_ready(self.run_dir, "html")
+    def test_pptd_requires_explicit_selection(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "choose-renderer"):
+            self.workflow.ensure_render_ready(self.run_dir, "pptd")
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="pptd"))
+        self.workflow.ensure_render_ready(self.run_dir, "pptd")
 
-    def test_review_on_requires_completion_before_export(self) -> None:
-        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="svg"))
-        self.workflow.cmd_choose_review(Namespace(run_dir=str(self.run_dir), mode="on"))
-
-        with self.assertRaisesRegex(RuntimeError, "review subflow"):
-            self.workflow.ensure_render_ready(self.run_dir, "svg")
-
-    def test_review_off_allows_render_readiness(self) -> None:
-        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="html"))
-        self.workflow.cmd_choose_review(Namespace(run_dir=str(self.run_dir), mode="off"))
-
-        self.workflow.ensure_render_ready(self.run_dir, "html")
+    def test_img_does_not_start_editor_or_read_pptd(self) -> None:
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))
+        state = self.workflow.load_state(self.run_dir)
+        self.assertEqual(state["status"], "render_ready")
+        self.assertNotIn("pptd", state["renderers"])
+        self.assertFalse((self.run_dir / "pptd").exists())
 
     def test_slide_plan_approval_recommends_img_renderer(self) -> None:
         output = io.StringIO()
@@ -243,16 +242,16 @@ class WorkflowHelperMultiRendererStateTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_completed_renderer_artifacts_are_tracked_without_overwriting_peers(self) -> None:
-        html_pptx = self.run_dir / "compare-topic-html.pptx"
+        pptd_pptx = self.run_dir / "compare-topic-pptd.pptx"
         img_pptx = self.run_dir / "compare-topic-img.pptx"
 
-        self.workflow.mark_completed(self.run_dir, "html", {"pptx": html_pptx})
+        self.workflow.mark_completed(self.run_dir, "pptd", {"pptx": pptd_pptx})
         self.workflow.mark_completed(self.run_dir, "img", {"pptx": img_pptx})
 
         state = self.workflow.load_state(self.run_dir)
 
         self.assertIn("renderers", state)
-        self.assertEqual(state["renderers"]["html"]["artifacts"]["pptx"]["path"], str(html_pptx))
+        self.assertEqual(state["renderers"]["pptd"]["artifacts"]["pptx"]["path"], str(pptd_pptx))
         self.assertEqual(state["renderers"]["img"]["artifacts"]["pptx"]["path"], str(img_pptx))
         self.assertEqual(state["renderer"], "img")
 
@@ -296,24 +295,25 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.tmpdir.cleanup()
 
     def test_prepare_render_jobs_writes_shared_and_per_slide_context(self) -> None:
-        self.workflow.cmd_prepare_render_jobs(Namespace(run_dir=str(self.run_dir), renderer="html"))
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="pptd"))
+        self.workflow.cmd_prepare_render_jobs(Namespace(run_dir=str(self.run_dir), renderer="pptd"))
 
-        jobs_root = self.run_dir / "render-jobs" / "html"
+        jobs_root = self.run_dir / "render-jobs" / "pptd"
         manifest = json.loads((jobs_root / "manifest.json").read_text(encoding="utf-8"))
         shared = json.loads((jobs_root / "shared-context.json").read_text(encoding="utf-8"))
         slide_job = json.loads((jobs_root / "slide-01.json").read_text(encoding="utf-8"))
 
-        self.assertEqual(manifest["renderer"], "html")
+        self.assertEqual(manifest["renderer"], "pptd")
         self.assertEqual(manifest["slide_count"], 2)
         self.assertEqual(shared["topic"], "Subagent Topic")
-        self.assertEqual(len(shared["slides"]), 2)
+        self.assertNotIn("slides", shared)
         self.assertEqual(shared["deck_strategy"], slide_job["deck_strategy"])
         self.assertEqual(shared["design_system"], slide_job["design_system"])
         self.assertEqual(shared["design_system"]["palette"]["primary"], "#1358A8")
-        self.assertEqual(slide_job["renderer"], "html")
+        self.assertEqual(slide_job["renderer"], "pptd")
         self.assertEqual(
             Path(slide_job["target_path"]).resolve(),
-            self.workflow.render_target_path(self.run_dir, "html", 1, "Opening").resolve(),
+            self.workflow.render_target_path(self.run_dir, "pptd", 1, "Opening").resolve(),
         )
         self.assertEqual(Path(slide_job["shared_context_path"]).resolve(), (jobs_root / "shared-context.json").resolve())
 
@@ -617,7 +617,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
 
         state = self.workflow.load_state(self.run_dir)
         conversion = state["renderers"]["img"]["svg_conversion"]
-        self.assertEqual(state["version"], 6)
+        self.assertEqual(state["version"], 7)
         self.assertEqual(state["status"], "completed")
         self.assertEqual(state["renderers"]["img"]["status"], "completed")
         self.assertEqual(conversion["status"], "available")
