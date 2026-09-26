@@ -115,6 +115,21 @@ class PlaywrightCacheTests(unittest.TestCase):
             self.assertEqual(selected.revision, "1223")
             self.assertTrue((selected.browser_root / "INSTALLATION_COMPLETE").is_file())
 
+    def test_node_version_does_not_pin_python_dependency(self) -> None:
+        helper = load_helper()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            self.add_linked_runtime(root, cache, name="python-runtime", version="1.62.0", revision="1234")
+            node = root / "node_modules" / "playwright-core"
+            node.mkdir(parents=True)
+            (node / "package.json").write_text(json.dumps({"version": "1.62.1"}))
+            (node / "browsers.json").write_text(json.dumps({"browsers": [{"name": "chromium-headless-shell", "revision": "1234"}]}))
+            (cache / ".links" / "node-runtime").write_text(str(node))
+            self.assertEqual(helper.compatible_cached_playwright(cache).version, "1.62.0")
+            (cache / ".links" / "python-runtime").unlink()
+            self.assertIsNone(helper.compatible_cached_playwright(cache))
+
     def test_returns_none_without_a_reliable_revision_mapping(self) -> None:
         helper = load_helper()
         with tempfile.TemporaryDirectory() as tmp:

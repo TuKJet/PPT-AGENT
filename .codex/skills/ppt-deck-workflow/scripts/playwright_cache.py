@@ -55,20 +55,12 @@ def _python_distribution_version(package_root: Path) -> str | None:
     return None
 
 
-def _node_distribution_version(package_root: Path) -> str | None:
-    package_json = package_root / "package.json"
-    try:
-        data = json.loads(package_json.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return None
-    version = data.get("version")
-    return str(version).strip() if version else None
-
-
 def package_version(package_root: Path) -> str | None:
-    return _python_distribution_version(package_root) or _node_distribution_version(
-        package_root
-    )
+    # A Node package patch version need not exist as a Python distribution.
+    # Only pin uv's Python dependency from an installed Python package mapping.
+    if (package_root.name, package_root.parent.name, package_root.parent.parent.name) != ("package", "driver", "playwright"):
+        return None
+    return _python_distribution_version(package_root)
 
 
 def headless_shell_revision(package_root: Path) -> str | None:
