@@ -2,7 +2,15 @@
 
 Read only after explicit PPTD selection, recorded by `choose-renderer --renderer pptd`.
 
-Use the bundled open-kimi-ppt editor and WASM directly for this initial integration. Do not add a template engine, new intermediate DSL, or IMG reconstruction phase. Do not invoke the reference project's separate Skill workflow.
+Use the bundled open-kimi-ppt editor and WASM directly. Do not add a template engine or new intermediate DSL. For `--source img`, also read [img-pptd.md](img-pptd.md). Do not invoke the reference project's separate Skill workflow.
+
+## Visual materials
+
+Choose materials according to their purpose: use user-provided assets and authoritative images for actual products, people, interfaces, places, and evidence. Search when suitable real material is missing. Use the available image-generation tool for conceptual illustrations, textures, backgrounds, or matching an established visual style. Generated illustrations must not be presented as documentary evidence.
+
+Prepare assets before positioning the page around their proportions. For generation, specify the subject, palette, aspect ratio, composition, and empty space needed for native text. Keep editable copy out of generated assets. Use reference images when consistency matters, inspect the result, and refine material defects. Search and generation are agent/tool actions, not functionality implemented by the exporter. If the relevant tool is unavailable, use supplied/local materials and disclose any material limitation.
+
+Store final assets in `pptd/media/` and reference relative paths. For searched or generated assets, record their source URL or generation prompt/tool and intended usage in `pptd/media-sources.json`; for original-image crops, record source image and crop coordinates. This record is provenance, not an additional user approval stage. Reuse suitable existing assets; a PPTD page does not require a preceding full-page IMG generation.
 
 ## Generation
 
@@ -30,6 +38,10 @@ Use the loaded deck to inspect rendered pages. Correct material clipping, overla
 Keep Agent and browser editing sequential: wait for the editor to show saved before reading its files; close/reload the document after Agent edits. Do not regenerate pages over unsaved browser changes. No automatic file-watch or conflict-merge facility is promised in this first version.
 
 ## Export and delivery
+
+Before PPTX delivery, run `export-pptd-images --run-dir output/<project>`. This drives the bundled local editor's image export with Playwright on macOS/Windows/Linux, saves the downloaded ZIP, decodes all pages, and builds `pptd/.qa-images/overview.jpg`. It uses the existing Playwright runtime and does not install agent-browser or leave a debug browser running. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing compatible Chromium binary. Remote assets/fonts are blocked for repeatability; use local assets and review font wrapping.
+
+Read `.qa-images/manifest.json` for the P1..Pn to `.page` mapping. Inspect the overview, then full-resolution `pages/*.png` for suspicious pages. Check image clarity/proportions, exact copy, text overflow, overlap, contrast, alignment, page boundaries, and missing visuals. Correct the `.page` files, rerun with `--force`, and inspect again before delivery. Record the result and residual issues in `pptd/visual-review.md`. A successful image export means review is pending, never that the visual check passed. For IMG reconstruction, also compare each page against the original IMG. These are editor renders, not PowerPoint readback previews. If browser export fails, preserve the project and report the error; do not substitute a demo or claim visual QA passed.
 
 `export --run-dir output/<project>` reads the latest saved project and writes `<topic>-pptd.pptx`. Requires Node.js 18+; uses bundled WASM offline and the current Python runtime for YAML. No Kimi login or reference repository is required. The browser may request optional remote fonts such as MiSans and fall back to installed fonts when unavailable; prefer locally available fonts and inspect wrapping. Do not install prerequisites silently.
 

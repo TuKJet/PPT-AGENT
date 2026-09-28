@@ -1,5 +1,9 @@
 # PPT Deck Workflow Agent
 
+PPTD visual QA: `uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py export-pptd-images --run-dir output/<project>` exports all page images through the local editor and writes `pptd/.qa-images/pages/*.png`, `overview.jpg`, `manifest.json`, and `browser-raw.zip`. Review the overview and relevant full-resolution pages before delivery. After edits, rerun with `--force`. The command uses the shared Playwright runtime; no agent-browser installation or Windows-only persistent browser is needed. Browser rendering is not Office readback verification.
+
+Generated IMG pages can also be used as references for editable PPTD reconstruction. After the user requests that derivative, run `choose-renderer --run-dir output/<project> --renderer pptd --source img`, then `prepare-render-jobs`. Follow `references/img-pptd.md` in the Skill: rebuild native text/structure, reuse suitable image regions as local media, visually compare in the editor, and use the existing PPTD export. The original IMG/PPTX is preserved. Direct PPTD uses the default `--source plans` and may obtain relevant assets through search or image generation without generating a full slide first.
+
 Codex-facing PPT generation workflow with explicit outline, content, slide-plan approval checkpoints and IMG/PPTD renderer branches.
 
 This branch is skill-first. Codex generates deck content inside the Codex conversation; repository code only handles deterministic artifact bookkeeping, render cleanup, screenshots, and PPTX export.

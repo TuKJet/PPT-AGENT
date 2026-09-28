@@ -25,6 +25,7 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 | Revising an existing artifact | [revision.md](references/revision.md) |
 | Only after user chooses IMG | [img.md](references/img.md) |
 | Only after user chooses PPTD | [pptd.md](references/pptd.md); follow its targeted format-reading instructions |
+| User requests editable PPTD from generated IMG | [pptd.md](references/pptd.md), [img-pptd.md](references/img-pptd.md) |
 | Global maintenance request | [global-skill-maintenance.md](references/global-skill-maintenance.md) |
 
 **Do not read or include PPTD format specifications, examples, or editor implementation in model context before PPTD is selected.** Do not load IMG prompts for a PPTD task. Renderer choice does not require either renderer's detailed manual.
@@ -45,6 +46,8 @@ Every helper command after init uses `--run-dir output/<project>`. Approval is a
 Renderer choice wording: **IMG：整页图片，视觉表现优先；PPTD：元素可编辑，生成后打开本地网页编辑器，可手动调整并导出 PPTX。** Default recommendation: IMG, unless editability is the user's priority. HTML and standalone SVG are no longer renderer options. Do not ask a render-review preference.
 
 PPTD selection authorizes starting the local editor after its project files are ready. Do not start it for IMG or during upstream planning. The browser is a page editing surface; the three content approvals remain in chat.
+
+After IMG export, offer optional editable PPTD reconstruction alongside the existing SVG option. Continue only when requested; a prior explicit request for IMG plus editable PPTD is sufficient. Record `choose-renderer --renderer pptd --source img`, then prepare jobs. Preserve the original IMG and its PPTX. This is a derivative of the approved deck, not a new outline/content approval cycle. Direct PPTD continues to use `--source plans` (the default).
 
 ## Shared Invariants
 

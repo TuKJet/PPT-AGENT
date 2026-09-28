@@ -783,6 +783,8 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     state = load_state(run_dir)
     plan_document = slide_plan_document(run_dir)
     slides = list(plan_document.get("slides") or [])
+    source_mode = renderer_state(state, renderer).get("source", "plans")
+    references = pptd_image_references(run_dir) if renderer == "pptd" and source_mode == "img" else []
     jobs_dir = render_jobs_root(run_dir, renderer)
     jobs_dir.mkdir(parents=True, exist_ok=True)
     target_dir = run_dir / renderer
@@ -825,6 +827,9 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
             "target_path": str(target_path),
             "shared_context_path": str(shared_context_path),
         }
+        if references:
+            payload["image_reference"] = references[idx - 1]
+            payload["reconstruction_guide_path"] = str(SKILL_ROOT / "references" / "img-pptd.md")
         write_json(job_path, payload)
         manifest_slides.append({
             "index": slide_index,
@@ -875,6 +880,21 @@ def require_complete_img_sources(run_dir: Path) -> list[Path]:
             f"IMG page count mismatch: expected {expected} pages from slide-plans.json, found {len(images)}"
         )
     return images
+
+
+def pptd_image_references(run_dir: Path) -> list[dict[str, Any]]:
+    images = require_complete_img_sources(run_dir)
+    references = []
+    for image, job in zip(images, slide_jobs(run_dir)):
+        expected = render_target_path(run_dir, "img", int(job["index"]), job["title"])
+        if image.stem != expected.stem:
+            raise ValueError(f"IMG page identity mismatch: expected {expected.stem}, found {image.stem}")
+        with Image.open(image) as source:
+            source.load()
+            size = list(source.size)
+        references.append({"source_image_path": str(image.resolve()),
+                           "source_image_sha256": file_sha256(image), "source_size": size})
+    return references
 
 
 def mark_img_exported_complete(run_dir: Path, pptx_path: Path, images: list[Path]) -> None:
@@ -1303,6 +1323,14 @@ def complete_img_svg_generation(run_dir: Path, *, force_render: bool = False) ->
 
 def validate_pptd_project(run_dir: Path) -> dict[str, Any]:
     ensure_render_ready(run_dir, "pptd")
+    entry = renderer_state(load_state(run_dir), "pptd")
+    if entry.get("source") == "img":
+        current = pptd_image_references(run_dir)
+        jobs_root = render_jobs_root(run_dir, "pptd")
+        for reference, job in zip(current, slide_jobs(run_dir)):
+            payload = read_json(jobs_root / f"slide-{int(job['index']):02d}.json")
+            if payload.get("image_reference") != reference:
+                raise ValueError("IMG reference changed; prepare jobs and review/rebuild affected PPTD pages before export")
     from pptd_runtime import validate_project
     return validate_project(run_dir / "pptd", expected_pages=len(slide_jobs(run_dir)))
 
@@ -1325,6 +1353,17 @@ def export_pptd(run_dir: Path) -> Path:
 def cmd_validate_pptd(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     print(json.dumps(validate_pptd_project(run_dir), ensure_ascii=False), flush=True)
+
+
+def cmd_export_pptd_images(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    validate_pptd_project(run_dir)
+    from pptd_visual import export_images
+    summary = export_images(run_dir / "pptd", force=args.force)
+    state = load_state(run_dir)
+    renderer_state(state, "pptd")["visual_qa"] = summary
+    save_state(run_dir, state)
+    print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
 
 
 def cmd_open_pptd_editor(args: argparse.Namespace) -> None:
@@ -1496,9 +1535,15 @@ def cmd_choose_renderer(args: argparse.Namespace) -> None:
     require_approved(run_dir, "slide_plans")
     if args.renderer not in {"img", "pptd"}:
         raise ValueError("renderer must be img or pptd")
+    source = getattr(args, "source", "plans")
+    if source not in {"plans", "img"} or (source == "img" and args.renderer != "pptd"):
+        raise ValueError("--source img is only supported for PPTD")
+    if source == "img":
+        pptd_image_references(run_dir)
     state = load_state(run_dir)
     state["renderer"] = args.renderer
     entry = renderer_state(state, args.renderer)
+    entry["source"] = source
     entry["review"] = {**RENDER_REVIEW_NOT_APPLICABLE, "confirmed_at": utc_now()}
     entry["status"] = "render_ready"
     state["render_review"] = dict(entry["review"])
@@ -1594,6 +1639,8 @@ def cmd_export(args: argparse.Namespace) -> None:
         print("workflow_complete=yes", flush=True)
         print("user_reply_required=no", flush=True)
         print("offer_img_svg=yes", flush=True)
+        print("offer_img_pptd=yes", flush=True)
+        print("img_pptd_next=choose-renderer --renderer pptd --source img", flush=True)
         print("img_svg_conversion=available_on_explicit_request", flush=True)
         print("img_svg_editability=powerpoint-convert-to-shape", flush=True)
         print("img_svg_additional_model_usage=yes", flush=True)
@@ -1677,6 +1724,8 @@ def build_parser() -> argparse.ArgumentParser:
     choose = sub.add_parser("choose-renderer")
     choose.add_argument("--run-dir", required=True)
     choose.add_argument("--renderer", choices=["img", "pptd"], required=True)
+    choose.add_argument("--source", choices=["plans", "img"], default="plans",
+                        help="PPTD may reconstruct existing IMG pages; default uses approved plans")
     choose.set_defaults(func=cmd_choose_renderer)
 
     choose_img_svg = sub.add_parser("choose-img-svg")
@@ -1710,6 +1759,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate = sub.add_parser("validate-pptd")
     validate.add_argument("--run-dir", required=True)
     validate.set_defaults(func=cmd_validate_pptd)
+
+    images = sub.add_parser("export-pptd-images")
+    images.add_argument("--run-dir", required=True)
+    images.add_argument("--force", action="store_true")
+    images.set_defaults(func=cmd_export_pptd_images)
 
     editor = sub.add_parser("open-pptd-editor")
     editor.add_argument("--run-dir", required=True)

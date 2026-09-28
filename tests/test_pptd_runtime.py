@@ -112,6 +112,29 @@ class PPTDRuntimeTests(unittest.TestCase):
                 server.shutdown()
                 thread.join()
 
+    @unittest.skipUnless(shutil.which("node"), "Node is required for actual WASM export")
+    def test_reference_image_crop_exports_beside_native_text(self):
+        from PIL import Image
+        (self.project / "media").mkdir()
+        Image.new("RGB", (1600, 900), "blue").save(self.project / "media/reference.png")
+        self.page["elements"].append({
+            "elementId": "reference-visual", "elementType": "image",
+            "bounds": [400, 150, 400, 250], "src": "media/reference.png",
+            "crop": {"left": 0.5}, "fit": {"mode": "fill"},
+        })
+        (self.project / "pages/01.page").write_text(json.dumps(self.page))
+        target = self.root / "hybrid.pptx"
+        runtime.export_project(self.project, target)
+        with zipfile.ZipFile(target) as archive:
+            ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+                  "p": "http://schemas.openxmlformats.org/presentationml/2006/main"}
+            slide = ET.fromstring(archive.read("ppt/slides/slide1.xml"))
+            self.assertIn("团队编辑验证", [node.text for node in slide.findall(".//a:t", ns)])
+            self.assertEqual(len(slide.findall(".//p:pic", ns)), 1)
+            crop = slide.find(".//p:pic/p:blipFill/a:srcRect", ns)
+            self.assertIsNotNone(crop)
+            self.assertEqual(crop.get("l"), "50000")
+
     def test_browser_loads_project_and_renders_chinese_without_network(self):
         from playwright_runtime import sync_playwright, launch_global_chromium
         with runtime.create_editor_server() as server:

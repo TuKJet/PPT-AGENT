@@ -124,6 +124,42 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
             with self.subTest(renderer=renderer), self.assertRaises(ValueError):
                 self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer=renderer))
 
+    def test_img_pptd_jobs_preserve_source_and_detect_changed_reference(self) -> None:
+        from PIL import Image
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))
+        source = self.workflow.render_target_path(self.run_dir, "img", 1, "Intro")
+        source.parent.mkdir(exist_ok=True)
+        Image.new("RGB", (1600, 900), "white").save(source)
+        original = source.read_bytes()
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="pptd", source="img"))
+        self.workflow.prepare_render_jobs(self.run_dir, "pptd")
+        job = self.workflow.read_json(self.run_dir / "render-jobs/pptd/slide-01.json")
+        self.assertEqual(job["image_reference"]["source_size"], [1600, 900])
+        self.assertEqual(source.read_bytes(), original)
+        self.assertIn("img", self.workflow.load_state(self.run_dir)["renderers"])
+        import pptd_runtime
+        with mock.patch.object(pptd_runtime, "validate_project", return_value={}) as validate:
+            self.workflow.validate_pptd_project(self.run_dir)
+            validate.assert_called_once()
+        Image.new("RGB", (1600, 900), "red").save(source)
+        with self.assertRaisesRegex(ValueError, "reference changed"):
+            self.workflow.validate_pptd_project(self.run_dir)
+
+    def test_img_pptd_rejects_invalid_sources_before_state_changes(self) -> None:
+        from PIL import Image
+        before = self.workflow.load_state(self.run_dir)
+        args = Namespace(run_dir=str(self.run_dir), renderer="pptd", source="img")
+        with self.assertRaisesRegex(ValueError, "IMG directory is empty"):
+            self.workflow.cmd_choose_renderer(args)
+        self.assertEqual(before, self.workflow.load_state(self.run_dir))
+        (self.run_dir / "img").mkdir()
+        Image.new("RGB", (16, 9)).save(self.run_dir / "img/wrong-page.png")
+        with self.assertRaisesRegex(ValueError, "identity mismatch"):
+            self.workflow.cmd_choose_renderer(args)
+        self.assertEqual(before, self.workflow.load_state(self.run_dir))
+        with self.assertRaisesRegex(ValueError, "only supported for PPTD"):
+            self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img", source="img"))
+
     def test_pptd_requires_explicit_selection(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "choose-renderer"):
             self.workflow.ensure_render_ready(self.run_dir, "pptd")

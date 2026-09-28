@@ -77,3 +77,5 @@ Text constraints:
 Export using `workflow.py export --run-dir output/<project>`. Read `slide-status-img.json` and deliver the original PPTX; this completes the IMG workflow.
 
 Optional IMG-to-SVG Post-Export Opt-In: ask once whether the user wants an optional derivative, state additional model/Token usage and that PowerPoint can convert vector parts using its SVG tools. Do not present a decline option. Read [img-svg.md](img-svg.md) and [img-svg-prompt.md](img-svg-prompt.md) only after explicit opt-in. This remains a post-export derivative, not a renderer choice.
+
+In the same post-export offer, include editable PPTD as the option for native text/structure and local browser editing. Both derivatives require additional model work; neither runs automatically. A prior explicit request for the derivative is sufficient authorization. For PPTD, use `choose-renderer --renderer pptd --source img`, then read [pptd.md](pptd.md) and [img-pptd.md](img-pptd.md). Keep the original IMG export available. Do not load either conversion guide while only producing IMG.
