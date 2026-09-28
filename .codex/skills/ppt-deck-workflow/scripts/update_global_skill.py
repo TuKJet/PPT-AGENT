@@ -19,6 +19,16 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 INSTALL_STATE_FILE = ".install-state.json"
 DEFAULT_SOURCE_REPOSITORY = "https://github.com/TuKJet/PPT-AGENT.git"
 DEFAULT_SOURCE_REF = "codex/all-logic-in-skills"
+CHANNEL_SOURCES = {
+    "public": {
+        "repository": DEFAULT_SOURCE_REPOSITORY,
+        "ref": DEFAULT_SOURCE_REF,
+    },
+    "pptd": {
+        "repository": "https://git.kj2ai.top/tukjet/PPT-AGENT.git",
+        "ref": "codex/pptd-logic-in-skills",
+    },
+}
 
 
 def codex_home() -> Path:
@@ -46,6 +56,12 @@ def runtime_environment(runtime: Path) -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("UV_CACHE_DIR", str(runtime / ".uv-cache"))
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(shared_playwright_cache()))
+    return env
+
+
+def git_network_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
     return env
 
 
@@ -136,11 +152,38 @@ def source_values(
     )
 
 
+def channel_source(channel: str) -> tuple[str, str]:
+    try:
+        source = CHANNEL_SOURCES[channel]
+    except KeyError as exc:
+        raise RuntimeError(f"unknown update channel: {channel}") from exc
+    return source["repository"], source["ref"]
+
+
+def source_channel(repository: str, ref: str) -> str | None:
+    normalized_repository = repository.rstrip("/")
+    for channel, source in CHANNEL_SOURCES.items():
+        if (
+            source["repository"].rstrip("/") == normalized_repository
+            and source["ref"] == ref
+        ):
+            return channel
+    return None
+
+
 def remote_commit(repository: str, ref: str) -> str:
-    result = run_checked(
-        ["git", "ls-remote", "--exit-code", repository, f"refs/heads/{ref}"],
-        capture_output=True,
-    )
+    try:
+        result = run_checked(
+            ["git", "ls-remote", "--exit-code", repository, f"refs/heads/{ref}"],
+            env=git_network_environment(),
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "cannot access update source "
+            f"{repository} branch {ref}; authentication may be required. "
+            "The installed Skill was not changed."
+        ) from exc
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     if len(lines) != 1:
         raise RuntimeError(f"could not resolve one branch head for {repository} {ref}")
@@ -178,7 +221,8 @@ def clone_branch(repository: str, ref: str, destination: Path) -> None:
             ref,
             repository,
             str(destination),
-        ]
+        ],
+        env=git_network_environment(),
     )
 
 
@@ -414,6 +458,7 @@ def status_command(skill_root: Path) -> None:
     print(f"skill_root={skill_root}")
     print(f"source_repo={repository}")
     print(f"source_ref={ref}")
+    print(f"source_channel={source_channel(repository, ref) or 'custom'}")
     print(f"installed_commit={commit or 'unknown'}")
     print(f"installed_from_dirty_source={'yes' if dirty else 'no'}")
     print(f"local_managed_changes={len(changes)}")
@@ -460,11 +505,15 @@ def upgrade_command(
             "Review them or use --allow-local-changes explicitly. First changes: "
             + ", ".join(changes[:10])
         )
+    current_repository, current_ref, _, _ = source_values(current_state)
     repository_value, ref_value, installed, dirty = source_values(
         current_state, repository, ref
     )
     remote = remote_commit(repository_value, ref_value)
-    if installed == remote and not dirty and not force:
+    source_changed = (
+        current_repository != repository_value or current_ref != ref_value
+    )
+    if installed == remote and not dirty and not force and not source_changed:
         print("update=not-needed")
         print(f"installed_commit={installed}")
         return False
@@ -577,7 +626,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Check, upgrade, or roll back a globally installed ppt-deck-workflow "
-            "Skill from its recorded GitHub branch."
+            "Skill from its recorded Git branch or a named release channel."
         )
     )
     parser.add_argument("--skill-root", default=str(SKILL_ROOT))
@@ -586,10 +635,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("status")
 
     check = subparsers.add_parser("check")
+    check.add_argument("--channel", choices=sorted(CHANNEL_SOURCES))
     check.add_argument("--repo")
     check.add_argument("--ref")
 
     upgrade = subparsers.add_parser("upgrade")
+    upgrade.add_argument("--channel", choices=sorted(CHANNEL_SOURCES))
     upgrade.add_argument("--repo")
     upgrade.add_argument("--ref")
     upgrade.add_argument("--force", action="store_true")
@@ -597,6 +648,13 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--skip-bootstrap", action="store_true")
     upgrade.add_argument("--skip-browser", action="store_true")
     upgrade.add_argument("--keep-backups", type=int, default=2)
+
+    switch = subparsers.add_parser("switch")
+    switch.add_argument("channel", choices=sorted(CHANNEL_SOURCES))
+    switch.add_argument("--allow-local-changes", action="store_true")
+    switch.add_argument("--skip-bootstrap", action="store_true")
+    switch.add_argument("--skip-browser", action="store_true")
+    switch.add_argument("--keep-backups", type=int, default=2)
 
     rollback = subparsers.add_parser("rollback")
     rollback.add_argument("--backup")
@@ -614,13 +672,34 @@ def main() -> None:
     if args.command == "status":
         status_command(skill_root)
     elif args.command == "check":
-        check_command(skill_root, repository=args.repo, ref=args.ref)
+        if args.channel and (args.repo or args.ref):
+            parser.error("--channel cannot be combined with --repo or --ref")
+        repository, ref = (
+            channel_source(args.channel) if args.channel else (args.repo, args.ref)
+        )
+        check_command(skill_root, repository=repository, ref=ref)
     elif args.command == "upgrade":
+        if args.channel and (args.repo or args.ref):
+            parser.error("--channel cannot be combined with --repo or --ref")
+        repository, ref = (
+            channel_source(args.channel) if args.channel else (args.repo, args.ref)
+        )
         upgrade_command(
             skill_root,
-            repository=args.repo,
-            ref=args.ref,
+            repository=repository,
+            ref=ref,
             force=args.force,
+            allow_local_changes=args.allow_local_changes,
+            bootstrap=not args.skip_bootstrap,
+            install_browser=not args.skip_browser,
+            keep_backups=args.keep_backups,
+        )
+    elif args.command == "switch":
+        repository, ref = channel_source(args.channel)
+        upgrade_command(
+            skill_root,
+            repository=repository,
+            ref=ref,
             allow_local_changes=args.allow_local_changes,
             bootstrap=not args.skip_bootstrap,
             install_browser=not args.skip_browser,

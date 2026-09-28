@@ -280,6 +280,15 @@ https://github.com/TuKJet/PPT-AGENT.git
 codex/all-logic-in-skills
 ```
 
+Two update channels are available. The GitHub channel continues to include the current PPTD implementation; the channels select an update source rather than a renderer feature tier:
+
+| Channel | Repository | Branch | Access |
+| --- | --- | --- | --- |
+| `public` | `https://github.com/TuKJet/PPT-AGENT.git` | `codex/all-logic-in-skills` | Public GitHub stable source |
+| `pptd` | `https://git.kj2ai.top/tukjet/PPT-AGENT.git` | `codex/pptd-logic-in-skills` | Authorized private update source |
+
+Switch the installed source with `update_global_skill.py switch public` or `update_global_skill.py switch pptd`. Codex also treats natural-language requests such as “switch to the GitHub stable channel” and “switch to the private PPTD update channel” as these explicit maintenance commands. The switch stages and validates a candidate; it does not run `git checkout` inside the installed Skill. Failed private-repository authentication leaves the current installation unchanged.
+
 Resolve the installed path as shown above, then inspect local status without network access:
 
 ```powershell

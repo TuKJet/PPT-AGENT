@@ -141,6 +141,78 @@ class GlobalSkillUpdateTests(unittest.TestCase):
             changes = self.updater.local_changes(target, state)
             self.assertIn("modified:SKILL.md", changes)
 
+    def test_named_channels_resolve_to_expected_sources(self) -> None:
+        self.assertEqual(
+            self.updater.channel_source("public"),
+            (
+                "https://github.com/TuKJet/PPT-AGENT.git",
+                "codex/all-logic-in-skills",
+            ),
+        )
+        self.assertEqual(
+            self.updater.channel_source("pptd"),
+            (
+                "https://git.kj2ai.top/tukjet/PPT-AGENT.git",
+                "codex/pptd-logic-in-skills",
+            ),
+        )
+        self.assertEqual(
+            self.updater.source_channel(
+                "https://git.kj2ai.top/tukjet/PPT-AGENT.git",
+                "codex/pptd-logic-in-skills",
+            ),
+            "pptd",
+        )
+        self.assertEqual(
+            self.updater.build_parser().parse_args(["switch", "pptd"]).channel,
+            "pptd",
+        )
+        self.assertEqual(
+            self.updater.git_network_environment()["GIT_TERMINAL_PROMPT"],
+            "0",
+        )
+
+    def test_source_change_is_applied_when_commit_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_repo = root / "source-repo"
+            source_repo.mkdir()
+            branch = "feature/ppt-skill"
+            commit = self.make_source_repository(source_repo, branch)
+
+            target = root / "codex-home" / "skills" / "ppt-deck-workflow"
+            source = {
+                "repository": str(source_repo),
+                "ref": branch,
+                "commit": commit,
+                "dirty": False,
+            }
+            self.installer.install_skill(target, source=source)
+
+            alias_repo = root / "source-repo-alias"
+            alias_repo.symlink_to(source_repo, target_is_directory=True)
+            previous_codex_home = os.environ.get("CODEX_HOME")
+            os.environ["CODEX_HOME"] = str(root / "codex-home")
+            try:
+                changed = self.updater.upgrade_command(
+                    target,
+                    repository=str(alias_repo),
+                    ref=branch,
+                    bootstrap=False,
+                    keep_backups=4,
+                )
+                self.assertTrue(changed)
+                state = json.loads(
+                    (target / ".install-state.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(state["source"]["repository"], str(alias_repo))
+                self.assertEqual(state["source"]["commit"], commit)
+            finally:
+                if previous_codex_home is None:
+                    os.environ.pop("CODEX_HOME", None)
+                else:
+                    os.environ["CODEX_HOME"] = previous_codex_home
+
     def test_restore_removes_partially_applied_candidate_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

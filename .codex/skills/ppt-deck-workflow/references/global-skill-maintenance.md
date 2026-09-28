@@ -46,6 +46,20 @@ Rollback restores the newest retained backup:
 uv run --project "$Runtime" python -B -u "$PptSkill\scripts\update_global_skill.py" rollback
 ```
 
+The installed Skill has two named update channels. The current GitHub channel retains PPTD; the channels identify update sources rather than renderer feature tiers:
+
+- `public`: GitHub stable source at `https://github.com/TuKJet/PPT-AGENT.git`, branch `codex/all-logic-in-skills`
+- `pptd`: authorized private source at `https://git.kj2ai.top/tukjet/PPT-AGENT.git`, branch `codex/pptd-logic-in-skills`
+
+Switch editions with a staged, validated update rather than a Git checkout inside the installed Skill:
+
+```powershell
+uv run --project "$Runtime" python -B -u "$PptSkill\scripts\update_global_skill.py" switch public
+uv run --project "$Runtime" python -B -u "$PptSkill\scripts\update_global_skill.py" switch pptd
+```
+
+Natural-language requests for the GitHub, public-source, or stable channel select `public`. Requests for the private PPTD or internal update channel select `pptd`. A private-channel authentication failure must happen before candidate application and must leave the installed Skill unchanged. Never ask the user to provide a private key or token in chat; direct them to configure repository access outside Codex.
+
 Use the equivalent slash-separated paths on macOS/Linux.
 
 ## Source And Safety Contract
@@ -53,6 +67,7 @@ Use the equivalent slash-separated paths on macOS/Linux.
 - Default to repository `https://github.com/TuKJet/PPT-AGENT.git` and branch `codex/all-logic-in-skills` when installation-time Git discovery is unavailable.
 - Record the actual origin URL, branch, commit, and dirty-source flag during installation.
 - Use `git ls-remote` for checks and a depth-one single-branch clone for upgrades; do not merge the remote branch into a live installation.
+- Disable interactive Git credential prompts during checks and upgrades. Existing credential helpers may supply authorized credentials; otherwise fail without changing the installation.
 - Refuse an upgrade when managed files differ from their recorded hashes unless the user explicitly approves `--allow-local-changes`.
 - Keep backups under `$CODEX_HOME/skill-state/ppt-deck-workflow/backups`, outside `$CODEX_HOME/skills`, so backup copies are not discovered as duplicate Skills.
 - Preserve `runtime/.venv`, `runtime/.uv-cache`, local `runtime/uv.lock`, `.install-state.json`, and unmanaged local files.
