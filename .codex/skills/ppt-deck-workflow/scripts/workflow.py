@@ -803,6 +803,15 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         "renderer": renderer,
         "slide_count": len(slides),
     }
+    if references:
+        shared_context["reconstruction_policy"] = {
+            "default_mode": "hybrid",
+            "native_rebuild_requires_explicit_request": True,
+            "editable_text": "rebuild_titles_body_and_key_data",
+            "complex_visuals": "prefer_source_crops",
+            "simple_geometry": "rebuild_only_when_visually_faithful",
+            "mixed_text_visuals": "preserve_as_separate_image_if_separation_degrades_fidelity",
+        }
     write_json(shared_context_path, shared_context)
 
     manifest_slides: list[dict[str, Any]] = []
@@ -829,6 +838,7 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         }
         if references:
             payload["image_reference"] = references[idx - 1]
+            payload["reconstruction_policy"] = shared_context["reconstruction_policy"]
             payload["reconstruction_guide_path"] = str(SKILL_ROOT / "references" / "img-pptd.md")
         write_json(job_path, payload)
         manifest_slides.append({

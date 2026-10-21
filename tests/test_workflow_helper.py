@@ -135,6 +135,12 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         self.workflow.prepare_render_jobs(self.run_dir, "pptd")
         job = self.workflow.read_json(self.run_dir / "render-jobs/pptd/slide-01.json")
         self.assertEqual(job["image_reference"]["source_size"], [1600, 900])
+        policy = job["reconstruction_policy"]
+        self.assertEqual(policy["default_mode"], "hybrid")
+        self.assertTrue(policy["native_rebuild_requires_explicit_request"])
+        self.assertEqual(policy["complex_visuals"], "prefer_source_crops")
+        shared = self.workflow.read_json(self.run_dir / "render-jobs/pptd/shared-context.json")
+        self.assertEqual(shared["reconstruction_policy"], policy)
         self.assertEqual(source.read_bytes(), original)
         self.assertIn("img", self.workflow.load_state(self.run_dir)["renderers"])
         import pptd_runtime
@@ -165,6 +171,17 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
             self.workflow.ensure_render_ready(self.run_dir, "pptd")
         self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="pptd"))
         self.workflow.ensure_render_ready(self.run_dir, "pptd")
+
+    def test_direct_renderer_jobs_do_not_inherit_img_reconstruction_policy(self) -> None:
+        for renderer in ("img", "pptd"):
+            with self.subTest(renderer=renderer):
+                self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer=renderer))
+                self.workflow.prepare_render_jobs(self.run_dir, renderer)
+                jobs_dir = self.run_dir / "render-jobs" / renderer
+                for filename in ("shared-context.json", "slide-01.json"):
+                    payload = self.workflow.read_json(jobs_dir / filename)
+                    self.assertNotIn("reconstruction_policy", payload)
+                    self.assertNotIn("image_reference", payload)
 
     def test_img_does_not_start_editor_or_read_pptd(self) -> None:
         self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))

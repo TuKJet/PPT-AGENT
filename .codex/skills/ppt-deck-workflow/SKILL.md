@@ -49,6 +49,8 @@ PPTD selection authorizes starting the local editor after its project files are 
 
 After IMG export, offer optional editable PPTD reconstruction alongside the existing SVG option. Continue only when requested; a prior explicit request for IMG plus editable PPTD is sufficient. Record `choose-renderer --renderer pptd --source img`, then prepare jobs. Preserve the original IMG and its PPTX. This is a derivative of the approved deck, not a new outline/content approval cycle. Direct PPTD continues to use `--source plans` (the default).
 
+For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑 PPT” selects **hybrid reconstruction** by default: editable titles/body/key data plus independent source-image crops for complex visuals. Preserve the source's visual quality; rebuild simple geometry only when faithful. Full native reconstruction requires an explicit request such as “全部原生” or “图内每个节点和连线都要能改”; “不用 SVG” alone does not imply it. State the hybrid approach and proceed without another choice gate. Apply any explicit native requirement only to its requested scope. See [img-pptd.md](references/img-pptd.md) after this derivative is selected.
+
 ## Shared Invariants
 
 - One new deck, one new folder under `output/`. Never reuse a previous run as a workaround for a permission/init failure. Keep sources, media, intermediate artifacts, reviews, and outputs in this same run directory.

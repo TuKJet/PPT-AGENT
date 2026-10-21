@@ -90,6 +90,8 @@ The helper validates these canonical field names before it writes `slide-plans-p
 
 `render-jobs/<renderer>/shared-context.json`
 
+- For IMG-derived PPTD, shared context and each `slide-xx.json` include `reconstruction_policy`: hybrid by default, source crops preferred for complex visuals, faithful native simple geometry, and full native rebuilding only on explicit user request. This is an authoring instruction; validation does not prove that a page followed it. Explicit user overrides and their scope must accompany page-author assignments. Direct IMG and plan-based PPTD jobs omit this policy.
+
 - Shared deck-level context for page subagents, including the approved `deck_strategy` and `design_system` copied from `slide-plans.json`.
 
 `render-jobs/<renderer>/slide-xx.json`

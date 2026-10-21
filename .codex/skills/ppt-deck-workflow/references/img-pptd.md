@@ -2,12 +2,32 @@
 
 Use after the user requests an editable derivative of generated IMG pages. Preserve the original IMG and image PPTX, existing SVG derivatives, and unrelated manual PPTD edits.
 
+## Interpret editability
+
+Default to **hybrid reconstruction with visual fidelity**. “可编辑”, “参考图片走 PPTD” and “转成可编辑 PPT” authorize editable text and separately movable visual assets; they do not request replacing all artwork with native shapes. Tell the user briefly: “按原图保真转成可编辑版：文字和关键数据可编辑，复杂图像裁剪保留并可独立移动、缩放。” Then proceed; do not add an approval stage.
+
+Only explicit requests such as “全部用原生元素”, “不要图片” or “图中节点和连线都能单独修改” override the hybrid default, and only within the requested scope. A requirement that one chart's data be editable does not apply to the deck's illustrations. “不用 SVG” only excludes SVG. For an explicit native request, honor it and disclose unavoidable fidelity or asset limits; do not silently return raster content as fully native.
+
+Choose representation per region before authoring:
+
+| Region | Default treatment |
+| --- | --- |
+| Titles, body, key numbers and independently placed labels | Editable text, preserving copy and placement |
+| Simple cards, rules, arrows and geometric structures | Native elements when they faithfully reproduce the source |
+| Photos, textured/3D icons, networks, hardware art, glow and other complex visuals | Tight source crops as separate pictures, preserving texture, geometry and effects; do not replace with generic icons or rough shapes |
+| Dense diagrams with inseparable internal labels/lines | Preserve the complete diagram region as one independently movable picture; keep surrounding copy editable and disclose that internal labels remain raster |
+| Charts/tables requiring editable data | Use authoritative data for native reconstruction; do not invent values from pixels |
+
+An image-heavy source should retain its visual assets. There is no target native-element ratio. Editable object count does not compensate for lost visual quality, and a full-slide image with duplicate text overlays is not hybrid reconstruction.
+
+## Reconstruct and verify
+
 1. Record `choose-renderer --run-dir <run> --renderer pptd --source img`, then `prepare-render-jobs --run-dir <run>`. The helper validates image count, page filenames and decoding before recording the choice. Jobs include `image_reference` with the absolute image path, pixel size and SHA-256.
 2. Pass each referenced IMG directly to the vision-capable model. Use approved copy and data as the textual authority; use the IMG for composition, relative geometry, colors and visual assets. Resolve visible discrepancies using approved content, and report material departures from the reference. Do not regenerate from plans alone.
-3. Write ordinary `pptd/deck.pptd`, `pages/*.page`, and `media/` using the PPTD guide. Reconstruct titles, body text, numbers, simple shapes and lines as independent elements. For charts/tables, use authoritative data when available; do not infer precise values from pixels. Complex visuals may remain independent pictures. Do not wrap the whole slide in one image with duplicate text overlays.
+3. Write ordinary `pptd/deck.pptd`, `pages/*.page`, and `media/` using the PPTD guide and the region choices above. The jobs' `reconstruction_policy` repeats the hybrid default for page-local work; pass explicit user overrides and their scope to any delegated author. Preserve source composition, visual density and asset identity rather than redesigning from the plans.
 4. Reuse original pixels for suitable illustrations and photos. Either copy the source to a uniquely named file in `pptd/media/` and use the image element's proportional `crop`, or crop it with Pillow into a separate local asset. Scale source coordinates to the declared PPTD size: `x_pptd = x_pixel * page_width / source_width`, likewise for y and dimensions. Keep source dimensions separate from the usual 1280x720 SVG canvas and 960x540 PPTD canvas. Do not stretch cropped content.
-5. Inspect crops for baked-in text and background edges. Avoid overlapping text regions. When text covers a complex visual, use available image editing to create a clean asset or conservatively rebuild that region, then add native text. Cropping cannot recover hidden pixels. Inspect edits for changed details; do not claim exact recovery. Record source/crop or edit provenance in `pptd/media-sources.json`.
-6. Run `validate-pptd` and `export-pptd-images`, inspect `.qa-images/overview.jpg`, and compare every rendered page with its original IMG using the manifest mapping. Check all approved text, crop boundaries, repeated text, text wrapping, alignment and missing visuals. Inspect suspicious regions at full resolution and repair them; regenerate images with `--force` after edits. Record the comparison and remaining differences in `pptd/reconstruction-review.md`; structural validation alone is not a visual pass.
+5. Inspect crops for baked-in text and background edges. Avoid duplicate text overlays. When text cannot be cleanly separated from a complex visual, keep that region intact and disclose its internal text limit. Use image editing for a clean asset only when the requested text edit requires separation; inspect changed details. Do not force shape reconstruction merely to remove baked-in labels. Cropping cannot recover hidden pixels. Record source/crop or edit provenance and any internal text retained in `pptd/media-sources.json`.
+6. Run `validate-pptd` and `export-pptd-images`, inspect `.qa-images/overview.jpg`, and compare every rendered page with its original IMG using the manifest mapping. Check all approved text, crop boundaries, repeated text, text wrapping, alignment and missing visuals. Explicitly check whether textured art, dense diagrams, glow or source-specific icons were replaced with visibly weaker approximations; in hybrid mode restore source crops rather than accepting this as an editability tradeoff. Inspect suspicious regions at full resolution and repair them; regenerate images with `--force` after edits. Record visual differences and actual editability, including raster internal labels, in `pptd/reconstruction-review.md`; structural validation alone is not a visual pass.
 7. Export through the existing PPTD exporter. The helper rejects missing/changed image references relative to prepared jobs. After a source changes, refresh jobs and inspect/rebuild affected pages; do not refresh hashes merely to bypass a mismatch. Report actual editability: native text/structure versus movable raster pictures. Browser preview is not PowerPoint readback verification.
 
 The original IMG is the visual reference, not editable source layers. This route is model-authored reconstruction with deterministic packaging, not automatic lossless image conversion. Do not overwrite an existing manually edited PPTD project without incorporating those edits or obtaining direction when intent conflicts.
