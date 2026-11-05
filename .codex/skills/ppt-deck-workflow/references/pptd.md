@@ -2,7 +2,7 @@
 
 Read only after explicit PPTD selection, recorded by `choose-renderer --renderer pptd`.
 
-Use the bundled open-kimi-ppt editor and WASM directly. Do not add a template engine or new intermediate DSL. For `--source img`, also read [img-pptd.md](img-pptd.md). Do not invoke the reference project's separate Skill workflow.
+Use the bundled PPTD WASM/CLI exporter directly. Do not add a template engine or new intermediate DSL. For `--source img`, also read [img-pptd.md](img-pptd.md). Do not invoke the reference project's separate Skill workflow. The local browser editor is an optional user-facing editing surface, not a required generation step; start it only when the user explicitly asks to edit in the browser or inspect the project interactively.
 
 `--source img` uses hybrid reconstruction by default: editable copy and key data, faithful simple geometry, and separate source crops for complex visuals. Apply the IMG guide's region choices before the generic generation steps below. PPTD is the editable project format, not a requirement that every visual be a native shape; full native reconstruction needs an explicit user request.
 
@@ -23,30 +23,34 @@ Store final assets in `pptd/media/` and reference relative paths. For searched o
 5. Preserve exact final Chinese copy and numbers, stable element IDs, and deck-level palette tokens. Batch image preparation before laying out around image proportions. All media must be local to the project for repeatable offline export; do not embed base64 images in the model's YAML output.
 6. Run `validate-pptd --run-dir output/<project>`. Repair invalid pages. This checks structure and local dependencies, not visual fidelity.
 
-## Local editor
+## Optional local editor
 
-After generation and validation, start:
+Do not start the editor during ordinary generation or QA. After generation and validation, use the CLI export below. Start the editor only for an explicit request such as “open the PPTD editor” or “let me adjust this in the browser”:
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py open-pptd-editor --run-dir output/<project>
 ```
 
-Use the global runtime command prefix in an installed Skill. This is a long-running foreground server; keep its terminal/session alive. It binds `127.0.0.1` on an available port, prints `editor_url` and `project_dir`, and serves only the bundled editor. Open the printed URL in the available browser tool or Codex browser panel; `--open` opens the system browser when appropriate. Do not repeatedly create new servers if the existing session is healthy.
+Use the global runtime command prefix in an installed Skill. This is a long-running foreground server; keep its terminal/session alive. It binds `127.0.0.1` on an available port, prints `editor_url` and `project_dir`, and serves only the bundled editor. Opening a browser tab or using Computer Use is permitted only for that explicit request. Do not repeatedly create new servers if the existing session is healthy.
 
 For this first version, use the editor's **打开 PPTD 文件夹** action to select the printed `project_dir` (the run's `pptd/` directory). Tell the user the exact directory. Chromium's folder permission enables editing and saving to disk. Read-only upload mode saves edits in memory only; do not claim those edits reached disk. Do not present the editor's built-in demo as the generated deck.
 
-Use the loaded deck to inspect rendered pages. Correct material clipping, overlap, missing assets, and text errors before delivery; use available browser screenshots for visual review. Structural validation alone is not a visual pass. Users may also refine and manually export through the editor.
+Use the loaded deck to inspect rendered pages only when the user requested the editor. Correct material clipping, overlap, missing assets, and text errors before delivery; structural validation alone is not a visual pass. Users may refine and manually export through the editor, but the agent's normal delivery remains the deterministic CLI export.
 
 Keep Agent and browser editing sequential: wait for the editor to show saved before reading its files; close/reload the document after Agent edits. Do not regenerate pages over unsaved browser changes. No automatic file-watch or conflict-merge facility is promised in this first version.
 
 ## Export and delivery
 
-Before PPTX delivery, run `export-pptd-images --run-dir output/<project>`. This drives the bundled local editor's image export with Playwright on macOS/Windows/Linux, saves the downloaded ZIP, decodes all pages, and builds `pptd/.qa-images/overview.jpg`. It uses the existing Playwright runtime and does not install agent-browser or leave a debug browser running. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing compatible Chromium binary. Remote assets/fonts are blocked for repeatability; use local assets and review font wrapping.
+Before PPTX delivery, run `export-pptd-images --run-dir output/<project>` as a background QA operation. This drives the bundled local renderer with Playwright on macOS/Windows/Linux, saves the downloaded ZIP, decodes all pages, and builds `.qa-images/overview.jpg`; it does not open an interactive editor or require Computer Use. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing compatible Chromium binary. Remote assets/fonts are blocked for repeatability; use local assets and review font wrapping.
 
-Read `.qa-images/manifest.json` for the P1..Pn to `.page` mapping. Inspect the overview, then full-resolution `pages/*.png` for suspicious pages. Check image clarity/proportions, exact copy, text overflow, overlap, contrast, alignment, page boundaries, and missing visuals. Correct the `.page` files, rerun with `--force`, and inspect again before delivery. Record the result and residual issues in `pptd/visual-review.md`. A successful image export means review is pending, never that the visual check passed. For IMG reconstruction, also compare each page against the original IMG. These are editor renders, not PowerPoint readback previews. If browser export fails, preserve the project and report the error; do not substitute a demo or claim visual QA passed.
+Read `.qa-images/manifest.json` for the P1..Pn to `.page` mapping. Inspect the overview, then full-resolution `pages/*.png` for suspicious pages. Check image clarity/proportions, exact copy, text overflow, overlap, contrast, alignment, page boundaries, and missing visuals. Correct the `.page` files, rerun with `--force`, and inspect again before delivery. For IMG reconstruction, call the reusable `compare-pptd` operation to compare source IMG and rendered pages; it produces a review-only image/hash artifact, never HTML. A successful image export means review is pending, never that the visual check passed. These are renderer previews, not PowerPoint readback previews. If browser export fails, preserve the project and report the error; do not substitute a demo or claim visual QA passed. Store temporary review outputs under `.workflow/` or `.qa-images/`, then clean them during finalization.
 
 `export --run-dir output/<project>` reads the latest saved project and writes `<topic>-pptd.pptx`. Requires Node.js 18+; uses bundled WASM offline and the current Python runtime for YAML. No Kimi login or reference repository is required. The browser may request optional remote fonts such as MiSans and fall back to installed fonts when unavailable; prefer locally available fonts and inspect wrapping. Do not install prerequisites silently.
 
 The CLI preserves supported native text, shapes, pictures, and tables. Its font arrays are empty: do not promise embedded fonts. The browser writer has additional preprocessing for icons, formulas, and some charts; complex charts can become images. Prefer text/shapes/lines/images/tables for initial validation. If CLI export cannot represent a requested advanced element, use browser export and report the limitation; never silently flatten the deck as a fallback.
 
-Read `slide-status-pptd.json` after helper export. Deliver the complete PPTD folder, PPTX, and local editor URL. Explain that after manual edits, the user can export again in the editor or save and ask Codex to re-export. Browser-download exports are separate from the helper's recorded artifact. Do not mark them as helper exports without checking the file.
+Read `slide-status-pptd.json` after helper export. The normal delivery is the PPTX plus the necessary PPTD source (`deck.pptd`, `pages/`, `media/`, and provenance). Do not deliver a local editor URL unless the user explicitly requested the editor. Browser-download exports are separate from the helper's recorded artifact. Do not mark them as helper exports without checking the file.
+
+## Finalization and clean output
+
+The run directory is an authoring workspace during generation, not the delivery package. Finalization must leave only the canonical `outline.json`, `contents.json`, `slide-plans.json`, the requested PPTX, and the necessary `pptd/` source tree (or the requested IMG source files). Remove generated previews, render jobs, prompt dumps, browser ZIPs, comparison images/manifests, ad-hoc scripts, HTML viewers, and other temporary review files through the helper's finalization command. Never create a second planning Markdown report alongside the canonical slide plan; human-readable previews are projections used during approval and are disposable.

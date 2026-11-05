@@ -4,6 +4,10 @@ Apply this contract whenever an existing outline, content artifact, or slide pla
 
 Treat the user's change request as a transient delta. The persisted artifact must describe only the desired final slide, not how it differs from an earlier version.
 
+First read `resume`, the task brief and the latest canonical page. Persist the scoped correction in the brief; update `outline.json`, `contents.json` and `slide-plans.json` only where content changes. Preserve accepted evidence, diagram relationships and unrelated/manual edits. A density correction does not replace the topic or visual system. A design correction does not reword accepted facts.
+
+Use the helper's preview command and overwrite its generated projection. Do not write a second planning Markdown, revision report, HTML gallery or custom preview script. Explain changes briefly in chat and link the canonical preview when review is needed.
+
 - Rewrite affected fields instead of appending correction notes.
 - Keep accepted content and the new final geometry; discard superseded alternatives and rejected wording.
 - Make `required_elements` an allowlist of exact final visible copy and objects. A deleted object or string must not remain in this list.

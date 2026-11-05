@@ -12,8 +12,9 @@ Research may come from Codex-native research capability, not repository AI provi
 
 - Keep only information directly relevant to the slide title.
 - Prefer conclusions, capability judgments, concrete facts, dates, metrics, and case outcomes.
-- Use 3-5 short bullets by default.
-- Keep each bullet compact, typically 30-45 Chinese characters or the English equivalent.
+- Use compact bullets for prose pages; architecture/process/comparison pages retain actual nodes, relationships, alternatives and results. Do not force all material into a fixed bullet or character quota.
+- For a design claim, retain the chain from problem to design choice to mechanism to supported benefit. Map claims and metrics to named source sections in the canonical plan's `source_refs`; distinguish measured results from design expectations.
+- Translate source diagrams into explicit relationships: direction, branching, merge points, feedback and edge labels. Do not reduce a diagram to a list of nouns. Keep detail that explains the design; move implementation syntax into notes.
 - Do not output URLs, footnote numbers, source lists, or long citations inside slide copy.
 - Avoid vague phrasing such as "据报道", "可能", "有观点认为", unless the slide explicitly needs uncertainty.
 - If evidence is weak, write conservative capability or logic statements instead of inventing numbers.

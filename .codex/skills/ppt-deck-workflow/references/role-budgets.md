@@ -1,6 +1,8 @@
 ## Role And Content Budgets
 
-Use these role budgets while planning and rendering.
+Use these role budgets while planning and rendering. They are flexible defaults: the user's density target and necessary source relationships take precedence. A limit must never erase a real stage, branch, comparison row or supporting fact.
+
+Information density means useful relationships and evidence per page. Increasing paragraph length is not the same as adding information. Add source-backed distinctions, comparisons, causes and outcomes; reduce annotation verbosity before deleting explanatory structure. Use the reference image and rendered readability to calibrate density, not a universal word quota.
 
 `cover`
 
@@ -18,18 +20,17 @@ Use these role budgets while planning and rendering.
 
 `content`
 
-- Default structure: two main regions plus one footer.
-- Keep at most one core module and one supporting module.
-- If using timeline, process, metrics, or scenarios, choose one supporting pattern rather than mixing several.
-- Timeline max 4 nodes; process max 3 steps; metrics max 2 blocks; scenarios max 3 items.
-- Footer max one conclusion plus 2-3 short tags.
+- Organize one main argument and its necessary evidence into a clear hierarchy.
+- Architecture, comparison and mechanism pages may contain several related groups.
+- Preserve required nodes, directed relationships, branch/merge points and feedback. Do not force a real nine-step flow into three generic boxes.
+- For medium density, a useful starting point is one complete logic diagram plus compact annotations and a supporting result or comparison.
+- A footer is optional; do not manufacture tags or extra conclusions to fill a template.
 
 `timeline`
 
-- Max 4 timeline nodes.
-- Each node: stage name, time, one sentence, and at most two short tags.
-- Right-side support area max two cards or one metric plus one summary.
-- Avoid dense five-plus-node timelines.
+- Preserve meaningful sequence, dependencies and milestones.
+- Group phases or split pages when the full sequence cannot remain legible.
+- Give each node only the annotation needed to explain its role.
 
 `summary`
 
@@ -45,4 +46,7 @@ Use these role budgets while planning and rendering.
 - Max two main blocks plus one light footer.
 - Prefer one main conclusion area or a simple two-region structure.
 - Avoid complex card matrices and dense detail.
+- Use a different composition and purpose from the cover.
+
+Keep cover and contents when present in the approved outline; a density change alone does not remove them. For design presentations, check the problem, design choice, mechanism and supported benefit. Audience adaptation can simplify implementation syntax while preserving decision-relevant architecture.
 

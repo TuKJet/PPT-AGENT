@@ -20,6 +20,79 @@ from pptd_runtime import create_editor_server, load_mapping, project_path, valid
 from playwright_runtime import launch_global_chromium, sync_playwright
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_comparison(root: Path, source_images: dict[str, str | Path],
+                     rendered_images: dict[str, str | Path], output: Path) -> dict:
+    """Create a review-only source/render contact sheet and a hash manifest.
+
+    This is deliberately a local raster artifact: it does not create an HTML viewer and
+    it never marks a deck as visually approved. Callers can remove the returned files at
+    finalization while retaining the canonical PPTD/PPTX outputs.
+    """
+    root = root.resolve()
+    keys = list(source_images)
+    if not keys or set(keys) != set(rendered_images):
+        raise ValueError("source and rendered comparison mappings must have identical non-empty keys")
+    pairs = []
+    for key in keys:
+        source = Path(source_images[key]).resolve()
+        rendered = Path(rendered_images[key]).resolve()
+        if not source.is_file() or not rendered.is_file():
+            raise ValueError(f"comparison image missing for {key}")
+        pairs.append((key, source, rendered))
+    output = output.resolve()
+    if output.is_dir():
+        raise ValueError("comparison output must be a file")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    width, label, gap = 640, 30, 12
+    cells = []
+    for key, source, rendered in pairs:
+        images = []
+        for path in (source, rendered):
+            with Image.open(path) as image:
+                image.load()
+                images.append(image.convert("RGB").resize((width, round(width * image.height / image.width)), Image.Resampling.LANCZOS))
+        height = max(image.height for image in images)
+        canvas = Image.new("RGB", (2 * width + gap, height + label), "#ffffff")
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle((0, 0, width, label), fill="#374151")
+        draw.rectangle((width + gap, 0, 2 * width + gap, label), fill="#111827")
+        draw.text((8, 7), f"{key} · source", fill="white", font=ImageFont.load_default())
+        draw.text((width + gap + 8, 7), f"{key} · rendered", fill="white", font=ImageFont.load_default())
+        canvas.paste(images[0], (0, label))
+        canvas.paste(images[1], (width + gap, label))
+        cells.append(canvas)
+    cell_height = max(cell.height for cell in cells)
+    columns = min(2, len(cells))
+    rows = math.ceil(len(cells) / columns)
+    sheet = Image.new("RGB", (columns * (2 * width + gap) + (columns + 1) * gap,
+                               rows * cell_height + (rows + 1) * gap), "#e5e7eb")
+    for index, cell in enumerate(cells):
+        x = gap + (index % columns) * (2 * width + gap + gap)
+        y = gap + (index // columns) * (cell_height + gap)
+        sheet.paste(cell, (x, y))
+    sheet.save(output, "JPEG", quality=92)
+    manifest = {
+        "status": "pending_visual_review",
+        "root": str(root),
+        "comparison": str(output),
+        "pairs": [{"key": key, "source": str(source), "rendered": str(rendered),
+                   "source_sha256": _file_sha256(source), "rendered_sha256": _file_sha256(rendered)}
+                  for key, source, rendered in pairs],
+    }
+    manifest_path = output.with_suffix(output.suffix + ".json")
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest["manifest"] = str(manifest_path)
+    return manifest
+
+
 def build_payload(root: Path) -> tuple[dict, dict, str]:
     report = validate_project(root)
     manifest_path = Path(report["manifest"])

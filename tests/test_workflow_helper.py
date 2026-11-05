@@ -101,15 +101,7 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         )
         slide_plans = valid_slide_plans(("Intro", "A", "cover"))
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
-        self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
-        state = self.workflow.load_state(self.run_dir)
-        self.workflow.mark_artifact(
-            self.run_dir,
-            state,
-            "slide_plans",
-            self.run_dir / "slide-plans.json",
-            self.run_dir / "slide-plans-preview.md",
-        )
+        self.workflow.preview_artifact(self.run_dir, "slide_plans")
         self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
 
     def tearDown(self) -> None:
@@ -268,7 +260,7 @@ class WorkflowHelperRunDirTests(unittest.TestCase):
 
         self.workflow.cmd_preview(Namespace(run_dir=relative, artifact="outline"))
 
-        self.assertTrue((expected / "outline-preview.md").exists())
+        self.assertTrue((expected / self.workflow.PREVIEW_FILES["outline"]).exists())
 
 
 class WorkflowHelperMultiRendererStateTests(unittest.TestCase):
@@ -329,15 +321,7 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
             ("Roadmap", "Beta", "summary"),
         )
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
-        self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
-        state = self.workflow.load_state(self.run_dir)
-        self.workflow.mark_artifact(
-            self.run_dir,
-            state,
-            "slide_plans",
-            self.run_dir / "slide-plans.json",
-            self.run_dir / "slide-plans-preview.md",
-        )
+        self.workflow.preview_artifact(self.run_dir, "slide_plans")
         self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
 
     def tearDown(self) -> None:
@@ -371,7 +355,7 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.assertEqual(Path(slide_job["shared_context_path"]).resolve(), (jobs_root / "shared-context.json").resolve())
 
     def test_slide_plan_preview_exposes_deck_strategy_and_design_system(self) -> None:
-        preview = (self.run_dir / "slide-plans-preview.md").read_text(encoding="utf-8")
+        preview = (self.run_dir / self.workflow.PREVIEW_FILES["slide_plans"]).read_text(encoding="utf-8")
 
         self.assertIn("# 幻灯片规划预览", preview)
         self.assertIn("## 全局叙事策略", preview)
@@ -441,7 +425,7 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
             Namespace(run_dir=str(smoke_run), artifact="slide_plans")
         )
 
-        preview_path = smoke_run / "slide-plans-preview.md"
+        preview_path = smoke_run / self.workflow.PREVIEW_FILES["slide_plans"]
         preview = preview_path.read_text(encoding="utf-8")
         state = self.workflow.load_state(smoke_run)
         self.assertEqual(state["artifacts"]["slide_plans"]["status"], "pending_review")
@@ -516,15 +500,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         )
         slide_plans = valid_slide_plans(("Opening", "Alpha", "cover"))
         self.workflow.write_json(self.run_dir / "slide-plans.json", slide_plans)
-        self.workflow.write_plans_preview(slide_plans, self.run_dir / "slide-plans-preview.md")
-        state = self.workflow.load_state(self.run_dir)
-        self.workflow.mark_artifact(
-            self.run_dir,
-            state,
-            "slide_plans",
-            self.run_dir / "slide-plans.json",
-            self.run_dir / "slide-plans-preview.md",
-        )
+        self.workflow.preview_artifact(self.run_dir, "slide_plans")
         self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
         self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))
         img_dir = self.run_dir / "img"

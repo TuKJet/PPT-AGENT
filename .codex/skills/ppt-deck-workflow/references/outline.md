@@ -5,6 +5,9 @@ Generate a complete renderer-neutral PPT outline.
 - Match the requested topic, audience, and page count.
 - Use stable slide roles: `cover`, `toc`, `content`, `timeline`, `summary`, `ending`.
 - Prefer a coherent narrative arc over a flat topic list.
+- Inspect named source documents and their headings/diagrams before outlining an existing project. Record source coverage in the canonical outline (for example page-local `source_refs`), not a second report. Distinguish design rationale, operating workflow, evidence and future validation; do not substitute one for another.
+- When explaining architecture to management, preserve the actual design choices and mechanisms at an accessible level. The audience label does not turn a design presentation into a generic sales/roadmap template.
+- Preserve approved page roles on revision, including cover and contents when present. Changing palette or density alone does not authorize removing them.
 - Keep each slide title specific enough to key `contents.json`.
 - The outline must already reflect audience level, decision context, and expected speaking style rather than leaving those choices only to later rendering stages.
 - Make slide titles and section labels read like slide-ready judgments, not presenter notes about what will be discussed.

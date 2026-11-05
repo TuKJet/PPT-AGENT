@@ -47,10 +47,11 @@ ARTIFACT_FILES = {
     "slide_plans": "slide-plans.json",
 }
 PREVIEW_FILES = {
-    "outline": "outline-preview.md",
-    "contents": "contents-preview.md",
-    "slide_plans": "slide-plans-preview.md",
+    "outline": ".workflow/outline-preview.md",
+    "contents": ".workflow/contents-preview.md",
+    "slide_plans": ".workflow/slide-plans-preview.md",
 }
+ARTIFACT_DEPENDENCIES = {"outline": ("contents", "slide_plans"), "contents": ("slide_plans",), "slide_plans": ()}
 COMMON_ARTIFACT_KEYS = set(ARTIFACT_FILES)
 RENDER_REVIEW_NOT_APPLICABLE = {
     "mode": "off",
@@ -299,18 +300,32 @@ def renderer_state(state: dict[str, Any], renderer: str) -> dict[str, Any]:
 
 
 def load_state(run_dir: Path) -> dict[str, Any]:
-    return _normalize_state(read_json(run_dir / STATE_FILE, default=default_state()))
+    if (run_dir / STATE_FILE).is_file():
+        return _normalize_state(read_json(run_dir / STATE_FILE))
+    state = default_state()
+    delivery = read_json(run_dir / 'slide-plans.json', default={}).get('_delivery') or {}
+    if delivery:
+        state.update(topic=delivery.get('topic', run_dir.name), audience=delivery.get('audience'))
+        selected = delivery.get('renderer')
+        if selected in {'img', 'pptd'}:
+            state['renderer'] = selected
+        state['renderers'] = {name: {**default_renderer_state(name), 'source': source}
+                              for name, source in delivery.get('renderer_sources', {}).items()
+                              if name in {'img', 'pptd'} and source in {'plans', 'img'}}
+    return _normalize_state(state)
 
 
 def save_state(run_dir: Path, state: dict[str, Any]) -> Path:
     normalized = _normalize_state(state)
-    normalized["version"] = 6
+    normalized["version"] = 7
     normalized["execution"] = "codex-skill"
     normalized["updated_at"] = utc_now()
     return write_json(run_dir / STATE_FILE, normalized)
 
 
 def init_state(run_dir: Path, *, topic: str, audience: str, pages: str, research: str) -> dict[str, Any]:
+    if run_dir.exists() and any(run_dir.iterdir()):
+        raise RuntimeError(f"run already initialized: {run_dir}; use resume or choose a new run directory")
     state = load_state(run_dir)
     state.update({
         "topic": topic,
@@ -341,23 +356,110 @@ def ensure_render_ready(run_dir: Path, renderer: str) -> None:
 
 
 def mark_artifact(run_dir: Path, state: dict[str, Any], name: str, path: Path, preview_path: Path) -> None:
+    artifact_sha = file_sha256(path)
+    preview_sha = file_sha256(preview_path)
+    previous = state.setdefault("artifacts", {}).get(name) or {}
+    unchanged = previous.get("sha256") == artifact_sha and previous.get("preview_sha256") == preview_sha
     state.setdefault("artifacts", {})[name] = {
+        **previous,
         "path": str(path),
         "preview_path": str(preview_path),
-        "status": "pending_review",
+        "sha256": artifact_sha,
+        "preview_sha256": preview_sha,
+        "status": "approved" if unchanged and state.get("approvals", {}).get(name) else "pending_review",
         "updated_at": utc_now(),
     }
-    state.setdefault("approvals", {})[name] = False
-    state["status"] = f"{name}_pending_review"
+    if not unchanged:
+        state.setdefault("approvals", {})[name] = False
+        for dependent in ARTIFACT_DEPENDENCIES.get(name, ()):
+            state.setdefault("approvals", {})[dependent] = False
+            entry = state.setdefault("artifacts", {}).get(dependent)
+            if entry:
+                entry["status"] = "stale"
+        for renderer in state.get("renderers", {}).values():
+            if isinstance(renderer, dict):
+                jobs = renderer.get("jobs")
+                if isinstance(jobs, dict):
+                    jobs["status"] = "stale"
+    if not unchanged:
+        state["status"] = f"{name}_pending_review"
     save_state(run_dir, state)
 
 
 def require_approved(run_dir: Path, artifact: str) -> None:
     state = load_state(run_dir)
-    if not state.get("approvals", {}).get(artifact):
+    entry = state.get("artifacts", {}).get(artifact) or {}
+    path, preview = Path(entry.get("path", "")), Path(entry.get("preview_path", ""))
+    current_sha = file_sha256(path) if path.is_file() else None
+    current_preview_sha = file_sha256(preview) if preview.is_file() else None
+    if (not state.get("approvals", {}).get(artifact) or not current_sha or not current_preview_sha or
+            entry.get("sha256") != current_sha or entry.get("preview_sha256") != current_preview_sha):
         preview = state.get("artifacts", {}).get(artifact, {}).get("preview_path")
         detail = f" Review {preview} first." if preview else ""
-        raise RuntimeError(f"{artifact} is not approved.{detail}")
+        raise RuntimeError(f"{artifact} is not approved or has changed since approval.{detail}")
+    for upstream, dependents in ARTIFACT_DEPENDENCIES.items():
+        if artifact in dependents and upstream in state.get("artifacts", {}):
+            require_approved(run_dir, upstream)
+
+
+def current_task_brief(run_dir: Path) -> dict:
+    path = run_dir / '.workflow/task-brief.json'
+    if path.is_file():
+        return read_json(path)
+    delivery = read_json(run_dir / 'slide-plans.json', default={}).get('_delivery') or {}
+    return delivery.get('task_brief') or {}
+
+
+def task_brief_hash(run_dir: Path) -> str | None:
+    brief = current_task_brief(run_dir)
+    if not brief:
+        return None
+    # Progress bookkeeping does not change rendering intent.
+    intent = {k: brief.get(k) for k in ('objective', 'constraints', 'source_paths')}
+    return text_sha256(json.dumps(intent, sort_keys=True, ensure_ascii=False))
+
+
+def render_jobs_issue(run_dir: Path, renderer: str) -> str | None:
+    state = load_state(run_dir)
+    entry = state.get('renderers', {}).get(renderer, {})
+    jobs = entry.get('jobs') or {}
+    manifest_path = render_jobs_root(run_dir, renderer) / 'manifest.json'
+    if not manifest_path.is_file():
+        return 'missing render manifest'
+    try:
+        manifest = read_json(manifest_path)
+        plan_sha = file_sha256(run_dir / 'slide-plans.json')
+        brief_sha = task_brief_hash(run_dir)
+        if (jobs.get('status') == 'stale' or manifest.get('plan_sha256') != plan_sha or
+                manifest.get('task_brief_sha256') != brief_sha or manifest.get('renderer') != renderer or
+                manifest.get('source', 'plans') != entry.get('source', 'plans')):
+            return 'render input changed'
+        if jobs.get('manifest_sha256') != file_sha256(manifest_path):
+            return 'render manifest changed or lacks provenance'
+        shared = manifest_path.parent / 'shared-context.json'
+        if not shared.is_file() or manifest.get('shared_context_sha256') != file_sha256(shared):
+            return 'shared render context changed'
+        slides = slide_jobs(run_dir)
+        if len(manifest.get('slides', [])) != len(slides):
+            return 'render page count changed'
+        for page, item in zip(slides, manifest['slides']):
+            path = manifest_path.parent / f"slide-{int(page['index']):02d}.json"
+            if not path.is_file() or item.get('job_sha256') != file_sha256(path):
+                return 'page render job changed'
+        return None
+    except (ValueError, OSError, KeyError, TypeError):
+        return 'invalid render manifest or input'
+
+
+def require_current_render_jobs(run_dir: Path, renderer: str) -> None:
+    issue = render_jobs_issue(run_dir, renderer)
+    if issue:
+        # Old direct-authoring projects may have no jobs at all. Do not claim provenance.
+        entry = load_state(run_dir).get('renderers', {}).get(renderer, {})
+        if issue == 'missing render manifest' and not entry.get('jobs'):
+            print('warning=no prepared render provenance; prepare-render-jobs before new authoring', file=sys.stderr)
+            return
+        raise RuntimeError(f'{renderer} jobs are stale: {issue}; run prepare-render-jobs again')
 
 
 def _get_pages(outline: dict[str, Any]) -> list[dict[str, Any]]:
@@ -512,8 +614,8 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
             index = int(slide["index"])
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{slide_path}.index must be an integer") from exc
-        if index < 1 or index in seen_indexes:
-            raise ValueError(f"{slide_path}.index must be a unique positive integer")
+        if index != position or index in seen_indexes:
+            raise ValueError(f"{slide_path}.index must follow contiguous page order starting at 1")
         seen_indexes.add(index)
         for field in ("title", "material", "page_role"):
             _require_non_empty_string(slide[field], f"{slide_path}.{field}")
@@ -700,6 +802,7 @@ def write_plans_preview(data: dict[str, Any], path: Path) -> Path:
 def preview_artifact(run_dir: Path, artifact: str) -> Path:
     data_path = run_dir / ARTIFACT_FILES[artifact]
     preview_path = run_dir / PREVIEW_FILES[artifact]
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
     data = read_json(data_path)
     if artifact == "outline":
         write_outline_preview(data, preview_path)
@@ -750,10 +853,13 @@ def mark_completed(run_dir: Path, renderer: str, artifacts: dict[str, Path]) -> 
     entry = renderer_state(state, renderer)
     entry["status"] = "completed"
     entry["completed_at"] = utc_now()
+    if (run_dir / 'slide-plans.json').is_file():
+        entry['export_plan_sha256'] = file_sha256(run_dir / 'slide-plans.json')
     entry["artifacts"] = {
         **entry.get("artifacts", {}),
         **{
-            name: {"path": str(path), "status": "completed"}
+            name: {"path": str(path), "status": "completed",
+                   "sha256": file_sha256(path) if path.is_file() else None}
             for name, path in artifacts.items()
         },
     }
@@ -787,6 +893,14 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     references = pptd_image_references(run_dir) if renderer == "pptd" and source_mode == "img" else []
     jobs_dir = render_jobs_root(run_dir, renderer)
     jobs_dir.mkdir(parents=True, exist_ok=True)
+    plan_path = run_dir / "slide-plans.json"
+    plan_sha = file_sha256(plan_path)
+    brief_sha = task_brief_hash(run_dir)
+    # Only helper-owned slide jobs are pruned; authored pages and media remain.
+    expected_job_names = {f"slide-{int(slide.get('index', i)):02d}.json" for i, slide in enumerate(slides, 1)}
+    for old_job in jobs_dir.glob("slide-*.json"):
+        if old_job.name not in expected_job_names:
+            old_job.unlink()
     target_dir = run_dir / renderer
     target_dir.mkdir(parents=True, exist_ok=True)
     if renderer == "pptd":
@@ -802,6 +916,10 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         "design_system": plan_document.get("design_system") or {},
         "renderer": renderer,
         "slide_count": len(slides),
+        "plan_sha256": plan_sha,
+        "task_brief_sha256": brief_sha,
+        "task_brief": current_task_brief(run_dir),
+        "source": source_mode,
     }
     if references:
         shared_context["reconstruction_policy"] = {
@@ -835,6 +953,10 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
             "total_pages": len(slides),
             "target_path": str(target_path),
             "shared_context_path": str(shared_context_path),
+            "plan_sha256": plan_sha,
+            "task_brief_sha256": brief_sha,
+            "task_brief": shared_context['task_brief'],
+            "source": source_mode,
         }
         if references:
             payload["image_reference"] = references[idx - 1]
@@ -846,6 +968,7 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
             "title": title,
             "job_path": str(job_path),
             "target_path": str(target_path),
+            "job_sha256": file_sha256(job_path),
         })
 
     manifest_path = jobs_dir / "manifest.json"
@@ -855,12 +978,17 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         "topic": shared_context["topic"],
         "audience": shared_context["audience"],
         "slide_count": len(slides),
+        "plan_sha256": plan_sha,
+        "task_brief_sha256": brief_sha,
+        "source": source_mode,
+        "shared_context_sha256": file_sha256(shared_context_path),
         "shared_context_path": str(shared_context_path),
         "slides": manifest_slides,
     })
 
     entry = renderer_state(state, renderer)
     entry["jobs"] = {
+        "manifest_sha256": file_sha256(manifest_path),
         "manifest_path": str(manifest_path),
         "shared_context_path": str(shared_context_path),
         "status": "prepared",
@@ -913,7 +1041,7 @@ def mark_img_exported_complete(run_dir: Path, pptx_path: Path, images: list[Path
     entry = renderer_state(state, "img")
     entry["artifacts"] = {
         **entry.get("artifacts", {}),
-        "pptx": {"path": str(pptx_path), "status": "completed"},
+        "pptx": {"path": str(pptx_path), "status": "completed", 'sha256': file_sha256(pptx_path)},
     }
     entry["svg_conversion"] = {
         "mode": None,
@@ -927,6 +1055,7 @@ def mark_img_exported_complete(run_dir: Path, pptx_path: Path, images: list[Path
     }
     entry["status"] = "completed"
     entry["completed_at"] = utc_now()
+    entry['export_plan_sha256'] = file_sha256(run_dir / 'slide-plans.json')
     state["render_review"] = dict(entry.get("review") or {})
     state["status"] = "completed"
     save_state(run_dir, state)
@@ -1333,6 +1462,7 @@ def complete_img_svg_generation(run_dir: Path, *, force_render: bool = False) ->
 
 def validate_pptd_project(run_dir: Path) -> dict[str, Any]:
     ensure_render_ready(run_dir, "pptd")
+    require_current_render_jobs(run_dir, 'pptd')
     entry = renderer_state(load_state(run_dir), "pptd")
     if entry.get("source") == "img":
         current = pptd_image_references(run_dir)
@@ -1350,13 +1480,17 @@ def export_pptd(run_dir: Path) -> Path:
     from pptd_runtime import export_project
     output = run_dir / renderer_pptx_name(run_dir, "pptd")
     summary = export_project(run_dir / "pptd", output)
-    write_json(run_dir / "pptd-export.json", summary)
+    write_json(run_dir / ".workflow/pptd-export.json", summary)
     write_slide_status(run_dir, {
         f"{i:02d}": {"page_path": path, "validation_status": "structure_and_pptx_verified",
                       "visual_review": "not_verified_by_helper", "export_ready": True}
         for i, path in enumerate(report["pages"], start=1)
     }, renderer="pptd")
     mark_completed(run_dir, "pptd", {"pptx": output, "project": run_dir / "pptd"})
+    from pptd_visual import build_payload
+    state = load_state(run_dir)
+    renderer_state(state, 'pptd')['export_project_sha256'] = build_payload(run_dir / 'pptd')[2]
+    save_state(run_dir, state)
     return output
 
 
@@ -1383,8 +1517,44 @@ def cmd_open_pptd_editor(args: argparse.Namespace) -> None:
     serve_editor(run_dir / "pptd", port=args.port, open_browser=args.open)
 
 
+def cmd_compare_pptd(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    report = validate_pptd_project(run_dir)
+    from pptd_visual import build_comparison, build_payload
+    manifest = read_json(run_dir / 'pptd/.qa-images/manifest.json')
+    if manifest.get('source_sha256') != build_payload(run_dir / 'pptd')[2]:
+        raise ValueError('PPTD changed since image export; run export-pptd-images --force')
+    references = pptd_image_references(run_dir)
+    images = manifest.get('images') or []
+    if [item.get('page') for item in images] != report['pages'] or len(images) != len(references):
+        raise ValueError('QA/source page mapping differs from PPTD manifest')
+    from pptd_runtime import project_path
+    selected = set(args.pages or range(1, len(images) + 1))
+    if not selected.issubset(set(range(1, len(images) + 1))):
+        raise ValueError('comparison page index out of range')
+    result = build_comparison(run_dir,
+        {f'{i:02}': Path(ref['source_image_path']) for i, ref in enumerate(references, 1) if i in selected},
+        {f'{i:02}': project_path(run_dir / 'pptd/.qa-images', item['image']) for i, item in enumerate(images, 1) if i in selected},
+        run_dir / '.workflow/pptd-comparison.jpg')
+    print(json.dumps(result, ensure_ascii=False), flush=True)
+
+
+def cmd_finalize(args: argparse.Namespace) -> None:
+    from delivery import finalize_delivery
+    result = finalize_delivery(normalize_run_dir(args.run_dir), apply=args.apply,
+                               discard=args.discard, retain=args.keep)
+    print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_restore_img(args: argparse.Namespace) -> None:
+    from delivery import restore_img_sources
+    paths = restore_img_sources(normalize_run_dir(args.run_dir), Path(args.pptx))
+    print(json.dumps({'restored': [str(path) for path in paths]}, ensure_ascii=False), flush=True)
+
+
 def export_img(run_dir: Path) -> Path:
     require_approved(run_dir, "slide_plans")
+    require_current_render_jobs(run_dir, 'img')
     from pptx import Presentation
     from pptx.util import Inches
 
@@ -1506,6 +1676,98 @@ def cmd_init(args: argparse.Namespace) -> None:
     print(f"run_dir={run_dir}", flush=True)
 
 
+TASK_BRIEF_FIELDS = ("objective", "constraints", "source_paths", "pending_work")
+
+
+def _validate_task_brief(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("task brief must be a JSON object")
+    missing = [field for field in TASK_BRIEF_FIELDS if field not in value]
+    if missing:
+        raise ValueError("task brief missing required fields: " + ", ".join(missing))
+    if not isinstance(value["objective"], str) or not value["objective"].strip():
+        raise ValueError("task brief objective must be a non-empty string")
+    for field in ("constraints", "source_paths", "pending_work"):
+        if not isinstance(value[field], list) or any(not isinstance(item, str) for item in value[field]):
+            raise ValueError(f"task brief {field} must be a list of strings")
+    if "next_action" in value and (not isinstance(value["next_action"], str) or not value["next_action"].strip()):
+        raise ValueError("task brief next_action must be a non-empty string when present")
+    # Reject recognizable credential assignments, not harmless instructions about secrets.
+    encoded = json.dumps(value, ensure_ascii=False)
+    if re.search(r'sk-(?:proj-)?[A-Za-z0-9_-]{16,}|(?:API_KEY|PASSWORD|TOKEN)\s*[=:]\s*\S+', encoded, re.I):
+        raise ValueError("task brief must not contain credential values")
+    return {key: value[key] for key in (*TASK_BRIEF_FIELDS, "next_action") if key in value}
+
+
+def cmd_checkpoint(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    brief = _validate_task_brief(read_json(Path(args.file)))
+    previous = task_brief_hash(run_dir)
+    write_json(run_dir / ".workflow" / "task-brief.json", brief)
+    if previous != task_brief_hash(run_dir) and (run_dir / STATE_FILE).is_file():
+        state = load_state(run_dir)
+        for entry in state.get('renderers', {}).values():
+            if entry.get('jobs'):
+                entry['jobs']['status'] = 'stale'
+        save_state(run_dir, state)
+    print(f"task_brief={run_dir / '.workflow' / 'task-brief.json'}", flush=True)
+
+
+def cmd_resume(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    state_path = run_dir / STATE_FILE
+    if not state_path.is_file():
+        from delivery import inspect_delivery
+        delivery = read_json(run_dir / "slide-plans.json", default={}).get("_delivery")
+        issues = inspect_delivery(run_dir) if delivery else ['no delivery provenance']
+        print(json.dumps({"run_dir": str(run_dir), "state": 'needs_verification' if issues else 'delivered',
+                          "delivery": delivery, 'issues': issues}, ensure_ascii=False), flush=True)
+        return
+    state = load_state(run_dir)
+    brief = current_task_brief(run_dir)
+    stale_jobs = []
+    for renderer, entry in (state.get("renderers") or {}).items():
+        if render_jobs_issue(run_dir, renderer):
+            stale_jobs.append(renderer)
+    artifact_status = {}
+    delivered = read_json(run_dir / 'slide-plans.json', default={}).get('_delivery') or {}
+    for name, filename in ARTIFACT_FILES.items():
+        if not (run_dir / filename).is_file():
+            artifact_status[name] = 'missing'
+        else:
+            try:
+                require_approved(run_dir, name)
+                artifact_status[name] = 'approved'
+            except RuntimeError:
+                from delivery import artifact_digest
+                inherited = name not in state.get('artifacts', {}) and delivered.get('artifact_sha256', {}).get(name) == artifact_digest(run_dir / filename)
+                artifact_status[name] = 'previously_delivered' if inherited else 'needs_review'
+    pending = next((name for name, status in artifact_status.items() if status not in {'approved', 'previously_delivered'}), None)
+    active = state.get('renderer')
+    output_missing = []
+    for renderer, entry in state.get('renderers', {}).items():
+        for name, artifact in entry.get('artifacts', {}).items():
+            if artifact.get('status') == 'completed' and not Path(artifact.get('path', '')).exists():
+                output_missing.append(f'{renderer}.{name}')
+    if pending:
+        next_action = f"{'author' if artifact_status[pending] == 'missing' else 'preview/review'} {pending}"
+    elif not active:
+        next_action = 'choose-renderer'
+    elif active in stale_jobs:
+        next_action = 'prepare-render-jobs'
+    elif state.get('status') == 'completed' and not output_missing:
+        next_action = 'finish review and finalize'
+    else:
+        next_action = 'continue renderer work'
+    effective_state = ('needs_review' if pending else 'needs_rebuild' if active in stale_jobs or output_missing else state.get('status'))
+    print(json.dumps({"run_dir": str(run_dir), "state": effective_state,
+                      'recorded_state': state.get('status'), 'approvals': artifact_status, 'missing_outputs': output_missing,
+                      "renderer": state.get("renderer"),
+                      "source": (state.get("renderers", {}).get(state.get("renderer"), {}) or {}).get("source"),
+                      "brief": brief, "previews": {name: str(run_dir / PREVIEW_FILES[name]) for name in ARTIFACT_FILES},
+                      "stale_jobs": stale_jobs, "next_action": next_action}, ensure_ascii=False), flush=True)
+
+
 def cmd_save_artifact(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1529,6 +1791,14 @@ def cmd_approve(args: argparse.Namespace) -> None:
         raise ValueError(f"unknown artifact: {args.artifact}")
     if args.artifact == "slide_plans":
         slide_plan_document(run_dir)
+    artifact_entry = state["artifacts"][args.artifact]
+    artifact_path = Path(artifact_entry["path"])
+    preview_path = Path(artifact_entry["preview_path"])
+    if not artifact_path.is_file() or not preview_path.is_file():
+        raise RuntimeError(f"{args.artifact} preview or source is missing; regenerate preview first")
+    if (artifact_entry.get('sha256') != file_sha256(artifact_path) or
+            artifact_entry.get('preview_sha256') != file_sha256(preview_path)):
+        raise RuntimeError('artifact or preview changed since preview; regenerate preview before approval')
     state.setdefault("approvals", {})[args.artifact] = True
     state["artifacts"][args.artifact]["status"] = "approved"
     state["artifacts"][args.artifact]["approved_at"] = utc_now()
@@ -1553,6 +1823,8 @@ def cmd_choose_renderer(args: argparse.Namespace) -> None:
     state = load_state(run_dir)
     state["renderer"] = args.renderer
     entry = renderer_state(state, args.renderer)
+    if entry.get('source', 'plans') != source and entry.get('jobs'):
+        entry['jobs']['status'] = 'stale'
     entry["source"] = source
     entry["review"] = {**RENDER_REVIEW_NOT_APPLICABLE, "confirmed_at": utc_now()}
     entry["status"] = "render_ready"
@@ -1715,6 +1987,15 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--run-dir", default=None)
     init.set_defaults(func=cmd_init)
 
+    checkpoint = sub.add_parser("checkpoint", help="save the compact task brief used for resumption")
+    checkpoint.add_argument("--run-dir", required=True)
+    checkpoint.add_argument("--file", required=True)
+    checkpoint.set_defaults(func=cmd_checkpoint)
+
+    resume = sub.add_parser("resume", help="show compact resumable workflow state")
+    resume.add_argument("--run-dir", required=True)
+    resume.set_defaults(func=cmd_resume)
+
     save = sub.add_parser("save-artifact")
     save.add_argument("--run-dir", required=True)
     save.add_argument("--artifact", choices=sorted(ARTIFACT_FILES), required=True)
@@ -1774,6 +2055,23 @@ def build_parser() -> argparse.ArgumentParser:
     images.add_argument("--run-dir", required=True)
     images.add_argument("--force", action="store_true")
     images.set_defaults(func=cmd_export_pptd_images)
+
+    compare = sub.add_parser('compare-pptd', help='build IMG/PPTD comparison images without HTML')
+    compare.add_argument('--run-dir', required=True)
+    compare.add_argument('--pages', nargs='+', type=int, help='optional one-based page indexes')
+    compare.set_defaults(func=cmd_compare_pptd)
+
+    finalize = sub.add_parser('finalize', help='inspect or clean temporary delivery files')
+    finalize.add_argument('--run-dir', required=True)
+    finalize.add_argument('--apply', action='store_true')
+    finalize.add_argument('--discard', action='append', default=[], help='confirmed generated scratch path')
+    finalize.add_argument('--keep', action='append', default=[], help='explicitly requested extra deliverable')
+    finalize.set_defaults(func=cmd_finalize)
+
+    restore = sub.add_parser('restore-img', help='recover original IMG pixels from retained image PPTX')
+    restore.add_argument('--run-dir', required=True)
+    restore.add_argument('--pptx', required=True)
+    restore.set_defaults(func=cmd_restore_img)
 
     editor = sub.add_parser("open-pptd-editor")
     editor.add_argument("--run-dir", required=True)

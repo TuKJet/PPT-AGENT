@@ -38,6 +38,12 @@ For each slide plan, specify:
 
 `slide-plans.json` must remain the control surface for art direction. If style guidance changes, edit the plan before rendering.
 
+Reference-image calibration includes palette roles and approximate area balance, contrast, typography, block geometry and whitespace. A hex color alone does not capture a visual system. Record these in the existing `design_system` fields. Keep them stable across pages until the user changes them; do not imitate reference branding or add logos unless requested.
+
+Keep source coverage and reasoning with the canonical page: optional `source_refs` identify file/section/figure, and optional `plan.diagram_spec` records nodes, directed edges, branch/merge points and edge labels for logic-heavy pages. Required relationships remain content even when geometry changes. `required_elements` contains actual visible copy/objects, not just “title, diagram, footer”. Separate speaker notes from the exact text allowed on the slide.
+
+Before a rewrite, check approved page roles and source coverage. Changing density must not erase cover/contents, design mechanisms or evidence. For local feedback, update only affected pages and shared settings actually implicated. Present the helper-generated `.workflow/slide-plans-preview.md`, not a second versioned planning Markdown.
+
 Use these exact canonical keys. Do not rename them, place them only inside prose, or substitute model-specific aliases:
 
 ```json

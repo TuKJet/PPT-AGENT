@@ -190,7 +190,12 @@ class GlobalSkillUpdateTests(unittest.TestCase):
             self.installer.install_skill(target, source=source)
 
             alias_repo = root / "source-repo-alias"
-            alias_repo.symlink_to(source_repo, target_is_directory=True)
+            try:
+                alias_repo.symlink_to(source_repo, target_is_directory=True)
+            except OSError as exc:
+                if getattr(exc, 'winerror', None) == 1314 or isinstance(exc, PermissionError):
+                    self.skipTest(f"symlink privilege unavailable: {exc}")
+                raise
             previous_codex_home = os.environ.get("CODEX_HOME")
             os.environ["CODEX_HOME"] = str(root / "codex-home")
             try:

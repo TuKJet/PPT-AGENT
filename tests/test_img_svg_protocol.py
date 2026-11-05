@@ -143,6 +143,8 @@ class ImgSvgProtocolTests(unittest.TestCase):
     def start_two_pages(self):
         self.workflow.write_json(self.run_dir / "slide-plans.json", helpers.valid_slide_plans(
             ("Opening", "A", "cover"), ("Closing", "B", "ending")))
+        self.workflow.preview_artifact(self.run_dir, "slide_plans")
+        self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
         second_source = self.run_dir / "img/slide-02-closing.png"
         second_source.write_bytes((self.run_dir / "img/slide-01-opening.png").read_bytes())
         first = self.start_page()

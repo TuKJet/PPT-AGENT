@@ -37,8 +37,8 @@ def make_project(root: Path):
         {"elementId": "box", "elementType": "shape", "bounds": [40, 150, 300, 200],
          "shapeName": "rect", "fill": {"type": "solid", "color": "#1358A8"}},
     ]}
-    (root / "deck.pptd").write_text(json.dumps(manifest, ensure_ascii=False))
-    (root / "pages/01.page").write_text(json.dumps(page, ensure_ascii=False))
+    (root / "deck.pptd").write_text(json.dumps(manifest, ensure_ascii=True), encoding="utf-8")
+    (root / "pages/01.page").write_text(json.dumps(page, ensure_ascii=True), encoding="utf-8")
     return manifest, page
 
 
@@ -70,11 +70,41 @@ class PPTDRuntimeTests(unittest.TestCase):
         for path in ("../outside.page", "/tmp/a.page", "https://example.com/a.png", "C:/a.png"):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 runtime.project_path(self.project, path)
+    def test_paths_reject_symlink_escape_when_supported(self):
         outside = self.root / "outside.page"
         outside.write_text("{}")
-        (self.project / "escape.page").symlink_to(outside)
+        try:
+            (self.project / "escape.page").symlink_to(outside)
+        except OSError as exc:
+            if getattr(exc, 'winerror', None) == 1314 or isinstance(exc, PermissionError):
+                self.skipTest(f"symlink privilege unavailable: {exc}")
+            raise
         with self.assertRaises(ValueError):
             runtime.project_path(self.project, "escape.page")
+
+    def test_line_requires_canonical_points_viewbox_and_arrow_schema(self):
+        line = {"elementId": "flow", "elementType": "line", "bounds": [40, 100, 400, 100],
+                "viewBox": [400, 100], "points": "0,50 400,50",
+                "arrow": [None, "arrow"], "curve": "round"}
+        self.page["elements"].append(line)
+        (self.project / "pages/01.page").write_text(json.dumps(self.page))
+        runtime.validate_project(self.project)
+
+        for key, value, message in (
+            ("startArrow", "arrow", "unsupported arrow fields"),
+            ("points", "0,50", "at least two points"),
+            ("arrow", [None, "triangle"], "line arrow"),
+        ):
+            candidate = dict(line)
+            if key == "startArrow":
+                candidate[key] = value
+            else:
+                candidate[key] = value
+            self.page["elements"][-1] = candidate
+            (self.project / "pages/01.page").write_text(json.dumps(self.page))
+            with self.assertRaisesRegex(ValueError, message):
+                runtime.validate_project(self.project)
+            self.page["elements"][-1] = line
 
     @unittest.skipUnless(shutil.which("node"), "Node is required for actual WASM export")
     def test_real_export_preserves_native_text_and_shapes_and_latest_edits(self):
@@ -166,13 +196,14 @@ class PPTDRuntimeTests(unittest.TestCase):
     def test_workflow_gate_export_and_cleanup(self):
         workflow = load_workflow_module()
         with mock.patch.dict("os.environ", {"OUTPUT_DIR": str(self.root)}):
+            shutil.rmtree(self.project)
             workflow.init_state(self.root, topic="Test", audience="Team", pages="1", research="")
             workflow.write_json(self.root / "slide-plans.json", valid_slide_plans())
             with self.assertRaises(RuntimeError):
                 workflow.cmd_choose_renderer(Namespace(run_dir=str(self.root), renderer="pptd"))
-            state = workflow.load_state(self.root)
-            state["approvals"]["slide_plans"] = True
-            workflow.save_state(self.root, state)
+            workflow.preview_artifact(self.root, "slide_plans")
+            workflow.cmd_approve(Namespace(run_dir=str(self.root), artifact="slide_plans"))
+            make_project(self.project)
             with mock.patch.object(runtime, "serve_editor") as serve:
                 with self.assertRaises(RuntimeError):
                     workflow.cmd_open_pptd_editor(Namespace(run_dir=str(self.root), port=0, open=False))

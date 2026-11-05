@@ -1,6 +1,6 @@
 ---
 name: ppt-deck-workflow
-description: Create PowerPoint decks with staged outline, content, and slide-plan approval, then IMG or editable PPTD output with a local browser editor. Also install, check, upgrade, or roll back the self-contained global Skill.
+description: Create PowerPoint decks with staged outline, content, and slide-plan approval, then IMG or editable PPTD sources and direct PPTX export. Also install, check, upgrade, or roll back the self-contained global Skill.
 ---
 
 # PPT Deck Workflow
@@ -19,6 +19,7 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 
 | When | Read |
 | --- | --- |
+| Resuming, switching models, or receiving corrections | [continuation.md](references/continuation.md) |
 | Before generating outline | [outline.md](references/outline.md) |
 | After outline approval, before contents | [contents.md](references/contents.md) |
 | After contents approval, before slide plans | [slide-plans.md](references/slide-plans.md), [role-budgets.md](references/role-budgets.md) |
@@ -27,6 +28,7 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 | Only after user chooses PPTD | [pptd.md](references/pptd.md); follow its targeted format-reading instructions |
 | User requests editable PPTD from generated IMG | [pptd.md](references/pptd.md), [img-pptd.md](references/img-pptd.md) |
 | Global maintenance request | [global-skill-maintenance.md](references/global-skill-maintenance.md) |
+| Before final delivery or continuing a cleaned project | [delivery.md](references/delivery.md) |
 
 **Do not read or include PPTD format specifications, examples, or editor implementation in model context before PPTD is selected.** Do not load IMG prompts for a PPTD task. Renderer choice does not require either renderer's detailed manual.
 
@@ -43,16 +45,18 @@ Keep this order: outline → contents → slide plans → renderer choice → re
 
 Every helper command after init uses `--run-dir output/<project>`. Approval is an explicit chat response, not a file existing or a successful helper call. Do not research for or prepare downstream artifacts before the current checkpoint is approved, unless the user explicitly requested research before outlining. Fix validation errors before handing over a preview.
 
-Renderer choice wording: **IMG：整页图片，视觉表现优先；PPTD：元素可编辑，生成后打开本地网页编辑器，可手动调整并导出 PPTX。** Default recommendation: IMG, unless editability is the user's priority. HTML and standalone SVG are no longer renderer options. Do not ask a render-review preference.
+Renderer choice wording: **IMG：整页图片，视觉表现优先；PPTD：文字、数据和适合重建的元素可编辑，直接导出 PPTX。** Default recommendation: IMG, unless editability is the user's priority. HTML and standalone SVG are no longer renderer options. Do not ask a render-review preference.
 
-PPTD selection authorizes starting the local editor after its project files are ready. Do not start it for IMG or during upstream planning. The browser is a page editing surface; the three content approvals remain in chat.
+PPTD selection leads to direct CLI PPTX export. Do not start an interactive editor, use Computer Use, request folder selection, or ask the user to export. Background rendering for agent QA is automatic. Open the optional editor only when the user explicitly asks to edit there.
 
-After IMG export, offer optional editable PPTD reconstruction alongside the existing SVG option. Continue only when requested; a prior explicit request for IMG plus editable PPTD is sufficient. Record `choose-renderer --renderer pptd --source img`, then prepare jobs. Preserve the original IMG and its PPTX. This is a derivative of the approved deck, not a new outline/content approval cycle. Direct PPTD continues to use `--source plans` (the default).
+After IMG export, offer optional editable PPTD reconstruction alongside SVG. Continue only when requested; a prior explicit request for both is sufficient. Record `choose-renderer --renderer pptd --source img`, then prepare jobs. Preserve the original pixels in the IMG PPTX; final cleanup may remove verified duplicate sources. This derivative does not restart outline/content approval. Direct PPTD uses `--source plans` (the default).
 
 For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑 PPT” selects **hybrid reconstruction** by default: editable titles/body/key data plus independent source-image crops for complex visuals. Preserve the source's visual quality; rebuild simple geometry only when faithful. Full native reconstruction requires an explicit request such as “全部原生” or “图内每个节点和连线都要能改”; “不用 SVG” alone does not imply it. State the hybrid approach and proceed without another choice gate. Apply any explicit native requirement only to its requested scope. See [img-pptd.md](references/img-pptd.md) after this derivative is selected.
 
 ## Shared Invariants
 
+- On resumption run `resume --run-dir ...`. Persist scoped requirements, sources and pending work with `checkpoint --file ...`; see [continuation.md](references/continuation.md). Compressed summaries do not replace these files.
+- Keep exactly one `outline.json`, `contents.json`, and `slide-plans.json`. Update these in place and show the helper's `.workflow/*-preview.md`; do not create parallel revision reports, planning summaries or HTML slide galleries. A chat explanation is enough.
 - One new deck, one new folder under `output/`. Never reuse a previous run as a workaround for a permission/init failure. Keep sources, media, intermediate artifacts, reviews, and outputs in this same run directory.
 - Audience understanding starts in the outline and carries through content, design system, and rendering. Leadership restraint means selective information, not a ban on color, images, diagrams, or polished visual design.
 - Slide plans use version 2, one `deck_strategy`, one `design_system`, and structured per-page plans. Keep visible copy exact and reference the shared palette. The slide-plan contract contains the schema; do not load renderer schemas to plan the deck.
@@ -60,12 +64,13 @@ For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑
 - Use `prepare-render-jobs` after selection for page-local inputs. Jobs carry the shared design system; work incrementally rather than rereading the entire deck for every page.
 - For requested comparisons, keep both branches in the same run directory: `img/` and `pptd/`, with distinct exports.
 - `clean-render` removes derived outputs, never authored pages or media.
+- Before final delivery run `finalize`, inspect its keep/remove list, then `finalize --apply`. Follow [delivery.md](references/delivery.md): retain canonical plans, PPTX and essential PPTD project assets, clear temporary work, and keep compact recovery metadata inside the canonical plan. Reusable operations belong in the Skill, not per-deck scripts.
 - Long operations are expected. Keep the user informed, do not restart healthy exports just for silence, and report material failures rather than implying successful delivery.
 
 ## Global Skill Maintenance
 
 Read the maintenance reference only for install/status/check/upgrade/switch/rollback. Use `scripts/install_global_skill.py` for installation and `scripts/update_global_skill.py` for maintenance of an installed copy. Preserve staged updates, rollback, the runtime environment, and shared Playwright cache. Do not replace an installation with `--force` as an update strategy. The installer bundles runtime and editor assets; it must not create a symlink back to this repository.
 
-Treat a natural-language request to switch update channels as an explicit maintenance request. “Switch to the GitHub, public-source, or stable channel” means `update_global_skill.py switch public`. “Switch to the private PPTD or internal update channel” means `update_global_skill.py switch pptd`. Both channels may contain PPTD; the distinction is update source and access, not renderer availability. The private channel is access-controlled by its Git server; never request, copy, print, or persist a user's private key or token. If authentication fails, report that private-channel access is not configured and leave the installed Skill unchanged. After a successful switch, report the channel and commit, then end the turn so the newly installed instructions load on the next turn.
+Natural-language public/stable channel requests map to `update_global_skill.py switch public`; private/internal requests map to `switch pptd`. This changes update source, not renderer availability. Follow the maintenance reference for authentication and rollback. Never collect credentials; authentication failure leaves the installation unchanged. After a successful switch report channel/commit and end the turn so the new instructions load next turn.
 
 After installing, follow the README's mandatory global PowerPoint Skill routing check. Never silently modify global Agent instructions. This development task does not install or upgrade the user's global copy automatically.

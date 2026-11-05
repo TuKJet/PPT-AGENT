@@ -48,6 +48,21 @@ class PPTDVisualTests(unittest.TestCase):
             Image.new("RGB", (16, 9), "blue").save(media)
             self.assertNotEqual(before, visual.build_payload(root)[2])
 
+    def test_build_comparison_is_hash_manifest_and_pending_review(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "source.png"
+            rendered = root / "rendered.png"
+            Image.new("RGB", (320, 180), "white").save(source)
+            Image.new("RGB", (320, 180), "black").save(rendered)
+            output = root / "review.jpg"
+            result = visual.build_comparison(root, {"01": source}, {"01": rendered}, output)
+            self.assertEqual(result["status"], "pending_visual_review")
+            self.assertTrue(output.is_file())
+            self.assertTrue(Path(result["manifest"]).is_file())
+            self.assertEqual(result["pairs"][0]["key"], "01")
+            self.assertNotEqual(result["pairs"][0]["source_sha256"], result["pairs"][0]["rendered_sha256"])
+
     def test_real_editor_exports_all_pages_and_overview(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

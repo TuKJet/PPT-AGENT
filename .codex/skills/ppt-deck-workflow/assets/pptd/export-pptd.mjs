@@ -46,7 +46,7 @@ async function loadYaml() {
         const { spawnSync } = require('node:child_process');
         const r = spawnSync(
           process.env.PPTD_PYTHON || 'python3',
-          ['-c', 'import sys,yaml,json; print(json.dumps(yaml.safe_load(sys.stdin.read()), ensure_ascii=False))'],
+          ['-c', 'import sys,yaml,json; value=yaml.safe_load(sys.stdin.buffer.read().decode("utf-8")); sys.stdout.buffer.write(json.dumps(value, ensure_ascii=False).encode("utf-8"))'],
           { input: text, encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 },
         );
         if (r.status !== 0) throw new Error('python yaml failed: ' + (r.stderr || r.stdout));

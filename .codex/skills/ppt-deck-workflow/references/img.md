@@ -2,6 +2,10 @@
 
 Read only after the user chooses IMG. Use the imagegen tool to generate finished full-page images.
 
+Read the task brief before choosing an image tool or making paid calls. A newer instruction to use the default tool during debugging overrides an earlier 4K request within that scope. When native 4K is currently requested, follow the available imagegen skill's supported API workflow, load credentials only into that process from the user's external secret store, and verify returned dimensions. Never label upscaled or lower-resolution images as native 4K. Persist prompts and actual dimensions under `.workflow/`, not extra project-root reports.
+
+Calibrate internally on representative pages before a long batch, including a logic-heavy page and a distinct page role. Inspect density, diagram relationships and shared styling against the approved plan. Do not add a user approval gate or reuse a rejected earlier design as a reference. Regenerate only pages affected by a correction unless a shared change requires more.
+
 ## IMG Prompt Compilation
 
 For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt. After all images are generated, package them into the original IMG PPTX; that export completes the requested IMG workflow while leaving IMG-to-SVG available as a later explicit opt-in.
@@ -75,6 +79,8 @@ Text constraints:
 
 
 Export using `workflow.py export --run-dir output/<project>`. Read `slide-status-img.json` and deliver the original PPTX; this completes the IMG workflow.
+
+Finish agent review and follow [delivery.md](delivery.md) before delivery. Original pixels remain recoverable from the IMG PPTX after cleanup. Do not generate an HTML slide viewer; native image previews in chat are sufficient.
 
 Optional IMG-to-SVG Post-Export Opt-In: ask once whether the user wants an optional derivative, state additional model/Token usage and that PowerPoint can convert vector parts using its SVG tools. Do not present a decline option. Read [img-svg.md](img-svg.md) and [img-svg-prompt.md](img-svg-prompt.md) only after explicit opt-in. This remains a post-export derivative, not a renderer choice.
 

@@ -17,6 +17,9 @@ from xml.etree import ElementTree as ET
 ASSETS = Path(__file__).resolve().parents[1] / "assets" / "pptd"
 WASM = ASSETS / "editor" / "neo-ppt" / "assets" / "pptd_wasm_bg-DPPWdROu.wasm"
 ELEMENT_TYPES = {"text", "shape", "line", "image", "icon", "table", "chart"}
+LINE_ARROW_TYPES = {"arrow", "stealth", "diamond", "oval"}
+LINE_CURVES = {"sharp", "round", "smooth"}
+LINE_UNSUPPORTED_ARROW_KEYS = {"startArrow", "endArrow", "headEnd", "tailEnd", "arrowStart", "arrowEnd"}
 
 
 def project_path(root: Path, relative: str) -> Path:
@@ -106,6 +109,44 @@ def validate_project(root: Path, expected_pages: int | None = None) -> dict:
                     raise ValueError(f"text content missing in {rel}: {element_id}")
             if kind == "image" and not isinstance(element.get("src"), str):
                 raise ValueError(f"image src missing in {rel}: {element_id}")
+            if kind == "line":
+                unsupported = sorted(LINE_UNSUPPORTED_ARROW_KEYS.intersection(element))
+                if unsupported:
+                    raise ValueError(
+                        f"line {element_id} uses unsupported arrow fields: {', '.join(unsupported)}; "
+                        "use arrow: [start, end]"
+                    )
+                view_box = element.get("viewBox")
+                if (not isinstance(view_box, list) or len(view_box) != 2
+                        or any(not finite_number(value) or value <= 0 for value in view_box)):
+                    raise ValueError(f"line viewBox must contain two positive finite numbers: {element_id}")
+                points = element.get("points")
+                if not isinstance(points, str):
+                    raise ValueError(f"line points missing in {rel}: {element_id}")
+                parsed_points = []
+                for token in points.split():
+                    parts = token.split(",")
+                    if len(parts) != 2:
+                        raise ValueError(f"line points must use x,y pairs: {element_id}")
+                    try:
+                        coords = [float(part) for part in parts]
+                    except ValueError as exc:
+                        raise ValueError(f"line points must be numeric: {element_id}") from exc
+                    parsed_points.append(coords)
+                if len(parsed_points) < 2:
+                    raise ValueError(f"line points require at least two points: {element_id}")
+                if any(not finite_number(value) or value < 0 or value > view_box[index % 2]
+                       for coords in parsed_points for index, value in enumerate(coords)):
+                    raise ValueError(f"line points must lie within viewBox: {element_id}")
+                curve = element.get("curve", "round")
+                if not isinstance(curve, str) or curve not in LINE_CURVES:
+                    raise ValueError(f"line curve must be one of {sorted(LINE_CURVES)}: {element_id}")
+                arrow = element.get("arrow", [None, None])
+                if (not isinstance(arrow, list) or len(arrow) != 2
+                        or any(value is not None and (not isinstance(value, str) or value not in LINE_ARROW_TYPES) for value in arrow)):
+                    raise ValueError(
+                        f"line arrow must be [start, end] using {sorted(LINE_ARROW_TYPES)} or null: {element_id}"
+                    )
             counts[kind] = counts.get(kind, 0) + 1
     for document in documents:
         for obj in walk(document):

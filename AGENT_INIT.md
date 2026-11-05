@@ -209,7 +209,7 @@ Always run from the repository root and use the local `ppt-deck-workflow` skill.
 
 Codex generates `outline.json`, `contents.json`, `slide-plans.json`, and renderer source files. The helper only manages state, previews, cleanup, and export:
 
-After `slide_plans` approval, present `img` first and recommend it by default. Offer `pptd` for editable pages and the local browser editor. These are the only two renderer choices. Load only the selected branch guide; do not read PPTD specifications before selection.
+After `slide_plans` approval, present `img` first and recommend it by default. Offer `pptd` for editable pages. These are the only two renderer choices. PPTD normally exports directly through the CLI; the local browser editor and Computer Use are optional and start only when the user explicitly requests interactive editing. Load only the selected branch guide; do not read PPTD specifications before selection.
 
 ```bash
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py init --topic "..." --audience "..." --pages "12"
@@ -256,7 +256,7 @@ For PPTD:
 - `output/<run>/<deck>-pptd.pptx`
 - `output/<run>/slide-status-pptd.json`
 
-Use `validate-pptd` and `open-pptd-editor` after PPTD selection and generation. Open the printed project folder in Chromium; save before CLI re-export. Do not load the PPTD format guide before selection.
+Use `validate-pptd`, background `export-pptd-images`, and direct `export` after PPTD selection and generation. Use `open-pptd-editor` only for an explicit user request to edit or inspect interactively; save before any later CLI re-export. Do not load the PPTD format guide before selection.
 
 For IMG:
 
