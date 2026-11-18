@@ -13,6 +13,7 @@ from importlib.metadata import version as package_version
 import os
 import shutil
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ if str(SKILL_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from embed_img_crops import validate_crop_entries, _validated_box
 from filename_utils import safe_filename_part, slide_filename
+from audience_delivery import USE_CONTEXTS, apply_presenter_notes
 
 STATE_FILE = "workflow-state.json"
 ARTIFACT_FILES = {
@@ -57,7 +59,7 @@ RENDER_REVIEW_NOT_APPLICABLE = {
     "mode": "off",
     "status": "not_applicable",
 }
-SLIDE_PLAN_VERSION = 2
+SLIDE_PLAN_VERSION = 3
 REQUIRED_DECK_STRATEGY_FIELDS = (
     "primary_audience",
     "decision_context",
@@ -456,7 +458,8 @@ def require_current_render_jobs(run_dir: Path, renderer: str) -> None:
     if issue:
         # Old direct-authoring projects may have no jobs at all. Do not claim provenance.
         entry = load_state(run_dir).get('renderers', {}).get(renderer, {})
-        if issue == 'missing render manifest' and not entry.get('jobs'):
+        if (issue == 'missing render manifest' and not entry.get('jobs')
+                and int(slide_plan_document(run_dir)["version"]) == 2):
             print('warning=no prepared render provenance; prepare-render-jobs before new authoring', file=sys.stderr)
             return
         raise RuntimeError(f'{renderer} jobs are stale: {issue}; run prepare-render-jobs again')
@@ -543,9 +546,9 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
         version = int(data.get("version", 1))
     except (TypeError, ValueError) as exc:
         raise ValueError("slide-plans.json version must be an integer") from exc
-    if version != SLIDE_PLAN_VERSION:
+    if version not in (2, SLIDE_PLAN_VERSION):
         raise ValueError(
-            "slide-plans.json must use version 2 with structured deck_strategy, "
+            "slide-plans.json must use version 3 (existing version 2 is supported) with structured deck_strategy, "
             "design_system, and per-slide plan fields; legacy version 1/free-form plans "
             "must be regenerated before preview or approval"
         )
@@ -557,6 +560,9 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
     )
     for field in ("primary_audience", "decision_context", "presentation_posture"):
         _require_non_empty_string(deck_strategy[field], f"slide-plans.json deck_strategy.{field}")
+    if (version == 3 or "use_context" in deck_strategy) and (
+            not isinstance(deck_strategy.get("use_context"), str) or deck_strategy["use_context"] not in USE_CONTEXTS):
+        raise ValueError("deck_strategy.use_context must be live, standalone or hybrid")
     _require_non_empty_string_list(
         deck_strategy["first_questions"],
         "slide-plans.json deck_strategy.first_questions",
@@ -625,6 +631,11 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
             f"{slide_path}.plan",
             REQUIRED_SLIDE_PLAN_FIELDS,
         )
+        from visual_plan import validate_data_visuals
+        try:
+            validate_data_visuals(plan)
+        except ValueError as exc:
+            raise ValueError(f"{slide_path}.plan.data_visuals: {exc}") from exc
         for field in ("core_message", "layout_structure"):
             _require_non_empty_string(plan[field], f"{slide_path}.plan.{field}")
         for field in (
@@ -637,6 +648,14 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
         for field in ("style_controls", "audience_controls"):
             if not isinstance(plan[field], dict):
                 raise ValueError(f"{slide_path}.plan.{field} must be an object")
+        if version == 3 or "copy_layers" in plan:
+            layers = plan.get("copy_layers")
+            if not isinstance(layers, dict):
+                raise ValueError(f"{slide_path}.plan.copy_layers must be an object")
+            for key in ("on_screen", "talk_track", "reference"):
+                items = layers.get(key)
+                if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+                    raise ValueError(f"{slide_path}.plan.copy_layers.{key} must be a list of strings")
         palette_tokens = plan["palette_tokens"]
         unknown_tokens = sorted(set(palette_tokens) - set(palette))
         if unknown_tokens:
@@ -692,8 +711,10 @@ def _append_deck_strategy_preview(lines: list[str], strategy: dict[str, Any]) ->
     extras = {
         key: value
         for key, value in strategy.items()
-        if key not in REQUIRED_DECK_STRATEGY_FIELDS
+        if key not in REQUIRED_DECK_STRATEGY_FIELDS and key != "use_context"
     }
+    if strategy.get("use_context") in USE_CONTEXTS:
+        lines.extend(["", f"**使用场景**：{USE_CONTEXTS[strategy['use_context']]}"])
     if extras:
         lines.extend(["", "### 其他叙事约束", ""])
         _append_preview_mapping(lines, extras)
@@ -763,6 +784,22 @@ def _append_slide_plan_details(
     _append_numbered_preview_list(lines, plan["visual_hierarchy"])
     lines.extend(["", "### 页面元素", ""])
     _append_bulleted_preview_list(lines, plan["required_elements"])
+    if "copy_layers" in plan:
+        for key, label in (("on_screen", "上屏原文"), ("talk_track", "讲解"), ("reference", "备查")):
+            lines.extend(["", f"### {label}", ""])
+            _append_bulleted_preview_list(lines, plan["copy_layers"][key] or ["无"])
+    visuals = plan.get("data_visuals") or []
+    if visuals:
+        lines.extend(["", "### 数据表达与交付要求", ""])
+        for item in visuals:
+            lines.append(f"- **{item['element_id']}** · {item['relationship']} → {item['encoding']} "
+                         f"({item['editability']})。{item['reason']}")
+            for series in item.get("series", []):
+                labels = series.get("categories", item.get("categories", []))
+                lines.append("  - " + series["name"] + "：" + "，".join(
+                    f"{label} {value}" for label, value in zip(labels, series["values"])))
+            for row in item.get("cells", []):
+                lines.append("  - " + " ｜ ".join(row))
     lines.extend(["", "### 本页配色", ""])
     colors = [
         f"{PALETTE_LABELS.get(token, _preview_label(token))} `{palette[token]}`"
@@ -809,6 +846,7 @@ def preview_artifact(run_dir: Path, artifact: str) -> Path:
     elif artifact == "contents":
         write_contents_preview(data, preview_path)
     elif artifact == "slide_plans":
+        require_run_plan_version(run_dir, data)
         write_plans_preview(data, preview_path)
     state = load_state(run_dir)
     mark_artifact(run_dir, state, artifact, data_path, preview_path)
@@ -820,8 +858,15 @@ def slide_jobs(run_dir: Path) -> list[dict[str, Any]]:
     return list(data.get("slides") or [])
 
 
+def require_run_plan_version(run_dir: Path, data: dict) -> None:
+    state = read_json(run_dir / STATE_FILE, default={})
+    if state.get("minimum_plan_version") == 3 and data.get("version") != 3:
+        raise ValueError("New runs require slide-plans.json version 3 with use_context and copy_layers")
+
+
 def slide_plan_document(run_dir: Path) -> dict[str, Any]:
     data = read_json(run_dir / "slide-plans.json", default={"slides": []})
+    require_run_plan_version(run_dir, data)
     validate_slide_plans(data)
     return data
 
@@ -908,19 +953,22 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         (target_dir / "media").mkdir(exist_ok=True)
 
     shared_context_path = jobs_dir / "shared-context.json"
+    version = int(plan_document["version"])
+    strategy = plan_document["deck_strategy"]
     shared_context = {
-        "version": 2 if int(plan_document.get("version", 1)) >= 2 else 1,
-        "topic": infer_topic(run_dir),
-        "audience": state.get("audience"),
-        "deck_strategy": plan_document.get("deck_strategy") or {},
+        "version": version,
+        "audience": strategy["primary_audience"] if version == 3 else state.get("audience"),
+        "deck_strategy": ({key: strategy[key] for key in ("primary_audience", "use_context")}
+                          if version == 3 else strategy),
         "design_system": plan_document.get("design_system") or {},
         "renderer": renderer,
         "slide_count": len(slides),
         "plan_sha256": plan_sha,
         "task_brief_sha256": brief_sha,
-        "task_brief": current_task_brief(run_dir),
         "source": source_mode,
     }
+    if version == 2:
+        shared_context["topic"] = infer_topic(run_dir)
     if references:
         shared_context["reconstruction_policy"] = {
             "default_mode": "hybrid",
@@ -940,7 +988,6 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         target_path = render_target_path(run_dir, renderer, slide_index, title)
         payload = {
             "version": shared_context["version"],
-            "topic": shared_context["topic"],
             "audience": shared_context["audience"],
             "deck_strategy": shared_context["deck_strategy"],
             "design_system": shared_context["design_system"],
@@ -948,16 +995,25 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
             "index": slide_index,
             "title": title,
             "page_role": job.get("page_role", "content"),
-            "material": job.get("material", ""),
-            "plan": job.get("plan", ""),
+            "plan": job["plan"],
             "total_pages": len(slides),
             "target_path": str(target_path),
             "shared_context_path": str(shared_context_path),
             "plan_sha256": plan_sha,
             "task_brief_sha256": brief_sha,
-            "task_brief": shared_context['task_brief'],
             "source": source_mode,
         }
+        if version == 2:
+            payload["topic"] = shared_context["topic"]
+        if "copy_layers" in job["plan"]:
+            plan = job["plan"]
+            payload["plan"] = {key: plan[key] for key in
+                               (*REQUIRED_SLIDE_PLAN_FIELDS, "data_visuals", "diagram_spec", "show_title") if key in plan}
+            payload["plan"]["copy_layers"] = {"on_screen": plan["copy_layers"]["on_screen"]}
+            if plan.get("show_title") is False:
+                del payload["title"]
+        else:
+            payload["material"] = job["material"]
         if references:
             payload["image_reference"] = references[idx - 1]
             payload["reconstruction_policy"] = shared_context["reconstruction_policy"]
@@ -975,7 +1031,7 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     write_json(manifest_path, {
         "version": shared_context["version"],
         "renderer": renderer,
-        "topic": shared_context["topic"],
+        "topic": infer_topic(run_dir),
         "audience": shared_context["audience"],
         "slide_count": len(slides),
         "plan_sha256": plan_sha,
@@ -1479,7 +1535,7 @@ def export_pptd(run_dir: Path) -> Path:
     report = validate_pptd_project(run_dir)
     from pptd_runtime import export_project
     output = run_dir / renderer_pptx_name(run_dir, "pptd")
-    summary = export_project(run_dir / "pptd", output)
+    summary = export_project(run_dir / "pptd", output, slides=slide_jobs(run_dir))
     write_json(run_dir / ".workflow/pptd-export.json", summary)
     write_slide_status(run_dir, {
         f"{i:02d}": {"page_path": path, "validation_status": "structure_and_pptx_verified",
@@ -1489,7 +1545,9 @@ def export_pptd(run_dir: Path) -> Path:
     mark_completed(run_dir, "pptd", {"pptx": output, "project": run_dir / "pptd"})
     from pptd_visual import build_payload
     state = load_state(run_dir)
-    renderer_state(state, 'pptd')['export_project_sha256'] = build_payload(run_dir / 'pptd')[2]
+    entry = renderer_state(state, 'pptd')
+    entry['export_project_sha256'] = build_payload(run_dir / 'pptd')[2]
+    entry['verified_objects'] = summary.get('verified_objects', [])
     save_state(run_dir, state)
     return output
 
@@ -1497,6 +1555,93 @@ def export_pptd(run_dir: Path) -> Path:
 def cmd_validate_pptd(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     print(json.dumps(validate_pptd_project(run_dir), ensure_ascii=False), flush=True)
+
+
+def _template_backend(source: Path):
+    if source.is_file() and source.suffix.lower() == ".pptx":
+        import pptx_template
+        return pptx_template
+    if source.is_dir() or (source.is_file() and source.suffix.lower() == ".pptd"):
+        import pptd_template
+        return pptd_template
+    raise ValueError("expected a PPTD project directory, its .pptd manifest, or a .pptx file")
+
+
+def cmd_template_inventory(args: argparse.Namespace) -> None:
+    source = Path(args.template).resolve(strict=True)
+    report = _template_backend(source).inventory(source)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_template_update(args: argparse.Namespace) -> None:
+    from delivery import pptx_page_count
+    from pptd_runtime import export_project
+    source = Path(args.template).resolve(strict=True)
+    backend = _template_backend(source)
+    changes = read_json(Path(args.changes))
+    if not isinstance(changes, list) or not changes:
+        raise ValueError("expected a nonempty JSON array of field updates")
+    dest = normalize_run_dir(args.run_dir)
+    native = source.is_file() and source.suffix.lower() == ".pptx"
+    source_dir = source if source.is_dir() else source.parent
+    if not native and dest.is_relative_to(source_dir):
+        raise ValueError("output must be outside the template project")
+    if dest.exists():
+        raise FileExistsError(f"choose a new output directory: {dest}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    filename = safe_filename_part(dest.name, max_length=80) + ".pptx"
+    with tempfile.TemporaryDirectory(prefix=".template-", dir=dest.parent) as temp:
+        staged = Path(temp) / "delivery"
+        staged.mkdir()
+        target = staged / filename
+        if native:
+            report = backend.export(source, changes, target)
+        else:
+            project = staged / "pptd"
+            report = backend.export(source, changes, project)
+            expected = backend.quarter_expectations(project, changes)["slides"]
+            result = export_project(project, target, slides=expected)
+            report["verified_objects"] = result.get("verified_objects", [])
+        report.update(output=str(dest / filename), pages=pptx_page_count(target))
+        if not native:
+            report["project"] = str(dest / "pptd")
+        staged.rename(dest)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+
+
+def cmd_apply_pptd_template(args: argparse.Namespace) -> None:
+    import pptd_template
+    from pptd_runtime import validate_project
+    run = normalize_run_dir(args.run_dir)
+    ensure_render_ready(run, "pptd")
+    if renderer_state(load_state(run), "pptd").get("source", "plans") != "plans":
+        raise ValueError("a PPTD template requires direct PPTD authoring from approved plans")
+    issue = render_jobs_issue(run, "pptd")
+    if issue:
+        raise ValueError(f"{issue}; prepare current render jobs before applying a template")
+    source = Path(args.template).resolve(strict=True)
+    validate_project(source if source.is_dir() else source.parent, expected_pages=len(slide_jobs(run)))
+    target = run / "pptd"
+    def linked(path):
+        return path.is_symlink() or getattr(path, "is_junction", lambda: False)()
+
+    if linked(target) or (target.exists() and any(
+            p.name not in {"media", "pages"} or linked(p) or not p.is_dir() or any(p.iterdir())
+            for p in target.iterdir())):
+        raise ValueError("the run already contains PPTD sources; use a new run or template-update")
+    with tempfile.TemporaryDirectory(dir=run) as temp:
+        project = Path(temp) / "project"
+        report = pptd_template.export(source, read_json(Path(args.changes)), project)
+        # prepare-render-jobs creates these empty directories. Only remove empty directories.
+        if target.exists():
+            for name in ("media", "pages"):
+                path = target / name
+                if path.exists():
+                    path.rmdir()
+            target.rmdir()
+        project.rename(target)
+    report["output"] = str(target)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
 
 
 def cmd_export_pptd_images(args: argparse.Namespace) -> None:
@@ -1564,9 +1709,10 @@ def export_img(run_dir: Path) -> Path:
     prs.slide_width = Inches(13.33)
     prs.slide_height = Inches(7.5)
     blank = prs.slide_layouts[6]
-    for image in images:
+    for image, page in zip(images, slide_jobs(run_dir)):
         slide = prs.slides.add_slide(blank)
         slide.shapes.add_picture(str(image), 0, 0, width=prs.slide_width, height=prs.slide_height)
+        apply_presenter_notes(slide, page["plan"])
 
     pptx_path = run_dir / renderer_pptx_name(run_dir, "img")
     prs.save(str(pptx_path))
@@ -1672,7 +1818,9 @@ def clean_render_outputs(run_dir: Path) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir, topic=args.topic)
     run_dir.mkdir(parents=True, exist_ok=True)
-    init_state(run_dir, topic=args.topic, audience=args.audience, pages=args.pages, research=args.research or "")
+    state = init_state(run_dir, topic=args.topic, audience=args.audience, pages=args.pages, research=args.research or "")
+    state["minimum_plan_version"] = SLIDE_PLAN_VERSION
+    save_state(run_dir, state)
     print(f"run_dir={run_dir}", flush=True)
 
 
@@ -1978,6 +2126,20 @@ def cmd_status(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Codex-skill PPT workflow artifact helper")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    inventory = sub.add_parser("template-inventory", help="list addressable fields in a supplied template")
+    inventory.add_argument("--template", required=True)
+    inventory.set_defaults(func=cmd_template_inventory)
+
+    for name, description, handler in [
+        ("template-update", "publish targeted changes to an existing deck in a fresh run directory", cmd_template_update),
+        ("apply-pptd-template", "populate a prepared PPTD run from a fixed-page PPTD template", cmd_apply_pptd_template),
+    ]:
+        template = sub.add_parser(name, help=description)
+        template.add_argument("--template", required=True)
+        template.add_argument("--changes", required=True, help="JSON array of guarded field updates")
+        template.add_argument("--run-dir", required=True)
+        template.set_defaults(func=handler)
 
     init = sub.add_parser("init")
     init.add_argument("--topic", required=True)

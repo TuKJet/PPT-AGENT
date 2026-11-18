@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
+import tempfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
 import webbrowser
@@ -164,7 +165,7 @@ def finite_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def export_project(root: Path, output: Path) -> dict:
+def export_project(root: Path, output: Path, *, slides: list[dict] | None = None) -> dict:
     report = validate_project(root)
     # Node adapter does not run the browser's icon/math/complex-chart preprocessing.
     for rel in report["pages"]:
@@ -187,7 +188,11 @@ def export_project(root: Path, output: Path) -> dict:
     if not WASM.is_file():
         raise RuntimeError("Bundled PPTD WASM is missing; repair the Skill installation")
     output.parent.mkdir(parents=True, exist_ok=True)
-    staged = output.with_suffix(".pending.pptx")
+    # Concurrent attempts must never validate or delete each other's partial output.
+    fd, temporary = tempfile.mkstemp(suffix=".pptx", prefix=".export-", dir=output.parent)
+    os.close(fd)
+    staged = Path(temporary)
+    verified_objects = []
     try:
         result = subprocess.run(
             [node, str(ASSETS / "export-pptd.mjs"), report["manifest"], "-o", str(staged),
@@ -197,6 +202,31 @@ def export_project(root: Path, output: Path) -> dict:
         )
         if result.returncode:
             raise RuntimeError(f"PPTD export failed:\n{result.stdout}\n{result.stderr}")
+        if slides and any("copy_layers" in s.get("plan", {}) for s in slides):
+            from pptx import Presentation
+            from audience_delivery import apply_presenter_notes
+            presentation = Presentation(staged)
+            if len(presentation.slides) != len(slides):
+                raise ValueError("PPTX page count differs from the approved plans")
+            notes_changed = False
+            for page, spec in zip(presentation.slides, slides):
+                if apply_presenter_notes(page, spec["plan"]):
+                    notes_changed = True
+            if notes_changed:
+                presentation.save(staged)
+        if slides and any(s.get("plan", {}).get("data_visuals") for s in slides):
+            from chart_workbook import bind_chart_workbooks
+            from native_audit import verify_native_objects
+            bind_chart_workbooks(staged, slides)
+            verified_objects = verify_native_objects(staged, root, slides)
+            required = sum(v["editability"] in {"native_chart", "native_table"}
+                           for s in slides for v in s.get("plan", {}).get("data_visuals", []))
+            if len(verified_objects) != required:
+                raise ValueError("native object audit did not account for every required object")
+            errors = [str(problem) for item in verified_objects if item["status"] != "passed"
+                      for problem in (item.get("errors") or [item["element_id"]])]
+            if errors:
+                raise ValueError("native object verification failed: " + " | ".join(errors))
         with zipfile.ZipFile(staged) as archive:
             if archive.testzip() is not None:
                 raise RuntimeError("PPTX ZIP integrity check failed")
@@ -213,7 +243,7 @@ def export_project(root: Path, output: Path) -> dict:
     finally:
         staged.unlink(missing_ok=True)
     return {**report, "output": str(output), "exporter": "local-wasm",
-            "text_runs": texts, "embedded_font_parts": fonts,
+            "text_runs": texts, "verified_objects": verified_objects, "embedded_font_parts": fonts,
             "font_embedding": "not_supported_by_cli", "zip_integrity": "passed"}
 
 

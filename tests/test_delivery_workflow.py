@@ -162,7 +162,9 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         self.w.prepare_render_jobs(self.run, 'pptd')
         job = self.w.read_json(self.run / 'render-jobs/pptd/slide-01.json')
         self.assertEqual(job['source'], 'img')
-        self.assertIn('Do not start the interactive editor', job['task_brief']['constraints'])
+        self.assertIn('Do not start the interactive editor', self.w.current_task_brief(self.run)['constraints'])
+        self.assertEqual(job['task_brief_sha256'], self.w.task_brief_hash(self.run))
+        self.assertNotIn('task_brief', job)
 
 
 if __name__ == "__main__":

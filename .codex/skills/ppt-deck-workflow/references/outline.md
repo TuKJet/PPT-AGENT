@@ -30,7 +30,7 @@ Generate a complete renderer-neutral PPT outline.
 
 ## Outline Audience And Style Contract
 
-Treat audience as a first-class control variable from outline generation onward.
+Identify both the primary audience and the setting. Who will make which decision? Will they see a projection while someone speaks, read the file independently, or do both? Infer the setting from the brief; use a balanced hybrid when both uses matter or the setting is unspecified. Carry it into the slide plan. On a live page, show the evidence needed to follow the speaker. On a standalone page, include the definitions, assumptions and limitations needed to judge the claim without a presenter.
 
 Before drafting visible copy, infer the audience's real decision lens:
 

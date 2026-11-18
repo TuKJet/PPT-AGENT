@@ -1,14 +1,25 @@
 ## Slide Plan Contract
 
-Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Define the shared system before writing page plans so every page inherits the same visual language. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
+Create `slide-plans.json` version 3 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Existing version-2 plans remain readable. When upgrading a plan, assign the actual material to the layers on every page before changing its version. Version 1 and a free-form string in `plan` are invalid.
 
 `deck_strategy` must record the stable audience interpretation used across the deck:
 
 - primary audience and any secondary audience constraint
+- `use_context` as `live`, `standalone` or `hybrid`
 - the decision or response the deck should enable
 - the first questions this audience is likely to ask
 - evidence order and detail-depth principles
 - presentation posture and desired confidence level
+
+Combine the setting with the audience's task. A live investment meeting needs the proposal, the meaningful difference between alternatives and the decision. A financial pre-read on the same subject needs assumptions, units and enough of the calculation to reproduce the estimate. A hybrid page carries a conclusion and sufficient evidence to stand on its own; the presenter can expand the reasoning. Keep the user's page count, required evidence and readability as constraints.
+
+Assign material to three lists in each `plan.copy_layers`:
+
+- Write only the words the audience should read in `on_screen` and apply design or revision directions to the page elements they describe. List the copy in reading order. Include a displayed title once. Use `plan.show_title: false` for an internal page name. A visual-only page may have an empty list. Native tables and charts take their data from `data_visuals`.
+- `talk_track` holds the explanation a presenter would add, for example why a comparison matters or when to revisit the decision.
+- `reference` holds detailed derivations, assumptions, lookup values or source pointers for follow-up. Leave either off-screen list empty when it serves no purpose. Details essential to a standalone reader belong on screen. The PPTX carries populated speaking and reference sections in the slide's speaker notes; the page drawing job receives neither.
+
+Before previewing, read each page as the intended audience. If a title, KPI card and footer all draw the same conclusion, keep the best placement. Preserve repeated labels, units and baselines when readers need them to decode data. Replace generic praise with the source-backed observation or cut it. Across neighboring pages, check that repetitions build the argument. Set density through relationships and evidence; use the actual rendered size to check readability.
 
 `design_system` must define:
 
@@ -19,6 +30,8 @@ Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one dec
 - chart and diagram treatment
 - imagery and illustration policy
 - any brand or reference-image design genes
+
+For a page that uses data to support its claim, consult [visualization-choice.md](visualization-choice.md). Record each data-bearing visual, the comparison it enables, and the chosen encoding in `plan.data_visuals`. Both renderers receive this field. If the editable deliverable must expose a chart's backing data or table cells, record the expected series or cell matrix here while the source is in context. Existing plans and pages without data visuals may omit the field.
 
 Choose the palette once for the whole deck. Page plans must reference the shared palette tokens and must not invent a new page palette, swap the primary/accent relationship, or introduce unrelated hex colors. Allow a page-specific color only for semantic encoding, a user-supplied asset, or an explicitly justified narrative moment; record that exception in the page plan and keep the rest of the system unchanged.
 
@@ -40,7 +53,7 @@ For each slide plan, specify:
 
 Reference-image calibration includes palette roles and approximate area balance, contrast, typography, block geometry and whitespace. A hex color alone does not capture a visual system. Record these in the existing `design_system` fields. Keep them stable across pages until the user changes them; do not imitate reference branding or add logos unless requested.
 
-Keep source coverage and reasoning with the canonical page: optional `source_refs` identify file/section/figure, and optional `plan.diagram_spec` records nodes, directed edges, branch/merge points and edge labels for logic-heavy pages. Required relationships remain content even when geometry changes. `required_elements` contains actual visible copy/objects, not just “title, diagram, footer”. Separate speaker notes from the exact text allowed on the slide.
+Keep source coverage and reasoning with the canonical page: optional `source_refs` identify file/section/figure, and optional `plan.diagram_spec` records nodes, directed edges, branch/merge points and edge labels. Use `required_elements` to specify concrete objects and their function, such as a current-versus-proposed cost comparison or a relationship diagram. Keep `material`, `talk_track` and `reference` in the canonical plan for review.
 
 Before a rewrite, check approved page roles and source coverage. Changing density must not erase cover/contents, design mechanisms or evidence. For local feedback, update only affected pages and shared settings actually implicated. Present the helper-generated `.workflow/slide-plans-preview.md`, not a second versioned planning Markdown.
 
@@ -48,9 +61,10 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "deck_strategy": {
     "primary_audience": "...",
+    "use_context": "live",
     "decision_context": "...",
     "first_questions": ["..."],
     "evidence_order": ["..."],
@@ -76,11 +90,16 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
   "slides": [
     {
       "index": 1,
-      "title": "...",
+      "title": "Pilot the staffing change in two stores",
       "material": "...",
       "page_role": "cover",
       "plan": {
         "core_message": "...",
+        "copy_layers": {
+          "on_screen": ["Pilot the staffing change in two stores", "Review overtime after six weeks"],
+          "talk_track": ["Explain how the two stores were selected."],
+          "reference": ["Staffing model assumptions in the operations workbook."]
+        },
         "layout_structure": "...",
         "visual_hierarchy": ["..."],
         "required_elements": ["..."],
@@ -96,32 +115,11 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
 
 Before asking for slide-plan approval, run the helper preview. A validation error means the artifact is incomplete and must be repaired; never bypass the failure by manually converting only the fields that happened to be generated.
 
-The helper must translate this strict machine schema into a smaller human-readable approval projection. `slide-plans-preview.md` should show the audience/decision lens, visual system, core message, layout, hierarchy, visible elements, and page style using natural labels, a compact palette table, numbered sequences, and bullets. Keep renderer-internal audience controls and neutral constraints in the validated JSON instead of copying them into the approval body. Never copy JSON objects, quoted field names, braces, or fenced `json` blocks into the preview.
+The helper translates this schema into a smaller human-readable approval projection. Review the audience and setting, then read each page's screen copy on its own before checking the speaking and reference material. These layers should be visibly distinct in the preview. Keep renderer-internal audience controls and neutral constraints in the validated JSON. Never copy JSON objects or fenced code into the preview.
 
 The audience decision made in the outline stage must carry forward into `slide-plans.json`; do not silently switch the deck into a different audience style later.
 
 Express audience fit through composition, emphasis, evidence density, ordering, and tone. Do not turn the slide plan into visible rhetoric about what the audience cares about unless the user explicitly requests that framing.
 
-### Final-State Revision Contract
-
-Apply this contract whenever an existing outline, content artifact, or slide plan receives a second or later user change.
-
-Treat the user's change request as a transient delta. The persisted artifact must describe only the desired final slide, not how it differs from an earlier version.
-
-- Rewrite affected fields instead of appending correction notes.
-- Keep accepted content and the new final geometry; discard superseded alternatives and rejected wording.
-- Make `required_elements` an allowlist of exact final visible copy and objects. A deleted object or string must not remain in this list.
-- Do not store revision verbs or tombstones such as `delete`, `remove`, `omit`, `do not show`, `must not appear`, `不要出现`, `删除`, `去掉`, or `不保留` when they refer to content from the previous version.
-- Do not quote the rejected literal inside a negative instruction. Mentioning a removed label again still gives it prompt attention and can cause it to reappear.
-- Express the destination positively and spatially. Bad: `delete the old card and do not show its label`. Good: `keep this interval as clean background space; join the remaining modules with one short connector`.
-- Keep generic safety and truthfulness constraints only when they remain useful without knowledge of the revision history, for example no invented metrics, no external brand logo, and exact required numbers.
-- If the user supplies an annotated screenshot, extract the accepted layout and final-state geometry into the plan. Do not transcribe cross marks, comments, rejected labels, or deletion instructions into the plan.
-
-Before generating `slide-plans-preview.md` or render jobs, audit the changed slide object:
-
-1. List the literals and objects the user rejected in working memory only.
-2. Search `material`, `core_message`, `layout_structure`, `visual_hierarchy`, `required_elements`, `style_controls`, `audience_controls`, and `renderer_neutral_constraints` for those literals.
-3. If a rejected literal survives only in a negated or historical sentence, remove that sentence and replace it with a positive final-state description.
-4. Confirm the preview contains no edit history and reads as if this were the first and only design specification.
-5. Prepare renderer jobs only from this clean artifact.
+For changes to an existing page, follow [revision.md](revision.md).
 
