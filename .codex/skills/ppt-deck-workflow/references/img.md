@@ -1,6 +1,6 @@
 # IMG Branch
 
-Read only after the user chooses IMG. Use the imagegen tool to generate finished full-page images.
+Read only after the user chooses IMG. Give the chosen image generator the approved on-screen text and visual composition together so its output is the finished slide. If generation is blocked, explain the blocker and obtain the user's choice before switching to another production method.
 
 Read the task brief before choosing an image tool or making paid calls. A newer instruction to use the default tool during debugging overrides an earlier 4K request within that scope. When native 4K is currently requested, follow the available imagegen skill's supported API workflow, load credentials only into that process from the user's external secret store, and verify returned dimensions. Never label upscaled or lower-resolution images as native 4K. Persist prompts and actual dimensions under `.workflow/`, not extra project-root reports.
 
@@ -10,7 +10,7 @@ Calibrate internally on representative pages before a long batch, including a lo
 
 Run `prepare-render-jobs`. Use the page job's `on_screen` and declared data for visible wording. A legacy version-2 job uses the visible copy approved in its plan.
 
-Compile one 16:9 page. Describe the composition, reading order, chart or diagram structure, whitespace, palette and typography in visual terms. Use a clean reference image where appropriate. Inspect the rendered page for legible text, accurate data and the intended composition.
+Compile one 16:9 page. Describe the composition, reading order, chart or diagram structure, whitespace, palette and typography in visual terms. Use a clean reference image where appropriate. View the pages side by side at presentation size: read the main relationship from the picture and its labels, check the text and data against the plan, and compare the actual palette and type across the deck.
 
 
 Export using `workflow.py export --run-dir output/<project>`. Read `slide-status-img.json` and deliver the original PPTX; this completes the IMG workflow.

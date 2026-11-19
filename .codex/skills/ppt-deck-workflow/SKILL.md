@@ -59,7 +59,7 @@ For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑
 - On resumption run `resume --run-dir ...`. Persist scoped requirements, sources and pending work with `checkpoint --file ...`; see [continuation.md](references/continuation.md). Compressed summaries do not replace these files.
 - Keep exactly one `outline.json`, `contents.json`, and `slide-plans.json`. Update these in place and show the helper's `.workflow/*-preview.md`; do not create parallel revision reports, planning summaries or HTML slide galleries. A chat explanation is enough.
 - One new deck, one new folder under `output/`. Never reuse a previous run as a workaround for a permission/init failure. Keep sources, media, intermediate artifacts, reviews, and outputs in this same run directory.
-- Establish audience and live, standalone or hybrid use in the outline. Keep the evidence that reader needs to decide or verify.
+- Start the outline with what the user wants the audience to understand, decide or do. Adjust evidence, register and density for that audience and for live, standalone or hybrid use.
 - New version-3 plans share one `deck_strategy` and `design_system`. Allocate screen copy, speaking points and reference material by page. Render approved screen copy and data. Existing version-2 plans remain readable.
 - Update the plan before regenerating. For small edits to an existing PPTD project, read its latest saved page first and preserve unrelated manual changes.
 - Use `prepare-render-jobs` after selection for page-local inputs. Jobs carry the shared design system; work incrementally rather than rereading the entire deck for every page.

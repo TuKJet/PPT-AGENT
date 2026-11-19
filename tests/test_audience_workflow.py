@@ -51,6 +51,9 @@ class AudienceWorkflowTests(unittest.TestCase):
         Image.new("RGB", (64, 36), "white").save(image)
         output = self.workflow.export_img(self.run_dir)
         slide = Presentation(output).slides[0]
+        self.assertEqual(slide.shapes[0].image.blob, image.read_bytes())
+        status = self.workflow.read_json(self.workflow.slide_status_path(self.run_dir, "img"))
+        self.assertEqual(status["slides"]["01"]["validation_status"], "image_embedded")
         notes = slide.notes_slide.notes_text_frame.text
         self.assertIn("讲解\n例会引导提问", notes)
         self.assertIn("备查\n核算底稿编号 R19", notes)

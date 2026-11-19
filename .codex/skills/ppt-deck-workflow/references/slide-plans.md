@@ -6,7 +6,7 @@ Create `slide-plans.json` version 3 with one deck-level `deck_strategy`, one dec
 
 - primary audience and any secondary audience constraint
 - `use_context` as `live`, `standalone` or `hybrid`
-- the decision or response the deck should enable
+- what the audience should understand, decide or do (use the existing `decision_context` field)
 - the first questions this audience is likely to ask
 - evidence order and detail-depth principles
 - presentation posture and desired confidence level
@@ -41,17 +41,17 @@ For each slide plan, specify:
 
 - Core message.
 - Page role.
-- Layout structure.
+- Layout structure. Build the main visual from the people, objects and relationships in the approved content. For an abstract capability, its actual inputs, choices and outputs can be the illustration. Specify what the viewer sees, how composition carries the meaning and which labels make it readable. Introducing a different application or a worked example changes the content. A short overview can pair a formal heading with a sentence that adds the takeaway.
 - Required visible copy and numbers.
 - Visual hierarchy.
 - Element types such as title, subtitle, card, metric, timeline, process, matrix, callout, chart, footer.
 - Style controls from the user: color, density, typography, visual motif, chart treatment, reference-image influence.
-- Audience-driven presentation controls: technical depth, business framing, persuasion intensity, decision orientation, and page-level density.
+- Audience controls: depth, register and density for the purpose and setting.
 - Renderer-neutral constraints; do not include renderer-specific class names, CSS, SVG path instructions, or implementation-only notes.
 
 `slide-plans.json` must remain the control surface for art direction. If style guidance changes, edit the plan before rendering.
 
-Reference-image calibration includes palette roles and approximate area balance, contrast, typography, block geometry and whitespace. A hex color alone does not capture a visual system. Record these in the existing `design_system` fields. Keep them stable across pages until the user changes them; do not imitate reference branding or add logos unless requested.
+Read a reference in light of what the user liked. Carry its way of explaining relationships into the page layout when that is the request. When adapting the look, set palette roles, area balance, type and spacing in the shared `design_system`; vary composition by page while keeping those choices consistent.
 
 Keep source coverage and reasoning with the canonical page: optional `source_refs` identify file/section/figure, and optional `plan.diagram_spec` records nodes, directed edges, branch/merge points and edge labels. Use `required_elements` to specify concrete objects and their function, such as a current-versus-proposed cost comparison or a relationship diagram. Keep `material`, `talk_track` and `reference` in the canonical plan for review.
 

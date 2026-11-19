@@ -98,7 +98,7 @@ REQUIRED_SLIDE_PLAN_FIELDS = (
 PREVIEW_LABELS = {
     "primary_audience": "目标受众",
     "secondary_audience": "次要受众",
-    "decision_context": "决策目标",
+    "decision_context": "沟通目标",
     "first_questions": "首要问题",
     "evidence_order": "证据顺序",
     "presentation_posture": "表达姿态",
@@ -699,7 +699,7 @@ def _append_deck_strategy_preview(lines: list[str], strategy: dict[str, Any]) ->
         "## 全局叙事策略",
         "",
         f"- **目标受众**：{strategy['primary_audience']}",
-        f"- **决策目标**：{strategy['decision_context']}",
+        f"- **沟通目标**：{strategy['decision_context']}",
         f"- **表达姿态**：{strategy['presentation_posture']}",
         "",
         "### 受众首先会问",
@@ -1720,7 +1720,7 @@ def export_img(run_dir: Path) -> Path:
         f"{i:02d}": {
             "title": image.stem,
             "page_role": "image",
-            "validation_status": "codex_imagegen",
+            "validation_status": "image_embedded",
             "export_ready": True,
             "image_path": str(image),
         }
