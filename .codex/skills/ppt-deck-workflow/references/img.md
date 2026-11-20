@@ -1,8 +1,8 @@
 # IMG Branch
 
-Read only after the user chooses IMG. Use the imagegen tool to generate finished full-page images.
+Read only after the user chooses IMG. Use the imagegen skill's built-in `image_gen` tool by default for finished full-page images.
 
-Read the task brief before choosing an image tool or making paid calls. A newer instruction to use the default tool during debugging overrides an earlier 4K request within that scope. When native 4K is currently requested, follow the available imagegen skill's supported API workflow, load credentials only into that process from the user's external secret store, and verify returned dimensions. Never label upscaled or lower-resolution images as native 4K. Persist prompts and actual dimensions under `.workflow/`, not extra project-root reports.
+Follow the current brief and the image-tool choice in [SKILL.md](../SKILL.md). Verify the returned pixel dimensions before describing an image as native 4K. Record prompts and actual dimensions under `.workflow/`.
 
 Calibrate internally on representative pages before a long batch, including a logic-heavy page and a distinct page role. Inspect density, diagram relationships and shared styling against the approved plan. Do not add a user approval gate or reuse a rejected earlier design as a reference. Regenerate only pages affected by a correction unless a shared change requires more.
 

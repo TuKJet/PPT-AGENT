@@ -11,7 +11,6 @@ Maintain one compact `.workflow/task-brief.json` through `checkpoint --run-dir <
   "objective": "Explain the design choices and their evidence",
   "constraints": [
     "Content pages: medium density through diagrams and evidence, not paragraph volume",
-    "During debugging: use the default image tool; no paid 4K generation",
     "All pages: retain the calibrated palette and omit page numbers"
   ],
   "source_paths": ["docs/design-overview.md#design-choices"],
