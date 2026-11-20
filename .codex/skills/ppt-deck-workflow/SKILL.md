@@ -7,7 +7,7 @@ description: Create PowerPoint decks with staged outline, content, and slide-pla
 
 Codex authors the content and renderer files. Use the deterministic helper for state, previews, export, and the local editor; never use `ppt_workflow.runner`, repository AI clients, or model-provider configuration.
 
-For style samples, finished slides and revisions, use the imagegen skill's built-in `image_gen` by default, including for high-quality or batch requests. When the user explicitly asks for 4K images, that request selects the imagegen skill's supported 4K Images API for those images. An explicit request to use the Images API also selects that route for its stated scope.
+Use imagegen's built-in `image_gen` for samples, slides and edits, including HD batches. An explicit request for 4K output selects its 4K Images API for those images. Honor explicit API requests at their stated scope.
 
 ## Runtime
 
