@@ -23,7 +23,6 @@ Information density means useful relationships and evidence per page. Increasing
 - Organize one main argument and its necessary evidence into a clear hierarchy.
 - Architecture, comparison and mechanism pages may contain several related groups.
 - Preserve required nodes, directed relationships, branch/merge points and feedback. Do not force a real nine-step flow into three generic boxes.
-- For medium density, a useful starting point is one complete logic diagram plus compact annotations and a supporting result or comparison.
 - A footer is optional; do not manufacture tags or extra conclusions to fill a template.
 
 `timeline`
@@ -35,7 +34,7 @@ Information density means useful relationships and evidence per page. Increasing
 `summary`
 
 - Give the conclusion visual priority. Choose the layout for the relationship between that conclusion and the supporting evidence.
-- Footer must be a thin summary strip, not a competing content block.
+- Use a quiet footer only when it adds information.
 - Avoid adding a second large conclusion paragraph.
 
 `ending`

@@ -4,13 +4,13 @@ Read only after the user chooses IMG. Use the imagegen skill's built-in `image_g
 
 Follow the current brief and the image-tool choice in [SKILL.md](../SKILL.md). Verify the returned pixel dimensions before describing an image as native 4K. Record prompts and actual dimensions under `.workflow/`.
 
-Calibrate internally on representative pages before a long batch, including a logic-heavy page and a distinct page role. Compare the result with the selected originals for the features they supply: the arrangement of headings and explanations, the prominence of the main figure and the details that carry its meaning. Correct any drift here before using the page to guide a batch. Do not add a user approval gate or reuse a rejected earlier design as a reference. Regenerate only pages affected by a correction unless a shared change requires more.
+Calibrate internally on representative pages before a long batch, including a logic-heavy page and a distinct page role. View these pages together. Look for the selected visual features at their intended scope and for a clear reading path for each page's argument. Do not add a user approval gate or reuse a rejected earlier design as a reference. Regenerate only pages affected by a correction unless a shared change requires more.
 
 ## IMG Prompt Compilation
 
 For the `img` branch, do not pass raw `slide-plans.json` text directly to imagegen. Treat each slide plan as source material and compile it into a clean image-generation prompt. After all images are generated, package them into the original IMG PPTX; that export completes the requested IMG workflow while leaving IMG-to-SVG available as a later explicit opt-in.
 
-For each page, use the approved visible wording, spatial relationships and selected design system. When the job has `style_references`, inspect and attach the relevant originals to the image tool as ordered references. Tell the tool which features to take from each and where they belong on this page. A generated sibling page can supply continuity; keep the original source for each borrowed feature in subsequent calls. Put the words to typeset in their own block. Turn design feedback into geometry, typography or color. For an annotated screenshot take the final layout from its markup.
+Lead each prompt with this page's focal point and reading order. From the job's `style_references`, attach the originals whose features it uses and name what each contributes here, such as linework, section detail or a specified arrangement. Use a sibling slide as a layout reference when the pages are intended to share a composition. Put the exact approved words to typeset in their own block. Turn design feedback into geometry, typography or color. For an annotated screenshot take the final layout from its markup.
 
 For `plan.data_regions`, give imagegen the panel's position and dimensions and ask it to render a clean surface there. Supply the rest of the page as usual. At export the helper fills those panels from the approved rows. When the plan intentionally leaves the data for the PPTD version, `"img": "reserve"` keeps that panel empty in IMG. Reserve the same space in the style samples.
 

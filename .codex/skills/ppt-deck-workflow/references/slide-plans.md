@@ -1,6 +1,6 @@
 ## Slide Plan Contract
 
-Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. For direct planning, derive the shared design system from the brief, supplied references and page content. On the sample route use the user's chosen treatment, palette or blend. Describe the chosen composition, palette and visual treatment concretely enough to apply them to a new page. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
+Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. For direct planning, derive the shared design system from the brief, supplied references and page content. On the sample route use the user's chosen treatment, palette or blend. Record what the user chose and where it applies. Give a specified page, series or company template the placement it calls for. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
 
 `deck_strategy` must record the stable audience interpretation used across the deck:
 
@@ -11,7 +11,7 @@ Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one dec
 - presentation posture and desired confidence level
 - `page_rhythm`, a short list of numbered pages or ranges and what each contributes. Mark where the audience should pause on a key claim, where it needs dense evidence, and where a light transition helps it change questions. Use the mix the story needs. For example, a three-page technical review can use the opening choice, a dense comparison, and a closing decision without a standalone transition.
 
-Use the outline's audience and occasion to carry the argument across pages. In each page's `layout_structure`, begin with the relationship the reader needs to see, then choose a form that makes it legible. Cause and effect may use linked steps, time can use a timeline, hierarchy a tree, alternatives a common comparison axis or matrix, and feedback a return arrow to the step that changes. A single result may only need a number or an image. The page rhythm determines where to enlarge that result or give its evidence more space.
+Use the outline's audience and occasion to carry the argument across pages. In each page's `layout_structure`, begin with the relationship the reader needs to see, then choose a form that makes it legible. Cause and effect may use linked steps, time can use a timeline, hierarchy a tree, alternatives a common comparison axis or matrix, and feedback a return arrow to the step that changes. A single result may only need a number or an image. Use `page_rhythm` to decide what leads on each page. A repeated layout helps when readers need to compare like with like.
 
 `design_system` must define:
 
@@ -23,7 +23,7 @@ Use the outline's audience and occasion to carry the argument across pages. In e
 - imagery and illustration policy
 - any brand or reference-image design genes
 
-Choose the palette once for the whole deck. Page plans must reference the shared palette tokens and must not invent a new page palette, swap the primary/accent relationship, or introduce unrelated hex colors. Allow a page-specific color only for semantic encoding, a user-supplied asset, or an explicitly justified narrative moment; record that exception in the page plan and keep the rest of the system unchanged.
+Use shared palette tokens across the deck. Pages must not invent a new page palette. Vary the area and emphasis of those colors with the evidence. Keep semantic colors and original asset colors where they carry meaning.
 
 Do not express "restrained" as a ban on visual assets. The `design_system` should say what visual devices are useful for this audience and topic, not merely prohibit illustrations, brand colors, decorative motifs, photography, or depth.
 
@@ -41,7 +41,7 @@ For each slide plan, specify:
 
 `slide-plans.json` must remain the control surface for art direction. If style guidance changes, edit the plan before rendering.
 
-For a design drawn from specific images, copy the chosen originals into the run's `style-references/` folder. List them in `design_system.style_references`, e.g. `[{"path":"style-references/A.png","use":"White ground, navy text and generous margins"},{"path":"style-references/B.png","use":"Left stack of bold section headings, each with a fine rule and explanation; one large cutaway on the right shows how the parts fit"}]`. Describe the features the user chose. For headings, look at grouping, order and position as well as type. For illustrations, identify the subject, viewpoint, scale and details that explain it. Apply those relationships in each relevant page's `layout_structure`, adapting the subject and making room for its actual evidence. Use the references as design sources; slide wording and facts come from the approved content.
+Copy chosen originals into `style-references/` and give each a `path` and `use` in `design_system.style_references`. Describe the visible feature and its scope. For example, A supplies the white ground and navy type throughout. B supplies detailed engineering cutaways. On the capability overview, its left stack of headings, each above a rule and explanation, faces a large illustration. Put that arrangement in the overview's `layout_structure`. On a comparison page the same drawing technique can show two alternatives at equal scale. Specify geometry when the user fixed it or the evidence depends on it. Let the page's approved content supply its facts, words and remaining composition decisions.
 
 Keep source coverage and reasoning with the canonical page: optional `source_refs` identify file/section/figure, and optional `plan.diagram_spec` records nodes, directed edges, branch/merge points and edge labels for logic-heavy pages. Required relationships remain content even when geometry changes. `required_elements` contains actual visible copy/objects, not just “title, diagram, footer”. Separate speaker notes from the exact text allowed on the slide.
 
