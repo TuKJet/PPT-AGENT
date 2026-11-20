@@ -185,6 +185,41 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
                     self.assertNotIn("reconstruction_policy", payload)
                     self.assertNotIn("image_reference", payload)
 
+    def test_style_references_reach_img_jobs_with_role_and_absolute_path(self) -> None:
+        from PIL import Image
+
+        plans_path = self.run_dir / "slide-plans.json"
+        plans = self.workflow.read_json(plans_path)
+        reference = self.run_dir / "style-references" / "B.png"
+        reference.parent.mkdir(parents=True)
+        Image.new("RGB", (320, 180), "white").save(reference)
+        plans["design_system"]["style_references"] = [{
+            "path": "style-references/B.png",
+            "use": "标题逐条陈列与右侧轴测工程图",
+        }]
+        self.workflow.write_json(plans_path, plans)
+        preview = self.workflow.preview_artifact(self.run_dir, "slide_plans")
+        preview_text = Path(preview).read_text(encoding="utf-8")
+        self.assertEqual(preview_text.count("style-references/B.png"), 1)
+        self.workflow.cmd_approve(Namespace(run_dir=str(self.run_dir), artifact="slide_plans"))
+        self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))
+        self.workflow.prepare_render_jobs(self.run_dir, "img")
+        shared = self.workflow.read_json(self.run_dir / "render-jobs/img/shared-context.json")
+        job = self.workflow.read_json(self.run_dir / "render-jobs/img/slide-01.json")
+        self.assertEqual(shared["style_references"][0]["path"], "style-references/B.png")
+        self.assertEqual(shared["style_references"][0]["use"], "标题逐条陈列与右侧轴测工程图")
+        self.assertEqual(job["style_references"], shared["style_references"])
+        self.assertEqual(Path(job["style_references"][0]["absolute_path"]), reference.resolve())
+
+        reference.unlink()
+        with self.assertRaisesRegex(ValueError, "file is missing"):
+            self.workflow.prepare_render_jobs(self.run_dir, "img")
+
+        plans["design_system"]["style_references"] = [{"path": "../outside.png", "use": "escape"}]
+        self.workflow.write_json(plans_path, plans)
+        with self.assertRaisesRegex(ValueError, r"style_references\[0\]\.path"):
+            self.workflow.preview_artifact(self.run_dir, "slide_plans")
+
     def test_img_does_not_start_editor_or_read_pptd(self) -> None:
         self.workflow.cmd_choose_renderer(Namespace(run_dir=str(self.run_dir), renderer="img"))
         state = self.workflow.load_state(self.run_dir)

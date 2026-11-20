@@ -47,6 +47,32 @@ def safe_path(root: Path, relative: str) -> Path:
     return path
 
 
+def resolve_style_references(root: Path, entries) -> list[dict[str, str]]:
+    """Validate and normalize the selected reference images for planning and delivery."""
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise ValueError('design_system.style_references must be a list')
+    root = root.resolve(strict=True)
+    resolved = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f'style_references[{index}] must be an object')
+        relative, use = entry.get('path'), entry.get('use')
+        if not isinstance(relative, str) or not relative.strip():
+            raise ValueError(f'style_references[{index}].path must be a non-empty relative path')
+        if not isinstance(use, str) or not use.strip():
+            raise ValueError(f'style_references[{index}].use must be a non-empty string')
+        try:
+            path = safe_path(root, relative.replace('\\', '/')).resolve()
+        except ValueError as exc:
+            raise ValueError(f'style_references[{index}].path: {exc}') from exc
+        if not path.is_file():
+            raise ValueError(f'style_references[{index}] file is missing: {relative}')
+        resolved.append({'path': path.relative_to(root).as_posix(), 'absolute_path': str(path), 'use': use.strip()})
+    return resolved
+
+
 def check_tree(root: Path):
     # Check every entry before deleting anything, including nested Windows junctions.
     for child in root.iterdir():
@@ -139,6 +165,7 @@ def finalize_delivery(run_dir: Path, *, apply: bool = False, discard=(), retain=
     count = len(plans.get('slides') or [])
     if not count:
         raise ValueError('slide-plans.json has no slides')
+    style_references = resolve_style_references(root, (plans.get('design_system') or {}).get('style_references'))
     old = plans.get('_delivery') or {}
     state = read_json(root / 'workflow-state.json', {})
     brief = read_json(root / '.workflow/task-brief.json', old.get('task_brief', {}))
@@ -163,6 +190,7 @@ def finalize_delivery(run_dir: Path, *, apply: bool = False, discard=(), retain=
         if pptx_page_count(path) != count:
             raise ValueError(f'PPTX page count differs from slide plans: {path.name}')
     keep = CANONICAL | {p.name for p in exports}
+    keep.update(reference['path'] for reference in style_references)
     if (root / 'pptd').exists():
         keep |= _pptd_files(root, count)
     for rel in retain:

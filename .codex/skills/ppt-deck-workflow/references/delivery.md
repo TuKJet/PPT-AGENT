@@ -1,6 +1,6 @@
 # Clean delivery
 
-The final run directory contains `outline.json`, `contents.json`, `slide-plans.json`, the requested `.pptx` exports, and, when applicable, `pptd/` with its manifest, authored pages and required local media/provenance. These files are the reusable result. Do not add a second planning report, a README, an HTML image gallery, scripts or preview bundles unless the user requests that deliverable.
+The final run directory contains `outline.json`, `contents.json`, `slide-plans.json`, the requested `.pptx` exports, and, when applicable, `pptd/` with its manifest, authored pages and required local media/provenance. When the plan names original design references under `style-references/`, those images also belong to the reusable result. Do not add a second planning report, a README, an HTML image gallery, scripts or preview bundles unless the user requests that deliverable.
 
 During work, keep prompt text, notes and temporary code under `.workflow/`. Helper-managed jobs, source images and QA outputs are temporary too. Prefer the bundled helpers for previews, page comparisons, export, validation and cleanup. When an operation recurs, improve the Skill implementation instead of copying a new Python script into every presentation. A one-off task-specific script, if actually necessary, stays in `.workflow/` and is removed after use.
 

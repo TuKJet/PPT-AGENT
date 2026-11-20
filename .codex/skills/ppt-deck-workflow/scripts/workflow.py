@@ -42,6 +42,7 @@ from filename_utils import safe_filename_part, slide_filename
 from data_regions import apply_pptd as apply_pptd_data_regions
 from data_regions import materialize_images as materialize_data_images
 from data_regions import validate as validate_data_regions
+from delivery import resolve_style_references
 
 STATE_FILE = "workflow-state.json"
 ARTIFACT_FILES = {
@@ -802,7 +803,7 @@ def _append_palette_preview(lines: list[str], palette: dict[str, Any]) -> None:
     lines.append("")
 
 
-def _append_design_system_preview(lines: list[str], design_system: dict[str, Any]) -> None:
+def _append_design_system_preview(lines: list[str], design_system: dict[str, Any], references: list[dict]) -> None:
     lines.extend([
         "## 全局设计规范",
         "",
@@ -812,6 +813,11 @@ def _append_design_system_preview(lines: list[str], design_system: dict[str, Any
         "",
     ])
     _append_palette_preview(lines, design_system["palette"])
+    if references:
+        lines.extend(["### 参考图与用途", ""])
+        for reference in references:
+            lines.append(f"- `{reference['path']}`：{reference['use']}")
+        lines.append("")
     for key, title in (
         ("typography", "字体层级"),
         ("component_rules", "组件与间距"),
@@ -825,7 +831,7 @@ def _append_design_system_preview(lines: list[str], design_system: dict[str, Any
     extras = {
         key: value
         for key, value in design_system.items()
-        if key not in REQUIRED_DESIGN_SYSTEM_FIELDS
+        if key not in REQUIRED_DESIGN_SYSTEM_FIELDS and key != "style_references"
     }
     if extras:
         lines.extend(["", "### 其他设计约束", ""])
@@ -875,11 +881,14 @@ def _append_slide_plan_details(
     ])
 
 
-def write_plans_preview(data: dict[str, Any], path: Path) -> Path:
+def write_plans_preview(data: dict[str, Any], path: Path, *, run_dir: Path | None = None) -> Path:
     validate_slide_plans(data)
+    if run_dir is None:
+        run_dir = path.parent.parent if path.parent.name == ".workflow" else path.parent
+    references = resolve_style_references(run_dir, data["design_system"].get("style_references"))
     lines = ["# 幻灯片规划预览", ""]
     _append_deck_strategy_preview(lines, data["deck_strategy"])
-    _append_design_system_preview(lines, data["design_system"])
+    _append_design_system_preview(lines, data["design_system"], references)
     palette = data["design_system"]["palette"]
     for job in data.get("slides", []):
         role = str(job.get("page_role", "content"))
@@ -906,7 +915,7 @@ def preview_artifact(run_dir: Path, artifact: str) -> Path:
     elif artifact == "contents":
         write_contents_preview(data, preview_path)
     elif artifact == "slide_plans":
-        write_plans_preview(data, preview_path)
+        write_plans_preview(data, preview_path, run_dir=run_dir)
     state = load_state(run_dir)
     mark_artifact(run_dir, state, artifact, data_path, preview_path)
     return preview_path
@@ -985,6 +994,7 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
     ensure_render_ready(run_dir, renderer)
     state = load_state(run_dir)
     plan_document = slide_plan_document(run_dir)
+    style_references = resolve_style_references(run_dir, plan_document["design_system"].get("style_references"))
     slides = list(plan_document.get("slides") or [])
     source_mode = renderer_state(state, renderer).get("source", "plans")
     references = pptd_image_references(run_dir) if renderer == "pptd" and source_mode == "img" else []
@@ -1018,6 +1028,8 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         "task_brief": current_task_brief(run_dir),
         "source": source_mode,
     }
+    if style_references:
+        shared_context["style_references"] = style_references
     if references:
         shared_context["reconstruction_policy"] = {
             "default_mode": "hybrid",
@@ -1055,6 +1067,8 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
             "task_brief": shared_context['task_brief'],
             "source": source_mode,
         }
+        if style_references:
+            payload["style_references"] = style_references
         if references:
             payload["image_reference"] = references[idx - 1]
             raw = run_dir / ".workflow/img-source" / Path(references[idx - 1]["source_image_path"]).name

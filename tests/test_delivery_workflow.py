@@ -120,6 +120,19 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         return output.getvalue()
 
     def test_img_to_pptd_cli_delivery_resume_and_restore(self):
+        plans = self.w.read_json(self.run / "slide-plans.json")
+        references_dir = self.run / "style-references"
+        references_dir.mkdir()
+        for name, color in (("A.png", "#152D4A"), ("B.png", "#F2A900")):
+            Image.new("RGB", (320, 180), color).save(references_dir / name)
+        unused = self.run / ".workflow" / "style-samples" / "unused.png"
+        unused.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (320, 180), "#777777").save(unused)
+        plans["design_system"]["style_references"] = [
+            {"path": "./style-references/A.png", "use": "A 的配色"},
+            {"path": "style-references/B.png", "use": "B 的标题与图形构图"},
+        ]
+        self._approve("slide_plans", plans)
         # Generate one local source image and the actual IMG PPTX.
         self.w.cmd_choose_renderer(Namespace(run_dir=str(self.run), renderer="img", source="plans"))
         self.w.prepare_render_jobs(self.run, "img")
@@ -165,8 +178,11 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         report = finalize_delivery(self.run, apply=True)
         self.assertTrue(report["applied"])
         self.assertEqual({p.name for p in self.run.iterdir()}, {
-            "outline.json", "contents.json", "slide-plans.json", img_pptx.name, pptd_pptx.name, "pptd"
+            "outline.json", "contents.json", "slide-plans.json", img_pptx.name, pptd_pptx.name, "pptd", "style-references"
         })
+        self.assertTrue((self.run / "style-references/A.png").is_file())
+        self.assertTrue((self.run / "style-references/B.png").is_file())
+        self.assertFalse(unused.exists())
         restored = restore_img_sources(self.run, img_pptx)
         self.assertEqual(restored[0].read_bytes(), original_img)
 
