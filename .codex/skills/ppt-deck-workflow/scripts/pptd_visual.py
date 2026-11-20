@@ -16,7 +16,7 @@ import zipfile
 
 from PIL import Image, ImageDraw, ImageFont
 
-from pptd_runtime import create_editor_server, load_mapping, project_path, validate_project, walk
+from pptd_runtime import ASSETS, create_editor_server, load_mapping, project_path, validate_project, walk
 from playwright_runtime import launch_global_chromium, sync_playwright
 
 
@@ -191,6 +191,11 @@ def export_images(root: Path, *, force: bool = False) -> dict:
                         page.route("**/*", route_request)
                         page.goto(origin + "/?ndExport=1")
                         page.wait_for_function("document.documentElement.dataset.deckStatus === 'ready'", timeout=120000)
+                        if report["element_counts"].get("chart"):
+                            # The editor snapshots the first page before a cold chart module may have loaded.
+                            assets = ASSETS / "editor" / "neo-ppt" / "assets"
+                            chart_module, = (p for p in assets.glob("echartsCore-*.js") if "-legacy-" not in p.name)
+                            page.evaluate("url => import(url).then(() => null)", f"/neo-ppt/assets/{chart_module.name}")
                         page.get_by_role("button", name="导出", exact=True).click()
                         page.locator(".radio-group-item").filter(has_text=re.compile("^图片$")).click()
                         page.locator(".radio-group-item.active").filter(has_text=re.compile("^图片$")).wait_for()

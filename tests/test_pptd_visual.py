@@ -87,8 +87,20 @@ class PPTDVisualTests(unittest.TestCase):
                 visual.export_images(root)
             second["elements"][0]["fill"]["color"] = "#00FF00"
             (root / "pages/02.page").write_text(json.dumps(second))
+            page["elements"].append({
+                "elementId": "trend", "elementType": "chart", "bounds": [380, 130, 550, 350],
+                "data": {"cols": ["Month", "Hours"], "rows": [["Jan", -2], ["Feb", 0], ["Mar", None]]},
+                "series": [{"type": "line", "name": "Hours", "lineColor": "#F2A900",
+                            "encode": {"x": "Month", "y": "Hours"}}],
+            })
+            (root / "pages/01.page").write_text(json.dumps(page))
             updated = visual.export_images(root, force=True)
             self.assertNotEqual(updated["source_sha256"], summary["source_sha256"])
+            with Image.open(root / ".qa-images/pages/001.png") as image:
+                pixels = image.convert("RGB").resize((480, 270))
+                yellow = sum(n for n, (r, g, b) in pixels.getcolors(pixels.width * pixels.height)
+                             if r > 150 and g > 100 and b < 70)
+                self.assertGreater(yellow, 0, "The first page is missing its amber chart series")
             with Image.open(root / ".qa-images/pages/002.png") as image:
                 self.assertGreater(ImageStat.Stat(image.convert("RGB")).mean[1], 240)
 
