@@ -16,13 +16,11 @@ Store final assets in `pptd/media/` and reference relative paths. For searched o
 
 ## Generation
 
-For an approved fixed-page PPTD template, follow [template-update.md](template-update.md) at the authoring step. For planned native charts or tables, use the plan's exact `element_id` as `elementId`, preserve the source categories and series, and author real chart/table elements. The CLI reads back each promised object's data before publishing the PPTX.
-
 1. Run `prepare-render-jobs --run-dir output/<project> --renderer pptd`.
 2. Read the relevant portions of [pptd-format.md](pptd-format.md): global units, multi-file structure, theme, page, element base, and the element types actually used. Use its headings to locate sections; avoid reading the complete chart catalog for a text/image page. Read advanced tables/charts/math only when needed. The format reference is syntax documentation, not a promise of lossless conversion.
 3. Codex directly writes `pptd/deck.pptd`, `pptd/pages/*.page`, and local assets under `pptd/media/`. Translate approved plans into concrete coordinates and elements; no additional approval artifact is required.
 4. Use `version: v2`, a shared theme, an explicit page size (normally `[960, 540]`), and relative page/media paths. Keep page filenames from the render jobs and put them in the approved order in the manifest. Author text and simple shapes as independent elements; for IMG reconstruction, follow the IMG guide's rules for inseparable diagram regions and raster labels. Use images for photos/illustrations and complex source visuals. Never use a full-page image as a substitute for an editable page.
-5. Use the approved screen copy (`on_screen` in v3) and data for text and labels. Keep stable element IDs, the deck palette and the requested language. The exporter places speaking and reference material in PowerPoint speaker notes. Keep media local and lay out around the final asset proportions.
+5. Preserve exact final Chinese copy and numbers, stable element IDs, and deck-level palette tokens. Batch image preparation before laying out around image proportions. All media must be local to the project for repeatable offline export; do not embed base64 images in the model's YAML output.
 6. Run `validate-pptd --run-dir output/<project>`. Repair invalid pages. This checks structure and local dependencies, not visual fidelity.
 
 ## Optional local editor

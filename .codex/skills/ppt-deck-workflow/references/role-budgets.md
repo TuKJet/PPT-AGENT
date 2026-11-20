@@ -7,7 +7,7 @@ Information density means useful relationships and evidence per page. Increasing
 `cover`
 
 - Single focal point.
-- A title-only cover can be brief. An opening that also serves as the overview needs room for the capabilities or results the audience came to hear.
+- One main title, one subtitle, and at most one supporting information block.
 - Avoid multiple parallel content cards.
 - Footer may be absent or visually quiet.
 
@@ -23,7 +23,7 @@ Information density means useful relationships and evidence per page. Increasing
 - Organize one main argument and its necessary evidence into a clear hierarchy.
 - Architecture, comparison and mechanism pages may contain several related groups.
 - Preserve required nodes, directed relationships, branch/merge points and feedback. Do not force a real nine-step flow into three generic boxes.
-- Match the composition to what the reader needs to see: a sequence in time, a comparison on common terms, or the connection between a capability and its outcome. Use a loop when returning to an earlier step matters.
+- For medium density, a useful starting point is one complete logic diagram plus compact annotations and a supporting result or comparison.
 - A footer is optional; do not manufacture tags or extra conclusions to fill a template.
 
 `timeline`
@@ -34,7 +34,11 @@ Information density means useful relationships and evidence per page. Increasing
 
 `summary`
 
-- Bring the findings together in a composition that shows how they relate. A separate closing line is useful when it adds an implication.
+- Prefer two columns or top-main/bottom-conclusion.
+- Max two major columns.
+- Right side may contain up to three steps.
+- Footer must be a thin summary strip, not a competing content block.
+- Avoid adding a second large conclusion paragraph.
 
 `ending`
 

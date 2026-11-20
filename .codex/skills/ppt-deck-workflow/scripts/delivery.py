@@ -226,10 +226,6 @@ def finalize_delivery(run_dir: Path, *, apply: bool = False, discard=(), retain=
         'verification': 'PPTX integrity, page count and local dependencies; visual review remains agent responsibility',
     }
     plans['_delivery'] = metadata
-    pptd_state = state.get('renderers', {}).get('pptd', {})
-    receipts = pptd_state.get('verified_objects', old.get('verified_objects', []))
-    if receipts:
-        metadata['verified_objects'] = receipts
     staged = root / '.workflow/delivery-plans.pending.json'
     staged.parent.mkdir(exist_ok=True)
     staged.write_text(json.dumps(plans, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

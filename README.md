@@ -42,12 +42,6 @@ PPTD 的生成说明和完整格式规范仅在选中该分支后读取。CLI �
 
 所有项目文件默认写入当前工作区的 `output/<project>/`。在本仓库内使用时会加载项目本地 Skill；在其他工作目录中新建 Codex 任务时，会使用安装到 `$CODEX_HOME/skills/ppt-deck-workflow` 的全局 Skill。
 
-季度更新可直接指定上一期的 PPTD 项目或原始 PowerPoint，例如“沿用集团模板，只把经营表和折线图的本季收入更新为 138”。PPTD 模板产出可继续编辑的源项目与 PPTX。原始 PowerPoint 模板产出保留母版、版式及无关部件的 PPTX。参见[模板字段更新](.codex/skills/ppt-deck-workflow/references/template-update.md)。
-
-数据页在逐页设计阶段记录读者需要比较的关系、选图理由和数据。PPTD 交付时，指定为原生的分类图表会核对内嵌 Excel 与图表缓存，指定为原生的表格会逐格核对。参见[数据选图说明](.codex/skills/ppt-deck-workflow/references/visualization-choice.md)。
-
-可以直接交代“给经营会现场拍板”或“给财务会前独立复算”。逐页预览会分别列出上屏原文、讲解和备查内容，后两项随 PPTX 写入演讲者备注。详见[逐页规划](.codex/skills/ppt-deck-workflow/references/slide-plans.md)和[修改已有页面](.codex/skills/ppt-deck-workflow/references/revision.md)。
-
 全局 Skill 维护也可以直接通过自然语言触发：
 
 ```text

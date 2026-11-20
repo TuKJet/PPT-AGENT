@@ -4,7 +4,7 @@ Create one new run under `output/<project>/`. Keep all artifacts in the same run
 
 1. Outline → preview → explicit chat approval.
 2. Contents → preview → explicit chat approval.
-3. Version-3 slide plans with per-page copy layers → preview → explicit chat approval. Existing version-2 plans remain readable.
+3. Version-2 slide plans → preview → explicit chat approval.
 4. User chooses IMG or PPTD. Recommend IMG by default unless editability is the priority.
 5. Load only the chosen branch guide. PPTD specifications must not be read before selection.
 6. IMG: imagegen full-slide sources → original image PPTX.

@@ -1,6 +1,6 @@
 ---
 name: ppt-deck-workflow
-description: Create staged IMG or editable PPTD decks, verify native data in PPTX, and update selected values in supplied PPTD or PowerPoint templates. Install and maintain the global Skill.
+description: Create PowerPoint decks with staged outline, content, and slide-plan approval, then IMG or editable PPTD sources and direct PPTX export. Also install, check, upgrade, or roll back the self-contained global Skill.
 ---
 
 # PPT Deck Workflow
@@ -24,7 +24,6 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 | After outline approval, before contents | [contents.md](references/contents.md) |
 | After contents approval, before slide plans | [slide-plans.md](references/slide-plans.md), [role-budgets.md](references/role-budgets.md) |
 | Revising an existing artifact | [revision.md](references/revision.md) |
-| Updating specific values in a supplied PPTD/PPTX template | [template-update.md](references/template-update.md) |
 | Only after user chooses IMG | [img.md](references/img.md) |
 | Only after user chooses PPTD | [pptd.md](references/pptd.md); follow its targeted format-reading instructions |
 | User requests editable PPTD from generated IMG | [pptd.md](references/pptd.md), [img-pptd.md](references/img-pptd.md) |
@@ -35,12 +34,12 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 
 ## Sequential Checkpoints
 
-For new decks: outline → contents → slide plans → renderer choice → render/export. For a fixed-deck update use the template revision route above.
+Keep this order: outline → contents → slide plans → renderer choice → render/export.
 
 1. `init --topic "..." --audience "..." --pages "..." --research "..."` creates a new `output/<project>/` run.
 2. Write `outline.json`, run `preview --run-dir output/<project> --artifact outline`, link the non-empty preview and stop for approval.
 3. After explicit approval, record `approve --artifact outline`. Read the contents contract, perform needed research, write `contents.json`, preview it, link the preview and stop.
-4. After explicit approval, record `approve --artifact contents`. Read the slide-plan contract, write version-3 `slide-plans.json`, preview it, link the preview and stop.
+4. After explicit approval, record `approve --artifact contents`. Read the slide-plan contract, write version-2 `slide-plans.json`, preview it, link the preview and stop.
 5. After explicit approval, record `approve --artifact slide_plans`. Offer exactly **IMG or PPTD** and wait for the user's choice.
 6. Record `choose-renderer --renderer img|pptd`, then read only that branch guide and follow it.
 
@@ -59,9 +58,9 @@ For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑
 - On resumption run `resume --run-dir ...`. Persist scoped requirements, sources and pending work with `checkpoint --file ...`; see [continuation.md](references/continuation.md). Compressed summaries do not replace these files.
 - Keep exactly one `outline.json`, `contents.json`, and `slide-plans.json`. Update these in place and show the helper's `.workflow/*-preview.md`; do not create parallel revision reports, planning summaries or HTML slide galleries. A chat explanation is enough.
 - One new deck, one new folder under `output/`. Never reuse a previous run as a workaround for a permission/init failure. Keep sources, media, intermediate artifacts, reviews, and outputs in this same run directory.
-- Start the outline with what the user wants the audience to understand, decide or do. Adjust evidence, register and density for that audience and for live, standalone or hybrid use.
-- New version-3 plans share one `deck_strategy` and `design_system`. Allocate screen copy, speaking points and reference material by page. Render approved screen copy and data. Existing version-2 plans remain readable.
-- Update the plan before regenerating. For small edits to an existing PPTD project, read its latest saved page first and preserve unrelated manual changes.
+- Audience understanding starts in the outline and carries through content, design system, and rendering. Leadership restraint means selective information, not a ban on color, images, diagrams, or polished visual design.
+- Slide plans use version 2, one `deck_strategy`, one `design_system`, and structured per-page plans. Keep visible copy exact and reference the shared palette. The slide-plan contract contains the schema; do not load renderer schemas to plan the deck.
+- Capture style changes in the plan before regenerating. Persist final-state copy, not revision history or rejected text. For small edits to an existing PPTD project, read its latest saved page first and preserve unrelated manual changes.
 - Use `prepare-render-jobs` after selection for page-local inputs. Jobs carry the shared design system; work incrementally rather than rereading the entire deck for every page.
 - For requested comparisons, keep both branches in the same run directory: `img/` and `pptd/`, with distinct exports.
 - `clean-render` removes derived outputs, never authored pages or media.
@@ -74,4 +73,4 @@ Read the maintenance reference only for install/status/check/upgrade/switch/roll
 
 Natural-language public/stable channel requests map to `update_global_skill.py switch public`; private/internal requests map to `switch pptd`. This changes update source, not renderer availability. Follow the maintenance reference for authentication and rollback. Never collect credentials; authentication failure leaves the installation unchanged. After a successful switch report channel/commit and end the turn so the new instructions load next turn.
 
-After installation, follow the README's mandatory global routing check. Global Agent instruction edits require permission.
+After installing, follow the README's mandatory global PowerPoint Skill routing check. Never silently modify global Agent instructions. This development task does not install or upgrade the user's global copy automatically.

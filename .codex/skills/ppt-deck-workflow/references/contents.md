@@ -11,8 +11,8 @@ Research may come from Codex-native research capability, not repository AI provi
 - Do not route research through `pipeline.py`, `html_pipeline/pipeline.py`, `AIClient`, or repository model tools.
 
 - Keep only information directly relevant to the slide title.
-- For a capability overview, express each claim as who does what and what usable result follows. Keep conditions that change its meaning when simplifying the language. Keep the scope of illustrations and evidence agreed in the outline.
-- Put genuinely parallel facts in a list. Express causes, tradeoffs and qualifications as connected statements. If a heading such as “边际收益显著” merely paraphrases the adjacent evidence, keep the comparison that earns it. Preserve architecture/process/comparison relationships and the assumptions behind estimates. Carry useful detail into the slide plan so the author can assign it to the screen, the speaker or reference material. There is no universal character quota.
+- Prefer conclusions, capability judgments, concrete facts, dates, metrics, and case outcomes.
+- Use compact bullets for prose pages; architecture/process/comparison pages retain actual nodes, relationships, alternatives and results. Do not force all material into a fixed bullet or character quota.
 - For a design claim, retain the chain from problem to design choice to mechanism to supported benefit. Map claims and metrics to named source sections in the canonical plan's `source_refs`; distinguish measured results from design expectations.
 - Translate source diagrams into explicit relationships: direction, branching, merge points, feedback and edge labels. Do not reduce a diagram to a list of nouns. Keep detail that explains the design; move implementation syntax into notes.
 - Do not output URLs, footnote numbers, source lists, or long citations inside slide copy.
