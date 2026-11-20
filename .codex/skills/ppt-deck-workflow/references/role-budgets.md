@@ -34,9 +34,7 @@ Information density means useful relationships and evidence per page. Increasing
 
 `summary`
 
-- Prefer two columns or top-main/bottom-conclusion.
-- Max two major columns.
-- Right side may contain up to three steps.
+- Give the conclusion visual priority. Choose the layout for the relationship between that conclusion and the supporting evidence.
 - Footer must be a thin summary strip, not a competing content block.
 - Avoid adding a second large conclusion paragraph.
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 from xml.etree import ElementTree as ET
 
-from test_workflow_helper import load_workflow_module, valid_slide_plans
+from test_workflow_helper import init_legacy_run, load_workflow_module, valid_slide_plans
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / ".codex/skills/ppt-deck-workflow/scripts"
@@ -197,7 +197,7 @@ class PPTDRuntimeTests(unittest.TestCase):
         workflow = load_workflow_module()
         with mock.patch.dict("os.environ", {"OUTPUT_DIR": str(self.root)}):
             shutil.rmtree(self.project)
-            workflow.init_state(self.root, topic="Test", audience="Team", pages="1", research="")
+            init_legacy_run(workflow, self.root, topic="Test", audience="Team", pages="1", research="")
             workflow.write_json(self.root / "slide-plans.json", valid_slide_plans())
             with self.assertRaises(RuntimeError):
                 workflow.cmd_choose_renderer(Namespace(run_dir=str(self.root), renderer="pptd"))

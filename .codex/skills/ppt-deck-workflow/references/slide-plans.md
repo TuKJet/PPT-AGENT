@@ -1,6 +1,6 @@
 ## Slide Plan Contract
 
-Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. Define the shared system before writing page plans so every page inherits the same visual language. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
+Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one deck-level `design_system`, and the page-local `slides`. For direct planning, derive the shared design system from the brief, supplied references and page content. On the sample route use the user's chosen treatment, palette or blend. Describe the chosen composition, palette and visual treatment concretely enough to apply them to a new page. Version 1 and a free-form string in `plan` are invalid even if the prose happens to mention color or layout.
 
 `deck_strategy` must record the stable audience interpretation used across the deck:
 
@@ -9,6 +9,9 @@ Create `slide-plans.json` version 2 with one deck-level `deck_strategy`, one dec
 - the first questions this audience is likely to ask
 - evidence order and detail-depth principles
 - presentation posture and desired confidence level
+- `page_rhythm`, a short list of numbered pages or ranges and what each contributes. Mark where the audience should pause on a key claim, where it needs dense evidence, and where a light transition helps it change questions. Use the mix the story needs. For example, a three-page technical review can use the opening choice, a dense comparison, and a closing decision without a standalone transition.
+
+Use the outline's audience and occasion to carry the argument across pages. In each page's `layout_structure`, begin with the relationship the reader needs to see, then choose a form that makes it legible. Cause and effect may use linked steps, time can use a timeline, hierarchy a tree, alternatives a common comparison axis or matrix, and feedback a return arrow to the step that changes. A single result may only need a number or an image. The page rhythm determines where to enlarge that result or give its evidence more space.
 
 `design_system` must define:
 
@@ -28,8 +31,8 @@ For each slide plan, specify:
 
 - Core message.
 - Page role.
-- Layout structure.
-- Required visible copy and numbers.
+- Layout structure derived from the page's relationships.
+- Exact visible copy, objects and numbers. In a live meeting reserve explanation for the speaker and supporting detail for reference. For a reading deck include the context needed to interpret the evidence. State each takeaway once.
 - Visual hierarchy.
 - Element types such as title, subtitle, card, metric, timeline, process, matrix, callout, chart, footer.
 - Style controls from the user: color, density, typography, visual motif, chart treatment, reference-image influence.
@@ -54,7 +57,8 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
     "decision_context": "...",
     "first_questions": ["..."],
     "evidence_order": ["..."],
-    "presentation_posture": "..."
+    "presentation_posture": "...",
+    "page_rhythm": ["P1 · Opening question and scope"]
   },
   "design_system": {
     "theme_name": "...",
@@ -94,6 +98,17 @@ Use these exact canonical keys. Do not rename them, place them only inside prose
 }
 ```
 
+For every source-backed line chart, bar chart or table, put its exact data in the corresponding `plan.data_regions` entry. Use the approved values, units and order. Bounds are fractions of the page in `[left, top, width, height]` order. For charts the first column lists categories and each remaining column is a numeric series. For tables all columns are displayed, including their headers. Use `null` for a missing measurement. Example:
+
+```json
+{"data_regions": [{
+  "id": "cost-per-case", "kind": "bar", "bounds": [0.1, 0.3, 0.8, 0.55],
+  "data": {"cols": ["方案", "每件成本（元）"], "rows": [["A", 130], ["B", 110]]}
+}]}
+```
+
+Choose `line`, `bar` or `table` to express the comparison. By default the IMG export draws the data. To defer a specific panel to the editable PPTD, set its optional `"img": "reserve"`. The approval preview shows the values; both renderers use the same entries. If the source lacks the figures, keep the claim qualitative or get the source table from the user.
+
 Before asking for slide-plan approval, run the helper preview. A validation error means the artifact is incomplete and must be repaired; never bypass the failure by manually converting only the fields that happened to be generated.
 
 The helper must translate this strict machine schema into a smaller human-readable approval projection. `slide-plans-preview.md` should show the audience/decision lens, visual system, core message, layout, hierarchy, visible elements, and page style using natural labels, a compact palette table, numbered sequences, and bullets. Keep renderer-internal audience controls and neutral constraints in the validated JSON instead of copying them into the approval body. Never copy JSON objects, quoted field names, braces, or fenced `json` blocks into the preview.
@@ -102,26 +117,4 @@ The audience decision made in the outline stage must carry forward into `slide-p
 
 Express audience fit through composition, emphasis, evidence density, ordering, and tone. Do not turn the slide plan into visible rhetoric about what the audience cares about unless the user explicitly requests that framing.
 
-### Final-State Revision Contract
-
-Apply this contract whenever an existing outline, content artifact, or slide plan receives a second or later user change.
-
-Treat the user's change request as a transient delta. The persisted artifact must describe only the desired final slide, not how it differs from an earlier version.
-
-- Rewrite affected fields instead of appending correction notes.
-- Keep accepted content and the new final geometry; discard superseded alternatives and rejected wording.
-- Make `required_elements` an allowlist of exact final visible copy and objects. A deleted object or string must not remain in this list.
-- Do not store revision verbs or tombstones such as `delete`, `remove`, `omit`, `do not show`, `must not appear`, `不要出现`, `删除`, `去掉`, or `不保留` when they refer to content from the previous version.
-- Do not quote the rejected literal inside a negative instruction. Mentioning a removed label again still gives it prompt attention and can cause it to reappear.
-- Express the destination positively and spatially. Bad: `delete the old card and do not show its label`. Good: `keep this interval as clean background space; join the remaining modules with one short connector`.
-- Keep generic safety and truthfulness constraints only when they remain useful without knowledge of the revision history, for example no invented metrics, no external brand logo, and exact required numbers.
-- If the user supplies an annotated screenshot, extract the accepted layout and final-state geometry into the plan. Do not transcribe cross marks, comments, rejected labels, or deletion instructions into the plan.
-
-Before generating `slide-plans-preview.md` or render jobs, audit the changed slide object:
-
-1. List the literals and objects the user rejected in working memory only.
-2. Search `material`, `core_message`, `layout_structure`, `visual_hierarchy`, `required_elements`, `style_controls`, `audience_controls`, and `renderer_neutral_constraints` for those literals.
-3. If a rejected literal survives only in a negated or historical sentence, remove that sentence and replace it with a positive final-state description.
-4. Confirm the preview contains no edit history and reads as if this were the first and only design specification.
-5. Prepare renderer jobs only from this clean artifact.
-
+Apply feedback to the intended element: put its final position, direction and appearance in layout or style, and only audience-facing wording in visible copy. For scoped changes follow [revision.md](revision.md).

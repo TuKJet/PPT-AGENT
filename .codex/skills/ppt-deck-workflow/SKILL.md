@@ -22,7 +22,8 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 | Resuming, switching models, or receiving corrections | [continuation.md](references/continuation.md) |
 | Before generating outline | [outline.md](references/outline.md) |
 | After outline approval, before contents | [contents.md](references/contents.md) |
-| After contents approval, before slide plans | [slide-plans.md](references/slide-plans.md), [role-budgets.md](references/role-budgets.md) |
+| Only if the user takes the sample route after contents approval | [style-samples.md](references/style-samples.md) |
+| When planning directly or after sample feedback | [slide-plans.md](references/slide-plans.md), [role-budgets.md](references/role-budgets.md) |
 | Revising an existing artifact | [revision.md](references/revision.md) |
 | Only after user chooses IMG | [img.md](references/img.md) |
 | Only after user chooses PPTD | [pptd.md](references/pptd.md); follow its targeted format-reading instructions |
@@ -34,24 +35,23 @@ Read only the current stage's reference. Do not pre-read downstream prompts, sch
 
 ## Sequential Checkpoints
 
-Keep this order: outline → contents → slide plans → renderer choice → render/export.
+Keep this order: outline → contents → planning mode → slide plans → renderer choice → render/export.
 
 1. `init --topic "..." --audience "..." --pages "..." --research "..."` creates a new `output/<project>/` run.
 2. Write `outline.json`, run `preview --run-dir output/<project> --artifact outline`, link the non-empty preview and stop for approval.
 3. After explicit approval, record `approve --artifact outline`. Read the contents contract, perform needed research, write `contents.json`, preview it, link the preview and stop.
-4. After explicit approval, record `approve --artifact contents`. Read the slide-plan contract, write version-2 `slide-plans.json`, preview it, link the preview and stop.
-5. After explicit approval, record `approve --artifact slide_plans`. Offer exactly **IMG or PPTD** and wait for the user's choice.
-6. Record `choose-renderer --renderer img|pptd`, then read only that branch guide and follow it.
+4. After `approve --artifact contents`, ask in ordinary chat: “你想直接看整套页面规划、边看边改，还是先看两页的四种风格样张找方向？” Honor a choice already given in the brief or approval. If the user has no clear preference or delegates the choice, use samples. Record it with `choose-plan-mode --mode direct|samples`.
+5. **Direct:** use the brief and any references to draft the complete slide plans immediately. **Samples:** read [style-samples.md](references/style-samples.md), show the four treatments of the same two pages and pause for a free-form choice or blend. On either path, preview the full `slide-plans.json`, invite natural-language edits and wait for approval.
+6. After explicit approval, record `approve --artifact slide_plans`. Offer exactly **IMG or PPTD** and wait for the user's choice.
+7. Record `choose-renderer --renderer img|pptd`, then read only that branch guide and follow it.
 
 Every helper command after init uses `--run-dir output/<project>`. Approval is an explicit chat response, not a file existing or a successful helper call. Do not research for or prepare downstream artifacts before the current checkpoint is approved, unless the user explicitly requested research before outlining. Fix validation errors before handing over a preview.
 
 Renderer choice wording: **IMG：整页图片，视觉表现优先；PPTD：文字、数据和适合重建的元素可编辑，直接导出 PPTX。** Default recommendation: IMG, unless editability is the user's priority. HTML and standalone SVG are no longer renderer options. Do not ask a render-review preference.
 
-PPTD selection leads to direct CLI PPTX export. Do not start an interactive editor, use Computer Use, request folder selection, or ask the user to export. Background rendering for agent QA is automatic. Open the optional editor only when the user explicitly asks to edit there.
+PPTD exports directly via CLI with background visual QA. Open the browser editor only when the user requests interactive editing.
 
-After IMG export, offer optional editable PPTD reconstruction alongside SVG. Continue only when requested; a prior explicit request for both is sufficient. Record `choose-renderer --renderer pptd --source img`, then prepare jobs. Preserve the original pixels in the IMG PPTX; final cleanup may remove verified duplicate sources. This derivative does not restart outline/content approval. Direct PPTD uses `--source plans` (the default).
-
-For IMG → PPTD, “可编辑”, “转 PPTD” or “参考图片做可编辑 PPT” selects **hybrid reconstruction** by default: editable titles/body/key data plus independent source-image crops for complex visuals. Preserve the source's visual quality; rebuild simple geometry only when faithful. Full native reconstruction requires an explicit request such as “全部原生” or “图内每个节点和连线都要能改”; “不用 SVG” alone does not imply it. State the hybrid approach and proceed without another choice gate. Apply any explicit native requirement only to its requested scope. See [img-pptd.md](references/img-pptd.md) after this derivative is selected.
+After IMG export, offer optional SVG or editable PPTD reconstruction. For a requested PPTD derivative run `choose-renderer --renderer pptd --source img`, prepare jobs and read [img-pptd.md](references/img-pptd.md). The default hybrid approach keeps text and key data editable and preserves complex artwork as independent crops. Honor explicit native reconstruction requests at their stated scope. Direct PPTD uses `--source plans`.
 
 ## Shared Invariants
 

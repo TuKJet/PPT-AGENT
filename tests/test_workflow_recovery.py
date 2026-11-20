@@ -8,6 +8,8 @@ import unittest
 from argparse import Namespace
 from pathlib import Path
 
+from tests.test_workflow_helper import init_legacy_run
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,7 +42,7 @@ class WorkflowRecoveryTests(unittest.TestCase):
         self.previous_output = os.environ.get("OUTPUT_DIR")
         os.environ["OUTPUT_DIR"] = str(self.output_root)
         self.run = self.output_root / "deck"
-        self.w.init_state(self.run, topic="Test", audience="management", pages="1", research="")
+        init_legacy_run(self.w, self.run, topic="Test", audience="management", pages="1", research="")
         self.w.write_json(self.run / "slide-plans.json", plans(self.w))
         self.preview = self.w.preview_artifact(self.run, "slide_plans")
         self.w.write_json(self.run / ".workflow/task-brief.json", {

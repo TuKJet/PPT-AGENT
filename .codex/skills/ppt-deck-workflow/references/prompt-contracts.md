@@ -4,7 +4,9 @@ Read only the contract for the current approved stage, not this whole directory.
 
 - Outline: [outline.md](outline.md).
 - Contents, after outline approval: [contents.md](contents.md).
-- Slide plans, after contents approval: [slide-plans.md](slide-plans.md) and [role-budgets.md](role-budgets.md).
+- Planning mode, after contents approval: ask whether to draft directly or compare visual samples. Record `choose-plan-mode --mode direct|samples`; default to `samples` when the user delegates or expresses no preference.
+- Style samples, only in samples mode: [style-samples.md](style-samples.md).
+- Full slide plans, after direct planning or after the user describes a sample preference: [slide-plans.md](slide-plans.md) and [role-budgets.md](role-budgets.md).
 - Revisions: [revision.md](revision.md).
 - IMG, only after selection: [img.md](img.md).
 - PPTD, only after selection: [pptd.md](pptd.md); that guide routes to the format specification as needed.

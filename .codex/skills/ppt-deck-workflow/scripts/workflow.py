@@ -39,6 +39,9 @@ if str(SKILL_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT / "scripts"))
 from embed_img_crops import validate_crop_entries, _validated_box
 from filename_utils import safe_filename_part, slide_filename
+from data_regions import apply_pptd as apply_pptd_data_regions
+from data_regions import materialize_images as materialize_data_images
+from data_regions import validate as validate_data_regions
 
 STATE_FILE = "workflow-state.json"
 ARTIFACT_FILES = {
@@ -171,6 +174,9 @@ def default_state() -> dict[str, Any]:
         },
         "renderers": {},
         "execution": "codex-skill",
+        "plan_mode": "legacy",
+        "style_samples": {"status": "not_started", "styles": [], "created_at": None},
+        "design_choice": None,
     }
 
 
@@ -244,6 +250,8 @@ def write_json(path: Path, data: Any) -> Path:
 def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
     merged = default_state()
     merged.update(state or {})
+    if merged.pop("style_gate_required", False) and "plan_mode" not in (state or {}):
+        merged["plan_mode"] = "samples"
     merged["approvals"] = dict(merged.get("approvals") or {})
     artifacts = dict(merged.get("artifacts") or {})
     renderers = merged.get("renderers")
@@ -342,9 +350,84 @@ def init_state(run_dir: Path, *, topic: str, audience: str, pages: str, research
             "status": "not_applicable",
         },
         "renderers": state.get("renderers") or {},
+        "plan_mode": None,
     })
     save_state(run_dir, state)
     return state
+
+
+def planning_action(state: dict[str, Any]) -> str | None:
+    mode = state["plan_mode"]
+    if mode is None:
+        return "ask-how-to-plan-slides"
+    if mode == "samples":
+        if state["style_samples"]["status"] != "ready":
+            return "generate-and-record-four-style-samples"
+        if not state.get("design_choice"):
+            return "ask-user-for-style-preference"
+    return None
+
+
+def cmd_choose_plan_mode(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    require_approved(run_dir, "contents")
+    state = load_state(run_dir)
+    if state["plan_mode"] != args.mode:
+        state["plan_mode"] = args.mode
+        state["design_choice"] = None
+        state["style_samples"] = {"status": "not_started", "styles": []}
+        _invalidate_slide_plans(state)
+        state["status"] = "planning_mode_chosen"
+        save_state(run_dir, state)
+    print(f"plan_mode={args.mode}", flush=True)
+    next_step = 'resume' if state['approvals'].get('slide_plans') else 'write-and-preview-slide-plans'
+    print(f"next={planning_action(state) or next_step}", flush=True)
+
+
+def cmd_record_style_samples(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    state = load_state(run_dir)
+    require_approved(run_dir, "contents")
+    if state["plan_mode"] != "samples":
+        raise RuntimeError("choose-plan-mode --mode samples before recording style samples")
+    from style_comparison import prepare
+    styles = read_json(Path(args.file)).get("styles")
+    comparisons = prepare(run_dir, styles, len(read_json(run_dir / "contents.json")))
+    state["style_samples"] = {"status": "ready", "styles": styles, "comparisons": comparisons}
+    state["design_choice"] = None
+    _invalidate_slide_plans(state)
+    state["status"] = "style_samples_ready"
+    save_state(run_dir, state)
+    for path in comparisons:
+        print(f"show_image={path}", flush=True)
+    print("next=ask-user-for-style-preference", flush=True)
+
+
+def cmd_choose_style(args: argparse.Namespace) -> None:
+    run_dir = normalize_run_dir(args.run_dir)
+    state = load_state(run_dir)
+    require_approved(run_dir, "contents")
+    if (state.get("style_samples") or {}).get("status") != "ready":
+        raise RuntimeError("record four style samples before choosing a design direction")
+    preference = str(args.preference or "").strip()
+    if not preference:
+        raise ValueError("style preference must be a free-form description")
+    if (state.get("design_choice") or {}).get("preference") != preference:
+        _invalidate_slide_plans(state)
+    state["design_choice"] = {"preference": preference, "chosen_at": utc_now()}
+    state["status"] = "style_chosen"
+    save_state(run_dir, state)
+    print("design_choice=recorded", flush=True)
+    print("next=write-and-preview-slide-plans", flush=True)
+
+
+def _invalidate_slide_plans(state: dict[str, Any]) -> None:
+    """Require a fresh preview/approval when visual direction changes."""
+    if "slide_plans" in state.get("approvals", {}):
+        state["approvals"]["slide_plans"] = False
+    entry = state.get("artifacts", {}).get("slide_plans")
+    if isinstance(entry, dict):
+        entry["status"] = "stale"
 
 
 def ensure_render_ready(run_dir: Path, renderer: str) -> None:
@@ -370,6 +453,8 @@ def mark_artifact(run_dir: Path, state: dict[str, Any], name: str, path: Path, p
         "updated_at": utc_now(),
     }
     if not unchanged:
+        if name in ("outline", "contents") and not state.get("design_choice"):
+            state["style_samples"] = {"status": "not_started", "styles": []}
         state.setdefault("approvals", {})[name] = False
         for dependent in ARTIFACT_DEPENDENCIES.get(name, ()):
             state.setdefault("approvals", {})[dependent] = False
@@ -637,6 +722,7 @@ def validate_slide_plans(data: dict[str, Any]) -> None:
         for field in ("style_controls", "audience_controls"):
             if not isinstance(plan[field], dict):
                 raise ValueError(f"{slide_path}.plan.{field} must be an object")
+        validate_data_regions(plan.get("data_regions", []), f"{slide_path}.plan.data_regions")
         palette_tokens = plan["palette_tokens"]
         unknown_tokens = sorted(set(palette_tokens) - set(palette))
         if unknown_tokens:
@@ -689,10 +775,14 @@ def _append_deck_strategy_preview(lines: list[str], strategy: dict[str, Any]) ->
     _append_numbered_preview_list(lines, strategy["first_questions"])
     lines.extend(["", "### 证据展开顺序", ""])
     _append_numbered_preview_list(lines, strategy["evidence_order"])
+    rhythm = strategy.get("page_rhythm")
+    if rhythm:
+        lines.extend(["", "### 全稿页面节奏", ""])
+        _append_bulleted_preview_list(lines, rhythm if isinstance(rhythm, list) else [rhythm])
     extras = {
         key: value
         for key, value in strategy.items()
-        if key not in REQUIRED_DECK_STRATEGY_FIELDS
+        if key not in REQUIRED_DECK_STRATEGY_FIELDS and key != "page_rhythm"
     }
     if extras:
         lines.extend(["", "### 其他叙事约束", ""])
@@ -763,6 +853,13 @@ def _append_slide_plan_details(
     _append_numbered_preview_list(lines, plan["visual_hierarchy"])
     lines.extend(["", "### 页面元素", ""])
     _append_bulleted_preview_list(lines, plan["required_elements"])
+    for region in plan.get("data_regions", []):
+        label = {"line": "折线图", "bar": "柱状图", "table": "表格"}[region["kind"]]
+        data = region["data"]
+        lines.extend(["", f"### {label}数据", ""])
+        for row in [data["cols"], ["---"] * len(data["cols"]), *data["rows"]]:
+            cells = [str(value).replace("|", "\\|").replace("\n", "<br>") if value is not None else "—" for value in row]
+            lines.append("| " + " | ".join(cells) + " |")
     lines.extend(["", "### 本页配色", ""])
     colors = [
         f"{PALETTE_LABELS.get(token, _preview_label(token))} `{palette[token]}`"
@@ -960,6 +1057,9 @@ def prepare_render_jobs(run_dir: Path, renderer: str) -> Path:
         }
         if references:
             payload["image_reference"] = references[idx - 1]
+            raw = run_dir / ".workflow/img-source" / Path(references[idx - 1]["source_image_path"]).name
+            if job["plan"].get("data_regions") and raw.is_file():
+                payload["artwork_before_data"] = str(raw)
             payload["reconstruction_policy"] = shared_context["reconstruction_policy"]
             payload["reconstruction_guide_path"] = str(SKILL_ROOT / "references" / "img-pptd.md")
         write_json(job_path, payload)
@@ -1471,8 +1571,10 @@ def validate_pptd_project(run_dir: Path) -> dict[str, Any]:
             payload = read_json(jobs_root / f"slide-{int(job['index']):02d}.json")
             if payload.get("image_reference") != reference:
                 raise ValueError("IMG reference changed; prepare jobs and review/rebuild affected PPTD pages before export")
+    plan = slide_plan_document(run_dir)
+    apply_pptd_data_regions(run_dir, plan)
     from pptd_runtime import validate_project
-    return validate_project(run_dir / "pptd", expected_pages=len(slide_jobs(run_dir)))
+    return validate_project(run_dir / "pptd", expected_pages=len(plan["slides"]))
 
 
 def export_pptd(run_dir: Path) -> Path:
@@ -1559,6 +1661,7 @@ def export_img(run_dir: Path) -> Path:
     from pptx.util import Inches
 
     images = require_complete_img_sources(run_dir)
+    materialize_data_images(run_dir, images, slide_plan_document(run_dir))
 
     prs = Presentation()
     prs.slide_width = Inches(13.33)
@@ -1749,7 +1852,10 @@ def cmd_resume(args: argparse.Namespace) -> None:
         for name, artifact in entry.get('artifacts', {}).items():
             if artifact.get('status') == 'completed' and not Path(artifact.get('path', '')).exists():
                 output_missing.append(f'{renderer}.{name}')
-    if pending:
+    planning = planning_action(state)
+    if planning and pending in {None, "slide_plans"}:
+        next_action = planning
+    elif pending:
         next_action = f"{'author' if artifact_status[pending] == 'missing' else 'preview/review'} {pending}"
     elif not active:
         next_action = 'choose-renderer'
@@ -1763,14 +1869,29 @@ def cmd_resume(args: argparse.Namespace) -> None:
     print(json.dumps({"run_dir": str(run_dir), "state": effective_state,
                       'recorded_state': state.get('status'), 'approvals': artifact_status, 'missing_outputs': output_missing,
                       "renderer": state.get("renderer"),
+                      "plan_mode": state["plan_mode"],
+                      "style_samples": state.get("style_samples"),
+                      "design_choice": state.get("design_choice"),
                       "source": (state.get("renderers", {}).get(state.get("renderer"), {}) or {}).get("source"),
                       "brief": brief, "previews": {name: str(run_dir / PREVIEW_FILES[name]) for name in ARTIFACT_FILES},
                       "stale_jobs": stale_jobs, "next_action": next_action}, ensure_ascii=False), flush=True)
 
 
+def require_plan_direction(run_dir: Path) -> None:
+    state = load_state(run_dir)
+    if state["plan_mode"] == "legacy":
+        return
+    require_approved(run_dir, "contents")
+    action = planning_action(state)
+    if action:
+        raise RuntimeError(f"Full slide planning is waiting for {action}")
+
+
 def cmd_save_artifact(args: argparse.Namespace) -> None:
     run_dir = normalize_run_dir(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
+    if args.artifact == "slide_plans":
+        require_plan_direction(run_dir)
     source = Path(args.file)
     data = read_json(source)
     target = write_json(run_dir / ARTIFACT_FILES[args.artifact], data)
@@ -1780,7 +1901,10 @@ def cmd_save_artifact(args: argparse.Namespace) -> None:
 
 
 def cmd_preview(args: argparse.Namespace) -> None:
-    preview = preview_artifact(normalize_run_dir(args.run_dir), args.artifact)
+    run_dir = normalize_run_dir(args.run_dir)
+    if args.artifact == "slide_plans":
+        require_plan_direction(run_dir)
+    preview = preview_artifact(run_dir, args.artifact)
     print(f"preview={preview}", flush=True)
 
 
@@ -1790,8 +1914,11 @@ def cmd_approve(args: argparse.Namespace) -> None:
     if args.artifact not in state.get("artifacts", {}):
         raise ValueError(f"unknown artifact: {args.artifact}")
     if args.artifact == "slide_plans":
+        require_plan_direction(run_dir)
         slide_plan_document(run_dir)
     artifact_entry = state["artifacts"][args.artifact]
+    if artifact_entry.get("status") == "stale":
+        raise RuntimeError("regenerate preview before approval")
     artifact_path = Path(artifact_entry["path"])
     preview_path = Path(artifact_entry["preview_path"])
     if not artifact_path.is_file() or not preview_path.is_file():
@@ -1805,6 +1932,8 @@ def cmd_approve(args: argparse.Namespace) -> None:
     state["status"] = f"{args.artifact}_approved"
     save_state(run_dir, state)
     print(f"approved={args.artifact}", flush=True)
+    if args.artifact == "contents":
+        print(f"next={planning_action(state) or 'write-and-preview-slide-plans'}", flush=True)
     if args.artifact == "slide_plans" and not state.get("renderer"):
         print("next=choose-renderer", flush=True)
         print("recommended_renderer=img", flush=True)
@@ -2011,6 +2140,25 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--run-dir", required=True)
     approve.add_argument("--artifact", choices=sorted(ARTIFACT_FILES), required=True)
     approve.set_defaults(func=cmd_approve)
+
+    plan_mode = sub.add_parser("choose-plan-mode", help="plan directly or explore sample images first")
+    plan_mode.add_argument("--run-dir", required=True)
+    plan_mode.add_argument("--mode", choices=("direct", "samples"), default="samples")
+    plan_mode.set_defaults(func=cmd_choose_plan_mode)
+
+    style_samples = sub.add_parser("record-style-samples",
+                                   help="record four two-page imagegen alternatives before full slide plans")
+    style_samples.add_argument("--run-dir", required=True)
+    style_samples.add_argument("--file", required=True,
+                               help="JSON containing four styles, each with page numbers, short plans and generated image paths")
+    style_samples.set_defaults(func=cmd_record_style_samples)
+
+    choose_style = sub.add_parser("choose-style",
+                                  help="record the user's free-form visual direction or blend")
+    choose_style.add_argument("--run-dir", required=True)
+    choose_style.add_argument("--preference", required=True,
+                              help="free-form description, including blends or screenshot references")
+    choose_style.set_defaults(func=cmd_choose_style)
 
     choose = sub.add_parser("choose-renderer")
     choose.add_argument("--run-dir", required=True)

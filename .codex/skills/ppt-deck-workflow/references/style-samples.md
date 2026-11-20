@@ -1,0 +1,23 @@
+# Compare visual directions
+
+Use this stage after `choose-plan-mode --mode samples`. Pick two pages whose different jobs reveal how a style handles this deck, for example a mechanism and a decision or a comparison and its interpretation. A one-page deck uses its actual page. Keep their message, data and relationships consistent across the four directions.
+
+First write a short slide plan for each sample. Identify its focal point, how the reader sees the relationship, the on-screen words and the role of the colors. Then use the imagegen skill to render each plan as an individual 16:9 IMG. For quantitative pages reserve the data rectangle on the artwork and supply the approved rows via optional page-level `data_regions`, using the same shape as the full plan. The comparison helper composites those exact values. A panel awaiting source data may stay empty.
+
+Order the four directions by increasing AIGC presence. A is a formal briefing on white, with a deep navy title accent, quiet dividers, clean typography and legible diagram lines. Derive B, C and D independently from the subject and the user's brief. Give them distinct palettes and compositions. Illustration or dimensional imagery can depict the actual product, process or setting when it clarifies the point. Keep the palette and treatment consistent between the two pages of each option.
+
+Save the sample plans and their IMG paths under `.workflow/style-samples/`. Use an entry like the one below for **each** direction in the manifest's `styles` list. For data regions, pass optional `palette_tokens` such as `primary`, `accent` and `surface`.
+
+```json
+{
+  "id": "A", "palette": "white and navy", "treatment": "formal briefing",
+  "pages": [
+    {"page": 2, "plan": "Two alternatives share one comparison axis; mark the allowable limit.", "path": ".workflow/style-samples/A-02.png"},
+    {"page": 4, "plan": "One decision above a short row of supporting evidence.", "path": ".workflow/style-samples/A-04.png"}
+  ]
+}
+```
+
+1. Run `record-style-samples --run-dir <run> --file <manifest.json>`. Display **each** returned `show_image` inline so the user sees all four treatments of each page. The original images are available for a closer look.
+2. Stop in ordinary chat and invite a description or annotated screenshot. For example, “哪种构图和配色最适合这次汇报？可以直接圈图，也可以混搭。” Wait for the reply. If the user requests another variation, show the revised sample and continue the discussion.
+3. Once the user settles on a direction, record it with `choose-style --run-dir <run> --preference "<their direction>"`. Translate the chosen details or blend into the full plan's `design_system`. The main renderer choice follows full plan approval.

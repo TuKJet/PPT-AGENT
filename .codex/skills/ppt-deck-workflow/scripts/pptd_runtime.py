@@ -52,7 +52,7 @@ def walk(value):
             yield from walk(child)
 
 
-def validate_project(root: Path, expected_pages: int | None = None) -> dict:
+def load_manifest(root: Path, expected_pages: int | None = None):
     root = root.resolve()
     manifests = list(root.glob("*.pptd"))
     if len(manifests) != 1:
@@ -71,6 +71,11 @@ def validate_project(root: Path, expected_pages: int | None = None) -> dict:
     size = manifest.get("size", [960, 540])
     if not isinstance(size, list) or len(size) != 2 or any(not finite_number(v) or v <= 0 for v in size):
         raise ValueError("PPTD size must contain two positive finite numbers")
+    return manifest_path, manifest, pages, size
+
+
+def validate_project(root: Path, expected_pages: int | None = None) -> dict:
+    manifest_path, manifest, pages, size = load_manifest(root, expected_pages)
     media = set()
     counts = {}
     warnings = []
@@ -197,6 +202,9 @@ def export_project(root: Path, output: Path) -> dict:
         )
         if result.returncode:
             raise RuntimeError(f"PPTD export failed:\n{result.stdout}\n{result.stderr}")
+        if report["element_counts"].get("chart"):
+            from embed_chart_workbooks import embed_chart_workbooks
+            embed_chart_workbooks(staged)
         with zipfile.ZipFile(staged) as archive:
             if archive.testzip() is not None:
                 raise RuntimeError("PPTX ZIP integrity check failed")

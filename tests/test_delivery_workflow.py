@@ -82,6 +82,7 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         })
         self._approve("outline", {"pages": [{"title": "Forward test", "page_role": "content"}]})
         self._approve("contents", {"Forward test": "One source page"})
+        self._record_style_checkpoint()
         self._approve("slide_plans", slide_plan())
 
     def tearDown(self):
@@ -95,6 +96,28 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         self.w.write_json(self.run / self.w.ARTIFACT_FILES[artifact], value)
         self.w.preview_artifact(self.run, artifact)
         self.w.cmd_approve(Namespace(run_dir=str(self.run), artifact=artifact))
+
+    def _record_style_checkpoint(self):
+        self.w.cmd_choose_plan_mode(Namespace(run_dir=str(self.run), mode="samples"))
+        styles = []
+        for offset in range(4):
+            image_path = self.run / ".workflow/style-samples" / f"style-{offset + 1}.png"
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (320, 180), (30 + offset * 30, 40, 120)).save(image_path)
+            styles.append({"id": chr(65 + offset), "pages": [{
+                "page": 1, "path": str(image_path), "plan": "single representative page"
+            }]})
+        record_path = self.run / ".workflow/style-samples/manifest.json"
+        self.w.write_json(record_path, {"source": "imagegen", "styles": styles})
+        self.w.cmd_record_style_samples(Namespace(run_dir=str(self.run), file=str(record_path)))
+        self.w.cmd_choose_style(Namespace(run_dir=str(self.run), preference="formal white and navy"))
+
+    def _cli(self, name: str, *options: str) -> str:
+        args = self.w.build_parser().parse_args([name, "--run-dir", str(self.run), *options])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            args.func(args)
+        return output.getvalue()
 
     def test_img_to_pptd_cli_delivery_resume_and_restore(self):
         # Generate one local source image and the actual IMG PPTX.
@@ -163,6 +186,19 @@ class DeliveryWorkflowForwardTests(unittest.TestCase):
         job = self.w.read_json(self.run / 'render-jobs/pptd/slide-01.json')
         self.assertEqual(job['source'], 'img')
         self.assertIn('Do not start the interactive editor', job['task_brief']['constraints'])
+
+    def test_legacy_approved_run_does_not_roll_back_into_plan_mode_checkpoint(self):
+        state = self.w.load_state(self.run)
+        state.pop("plan_mode", None)
+        self.w.save_state(self.run, state)
+        resumed = json.loads(self._cli("resume"))
+        self.assertNotEqual(resumed["next_action"], "ask-how-to-plan-slides")
+        self._cli("choose-plan-mode", "--mode", "direct")
+        first = self.w.load_state(self.run)
+        self._cli("choose-plan-mode", "--mode", "direct")
+        second = self.w.load_state(self.run)
+        self.assertEqual(first.get("plan_mode"), "direct")
+        self.assertEqual(second.get("plan_mode"), "direct")
 
 
 if __name__ == "__main__":

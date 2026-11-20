@@ -28,12 +28,17 @@ This branch is skill-first. Codex generates deck content inside the Codex conver
 正常流程是：
 
 ```text
-大纲预览 → 用户批准 → 内容预览 → 用户批准 → 页面规划预览 → 用户批准
+大纲预览 → 用户批准 → 内容预览 → 用户批准 → 选择如何设计页面
+  ├─ 直接规划：先看完整页面规划，用自然语言调整
+  └─ 先看样张（默认）：同两页 × 四种风格 → 描述偏好或混搭 → 完整页面规划
+         → 用户批准页面规划
          → 选择 IMG / PPTD → 按需加载分支规范 → 生成并导出 PPTX
          → PPTD 默认直接 CLI 导出；用户明确要求时才打开本地编辑器
 ```
 
-在每个预览阶段回复 `批准` 即可继续，也可以直接提出修改，例如“合并第 3、4 页并压缩到 5 页”。渲染方式的常见选择：
+已有明确想法时，可以直接说“先出整套规划，我边看边改”。想先找方向，或愿意让 Codex 决定时，默认用两页有代表性的内容做风格对比。第一套是白底深蓝的正式汇报，其余三套按内容逐步增加设计表现。可以说“用第二套的线稿、第三套的配色”，也可以发截图圈出想保留的细节。
+
+在大纲、内容和完整页面规划预览阶段回复 `批准` 即可继续，也可以直接提出修改，例如“合并第 3、4 页并压缩到 5 页”。渲染方式的常见选择：
 
 - `IMG`（默认推荐）：生成视觉完成度更高的整页图片；原始 IMG PPTX 导出后，Skill 会再单独询问是否生成 SVG 版本。
 - `PPTD`：模型直接生成可编辑页面文件并通过 CLI 导出 PPTX；用户明确要求交互式调整时才启动本地网页编辑器。
@@ -364,6 +369,13 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact outline
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact contents
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
+# After contents approval, ask whether to plan directly or compare visual samples.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-plan-mode --run-dir output/... --mode samples
+# In direct mode, draft and iterate slide plans in chat, then preview them.
+# In samples mode, generate the four style directions and show the actual IMG samples.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py record-style-samples --run-dir output/... --file output/.../.workflow/style-samples/manifest.json
+# Continue only after the user describes their preference.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-style --run-dir output/... --preference "..."
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img

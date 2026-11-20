@@ -24,6 +24,13 @@ def load_workflow_module():
     return module
 
 
+def init_legacy_run(workflow, run_dir, **kwargs):
+    """Renderer-only fixtures represent runs authored before the style checkpoint."""
+    state = workflow.init_state(run_dir, **kwargs)
+    state.pop("plan_mode")
+    workflow.write_json(run_dir / workflow.STATE_FILE, state)
+
+
 def valid_slide_plans(*slides: tuple[str, str, str]) -> dict:
     slide_items = slides or (("Opening", "Alpha", "cover"),)
     return {
@@ -92,7 +99,7 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         self.previous_output_dir = os.environ.get("OUTPUT_DIR")
         os.environ["OUTPUT_DIR"] = str(self.output_root)
         self.run_dir = self.output_root / "review-flow"
-        self.workflow.init_state(
+        init_legacy_run(self.workflow,
             self.run_dir,
             topic="Test Topic",
             audience="Test Audience",
@@ -135,10 +142,13 @@ class WorkflowHelperReviewFlowTests(unittest.TestCase):
         self.assertEqual(shared["reconstruction_policy"], policy)
         self.assertEqual(source.read_bytes(), original)
         self.assertIn("img", self.workflow.load_state(self.run_dir)["renderers"])
-        import pptd_runtime
-        with mock.patch.object(pptd_runtime, "validate_project", return_value={}) as validate:
-            self.workflow.validate_pptd_project(self.run_dir)
-            validate.assert_called_once()
+        project = self.run_dir / "pptd"
+        self.workflow.write_json(project / "deck.pptd", {"version": "v2", "pages": ["pages/01.page"]})
+        self.workflow.write_json(project / "pages/01.page", {"elements": [{
+            "elementId": "title", "elementType": "text", "bounds": [5, 5, 300, 40],
+            "content": {"text": "Intro"},
+        }]})
+        self.assertEqual(self.workflow.validate_pptd_project(self.run_dir)["pages"], ["pages/01.page"])
         Image.new("RGB", (1600, 900), "red").save(source)
         with self.assertRaisesRegex(ValueError, "reference changed"):
             self.workflow.validate_pptd_project(self.run_dir)
@@ -271,7 +281,7 @@ class WorkflowHelperMultiRendererStateTests(unittest.TestCase):
         self.previous_output_dir = os.environ.get("OUTPUT_DIR")
         os.environ["OUTPUT_DIR"] = str(self.output_root)
         self.run_dir = self.output_root / "multi-render"
-        self.workflow.init_state(
+        init_legacy_run(self.workflow,
             self.run_dir,
             topic="Compare Topic",
             audience="Test Audience",
@@ -309,7 +319,7 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.previous_output_dir = os.environ.get("OUTPUT_DIR")
         os.environ["OUTPUT_DIR"] = str(self.output_root)
         self.run_dir = self.output_root / "render-jobs"
-        self.workflow.init_state(
+        init_legacy_run(self.workflow,
             self.run_dir,
             topic="Subagent Topic",
             audience="Management",
@@ -355,10 +365,16 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
         self.assertEqual(Path(slide_job["shared_context_path"]).resolve(), (jobs_root / "shared-context.json").resolve())
 
     def test_slide_plan_preview_exposes_deck_strategy_and_design_system(self) -> None:
-        preview = (self.run_dir / self.workflow.PREVIEW_FILES["slide_plans"]).read_text(encoding="utf-8")
+        plans = self.workflow.read_json(self.run_dir / "slide-plans.json")
+        plans["deck_strategy"]["page_rhythm"] = ["P1 · 重点页，先给出判断", "P2 · 两方案共用一张对比表"]
+        path = self.run_dir / self.workflow.PREVIEW_FILES["slide_plans"]
+        self.workflow.write_plans_preview(plans, path)
+        preview = path.read_text(encoding="utf-8")
 
         self.assertIn("# 幻灯片规划预览", preview)
         self.assertIn("## 全局叙事策略", preview)
+        self.assertIn("### 全稿页面节奏", preview)
+        self.assertIn("- P2 · 两方案共用一张对比表", preview)
         self.assertIn("## 全局设计规范", preview)
         self.assertIn("Confident Blue", preview)
         self.assertIn("#1358A8", preview)
@@ -376,7 +392,7 @@ class WorkflowHelperRenderJobsTests(unittest.TestCase):
 
     def test_fresh_one_page_slide_plan_smoke_flow_is_human_readable(self) -> None:
         smoke_run = self.output_root / "fresh-one-page-preview-smoke"
-        self.workflow.init_state(
+        init_legacy_run(self.workflow,
             smoke_run,
             topic="客服知识库稳定运营价值",
             audience="业务负责人",
@@ -491,7 +507,7 @@ class WorkflowHelperImgSvgFlowTests(unittest.TestCase):
         self.previous_output_dir = os.environ.get("OUTPUT_DIR")
         os.environ["OUTPUT_DIR"] = str(self.output_root)
         self.run_dir = self.output_root / "img-svg-flow"
-        self.workflow.init_state(
+        init_legacy_run(self.workflow,
             self.run_dir,
             topic="IMG SVG Topic",
             audience="Management",

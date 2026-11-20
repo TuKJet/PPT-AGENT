@@ -2,6 +2,8 @@
 
 Run `workflow.py resume --run-dir <run>` at the start of a continued task, after context compaction or a model change, and before delegating pages. Read the current canonical artifact and only the selected stage/renderer guide. Do not replay completed stages or reselect an already chosen renderer just because conversation context is shorter.
 
+For a run initialized with the current workflow, `resume` reports `ask-how-to-plan-slides` after contents approval until the user chooses a mode. Record it with `choose-plan-mode --mode direct|samples`. In `samples` mode, four two-page (or one-page for a one-page deck) style samples are recorded and the user's free-form preference is captured with `choose-style --preference` before full slide plans. Re-recording samples clears the previous choice and marks any existing slide-plan approval stale. In `direct` mode, draft and revise the slide plans in chat, then preview and approve them. Runs created before this checkpoint remain compatible and continue from their recorded state.
+
 Maintain one compact `.workflow/task-brief.json` through `checkpoint --run-dir <run> --file <file>`. The input can be that same file; no extra report is needed. Supported fields:
 
 ```json

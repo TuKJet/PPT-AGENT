@@ -217,6 +217,13 @@ uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --r
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact outline
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact contents
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact contents
+# Ask whether to plan directly or show samples. For direct planning, record --mode direct
+# and go straight to drafting the full slide plans. The example follows the sample route.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-plan-mode --run-dir output/... --mode samples
+# Generate the two representative pages in each of the four directions, then show them.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py record-style-samples --run-dir output/... --file output/.../.workflow/style-samples/manifest.json
+# Continue only after the user describes their preference.
+uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-style --run-dir output/... --preference "..."
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py preview --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py approve --run-dir output/... --artifact slide_plans
 uv run python -u .codex/skills/ppt-deck-workflow/scripts/workflow.py choose-renderer --run-dir output/... --renderer img

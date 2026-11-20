@@ -21,6 +21,8 @@ Store final assets in `pptd/media/` and reference relative paths. For searched o
 3. Codex directly writes `pptd/deck.pptd`, `pptd/pages/*.page`, and local assets under `pptd/media/`. Translate approved plans into concrete coordinates and elements; no additional approval artifact is required.
 4. Use `version: v2`, a shared theme, an explicit page size (normally `[960, 540]`), and relative page/media paths. Keep page filenames from the render jobs and put them in the approved order in the manifest. Author text and simple shapes as independent elements; for IMG reconstruction, follow the IMG guide's rules for inseparable diagram regions and raster labels. Use images for photos/illustrations and complex source visuals. Never use a full-page image as a substitute for an editable page.
 5. Preserve exact final Chinese copy and numbers, stable element IDs, and deck-level palette tokens. Batch image preparation before laying out around image proportions. All media must be local to the project for repeatable offline export; do not embed base64 images in the model's YAML output.
+
+For `plan.data_regions`, author the surrounding page and leave those rectangles free. Validation/export places native chart and table objects from the plan in those coordinates. Each exported line or bar chart includes its Excel data. Change managed values in the canonical plan before re-exporting. Other artwork and manually authored elements follow the normal PPTD workflow.
 6. Run `validate-pptd --run-dir output/<project>`. Repair invalid pages. This checks structure and local dependencies, not visual fidelity.
 
 ## Optional local editor

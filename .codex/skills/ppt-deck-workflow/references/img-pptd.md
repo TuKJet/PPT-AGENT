@@ -18,6 +18,8 @@ Choose representation per region before authoring:
 | Dense diagrams with inseparable internal labels/lines | Preserve the complete diagram region as one independently movable picture; keep surrounding copy editable and disclose that internal labels remain raster |
 | Charts/tables requiring editable data | Use authoritative data for native reconstruction; do not invent values from pixels |
 
+For `plan.data_regions`, reserve the planned rectangles in the authored PPTD page. The helper inserts editable chart or table elements at validation/export, using the approved data even when the IMG panel was empty. Use the job's `artwork_before_data` when available for adjacent crops. A source image containing the plotted values should only be cropped outside the data rectangle.
+
 An image-heavy source should retain its visual assets. There is no target native-element ratio. Editable object count does not compensate for lost visual quality, and a full-slide image with duplicate text overlays is not hybrid reconstruction.
 
 ## Reconstruct and verify
